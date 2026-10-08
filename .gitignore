@@ -1,0 +1,25 @@
+# Build output
+build/bin/
+frontend/dist/
+
+# Frontend dependencies
+node_modules/
+
+# Local development toolchain and scratch space created by this workspace's
+# sandboxed setup (Go module cache, Wails CLI, test data, screenshots).
+.dev/
+
+# Wails generated native bindings are committed on purpose so the frontend
+# type-checks without running the CLI; nothing to ignore for them here.
+
+# Python bytecode left by the archived probe scripts.
+__pycache__/
+*.pyc
+
+# Agent session memory (tool scratch, not project source).
+.memsearch/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp

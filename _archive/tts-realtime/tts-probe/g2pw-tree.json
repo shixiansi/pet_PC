@@ -1,0 +1,130 @@
+[
+  {
+    "name": "__init__.py",
+    "path": "g2pw/__init__.py",
+    "sha": "73d1771f6279cd38d3dd226f14009fb780b0ea10",
+    "size": 35,
+    "url": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/__init__.py?ref=master",
+    "html_url": "https://github.com/GitYCC/g2pW/blob/master/g2pw/__init__.py",
+    "git_url": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/73d1771f6279cd38d3dd226f14009fb780b0ea10",
+    "download_url": "https://raw.githubusercontent.com/GitYCC/g2pW/master/g2pw/__init__.py",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/__init__.py?ref=master",
+      "git": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/73d1771f6279cd38d3dd226f14009fb780b0ea10",
+      "html": "https://github.com/GitYCC/g2pW/blob/master/g2pw/__init__.py"
+    }
+  },
+  {
+    "name": "api.py",
+    "path": "g2pw/api.py",
+    "sha": "b46482c7ac1e04e681780f93ffdf7572ecc5bb78",
+    "size": 8047,
+    "url": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/api.py?ref=master",
+    "html_url": "https://github.com/GitYCC/g2pW/blob/master/g2pw/api.py",
+    "git_url": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/b46482c7ac1e04e681780f93ffdf7572ecc5bb78",
+    "download_url": "https://raw.githubusercontent.com/GitYCC/g2pW/master/g2pw/api.py",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/api.py?ref=master",
+      "git": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/b46482c7ac1e04e681780f93ffdf7572ecc5bb78",
+      "html": "https://github.com/GitYCC/g2pW/blob/master/g2pw/api.py"
+    }
+  },
+  {
+    "name": "bert-base-chinese_s2t_dict.txt",
+    "path": "g2pw/bert-base-chinese_s2t_dict.txt",
+    "sha": "b5d93efbe4a509c68143e90c8ddd5bd4f7cf0a0b",
+    "size": 13999,
+    "url": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/bert-base-chinese_s2t_dict.txt?ref=master",
+    "html_url": "https://github.com/GitYCC/g2pW/blob/master/g2pw/bert-base-chinese_s2t_dict.txt",
+    "git_url": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/b5d93efbe4a509c68143e90c8ddd5bd4f7cf0a0b",
+    "download_url": "https://raw.githubusercontent.com/GitYCC/g2pW/master/g2pw/bert-base-chinese_s2t_dict.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/bert-base-chinese_s2t_dict.txt?ref=master",
+      "git": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/b5d93efbe4a509c68143e90c8ddd5bd4f7cf0a0b",
+      "html": "https://github.com/GitYCC/g2pW/blob/master/g2pw/bert-base-chinese_s2t_dict.txt"
+    }
+  },
+  {
+    "name": "bopomofo_to_pinyin_wo_tune_dict.json",
+    "path": "g2pw/bopomofo_to_pinyin_wo_tune_dict.json",
+    "sha": "7d52bb851d2508f7f6faec06bdf4baadb1e49cab",
+    "size": 7739,
+    "url": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/bopomofo_to_pinyin_wo_tune_dict.json?ref=master",
+    "html_url": "https://github.com/GitYCC/g2pW/blob/master/g2pw/bopomofo_to_pinyin_wo_tune_dict.json",
+    "git_url": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/7d52bb851d2508f7f6faec06bdf4baadb1e49cab",
+    "download_url": "https://raw.githubusercontent.com/GitYCC/g2pW/master/g2pw/bopomofo_to_pinyin_wo_tune_dict.json",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/bopomofo_to_pinyin_wo_tune_dict.json?ref=master",
+      "git": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/7d52bb851d2508f7f6faec06bdf4baadb1e49cab",
+      "html": "https://github.com/GitYCC/g2pW/blob/master/g2pw/bopomofo_to_pinyin_wo_tune_dict.json"
+    }
+  },
+  {
+    "name": "char_bopomofo_dict.json",
+    "path": "g2pw/char_bopomofo_dict.json",
+    "sha": "83c5cebb9f5f6fc170c6c00fb964e091318fe0e2",
+    "size": 1851164,
+    "url": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/char_bopomofo_dict.json?ref=master",
+    "html_url": "https://github.com/GitYCC/g2pW/blob/master/g2pw/char_bopomofo_dict.json",
+    "git_url": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/83c5cebb9f5f6fc170c6c00fb964e091318fe0e2",
+    "download_url": "https://raw.githubusercontent.com/GitYCC/g2pW/master/g2pw/char_bopomofo_dict.json",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/char_bopomofo_dict.json?ref=master",
+      "git": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/83c5cebb9f5f6fc170c6c00fb964e091318fe0e2",
+      "html": "https://github.com/GitYCC/g2pW/blob/master/g2pw/char_bopomofo_dict.json"
+    }
+  },
+  {
+    "name": "dataset.py",
+    "path": "g2pw/dataset.py",
+    "sha": "9180024defac8afb307f5554e2f008699b5024ce",
+    "size": 7449,
+    "url": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/dataset.py?ref=master",
+    "html_url": "https://github.com/GitYCC/g2pW/blob/master/g2pw/dataset.py",
+    "git_url": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/9180024defac8afb307f5554e2f008699b5024ce",
+    "download_url": "https://raw.githubusercontent.com/GitYCC/g2pW/master/g2pw/dataset.py",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/dataset.py?ref=master",
+      "git": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/9180024defac8afb307f5554e2f008699b5024ce",
+      "html": "https://github.com/GitYCC/g2pW/blob/master/g2pw/dataset.py"
+    }
+  },
+  {
+    "name": "module.py",
+    "path": "g2pw/module.py",
+    "sha": "5172f497b449ab64f1ea1e64042054f8ad71a2ca",
+    "size": 11026,
+    "url": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/module.py?ref=master",
+    "html_url": "https://github.com/GitYCC/g2pW/blob/master/g2pw/module.py",
+    "git_url": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/5172f497b449ab64f1ea1e64042054f8ad71a2ca",
+    "download_url": "https://raw.githubusercontent.com/GitYCC/g2pW/master/g2pw/module.py",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/module.py?ref=master",
+      "git": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/5172f497b449ab64f1ea1e64042054f8ad71a2ca",
+      "html": "https://github.com/GitYCC/g2pW/blob/master/g2pw/module.py"
+    }
+  },
+  {
+    "name": "utils.py",
+    "path": "g2pw/utils.py",
+    "sha": "2abeef8bfbb079384643c58d0177f6538c878d40",
+    "size": 4818,
+    "url": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/utils.py?ref=master",
+    "html_url": "https://github.com/GitYCC/g2pW/blob/master/g2pw/utils.py",
+    "git_url": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/2abeef8bfbb079384643c58d0177f6538c878d40",
+    "download_url": "https://raw.githubusercontent.com/GitYCC/g2pW/master/g2pw/utils.py",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/GitYCC/g2pW/contents/g2pw/utils.py?ref=master",
+      "git": "https://api.github.com/repos/GitYCC/g2pW/git/blobs/2abeef8bfbb079384643c58d0177f6538c878d40",
+      "html": "https://github.com/GitYCC/g2pW/blob/master/g2pw/utils.py"
+    }
+  }
+]

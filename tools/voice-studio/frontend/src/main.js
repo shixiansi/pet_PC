@@ -1,0 +1,616 @@
+/**
+ * Voice studio frontend.
+ *
+ * A workbench, not a panel: it uses the whole window, keeps the character list
+ * fixed while the line list scrolls, and puts the one action that answers "I chose
+ * a character, now what?" (整套换成这个角色) directly under the role list.
+ *
+ * The one rule it must not break, inherited from the backend:
+ *
+ *   generating does NOT change what the pet says; only 采用/整套换成 does.
+ *
+ * So every affordance is labelled in those terms, and the per-line badge always
+ * states what will actually play - including WHICH character, because a bare
+ * "内置" next to a newly selected character is what made the switch look broken.
+ */
+
+import './style.css';
+
+import * as App from '../wailsjs/go/main/Studio';
+import { EventsOn } from '../wailsjs/runtime/runtime';
+
+const $ = (id) => document.getElementById(id);
+
+const els = {
+  headline: $('headline'),
+  refresh: $('refresh'),
+
+  engineStrip: $('engine-strip'),
+  engineDot: $('engine-dot'),
+  engineText: $('engine-text'),
+  engineStart: $('engine-start'),
+  engineStop: $('engine-stop'),
+  engineSettingsToggle: $('engine-settings-toggle'),
+  engineLogToggle: $('engine-log-toggle'),
+
+  engineSettings: $('engine-settings'),
+  cfgURL: $('cfg-url'),
+  cfgDir: $('cfg-dir'),
+  cfgVenv: $('cfg-venv'),
+  cfgSave: $('cfg-save'),
+
+  engineLog: $('engine-log'),
+  engineLogText: $('engine-log-text'),
+
+  rolesHint: $('roles-hint'),
+  roleList: $('role-list'),
+  rescan: $('rescan'),
+  tune: $('tune'),
+  speed: $('speed'),
+  speedOut: $('speed-out'),
+  temp: $('temp'),
+  tempOut: $('temp-out'),
+  reppen: $('reppen'),
+  reppenOut: $('reppen-out'),
+  saveRole: $('save-role'),
+  adoptAll: $('adopt-all'),
+  genAll: $('gen-all'),
+  cancel: $('cancel'),
+
+  linesSummary: $('lines-summary'),
+  progressWrap: $('progress-wrap'),
+  progressFill: $('progress-fill'),
+  progressText: $('progress-text'),
+  lines: $('lines'),
+
+  toast: $('toast'),
+};
+
+/** Latest snapshot from Go. */
+let view = null;
+/** Which take is being auditioned, for the row indicator. */
+let playing = null;
+/** Serialises reloads so a burst of events cannot interleave renders. */
+let reloading = false;
+let reloadAgain = false;
+
+function toast(message) {
+  els.toast.textContent = message;
+  els.toast.classList.remove('hidden');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => els.toast.classList.add('hidden'), 3200);
+}
+
+function fail(err) {
+  const msg = err && err.message ? err.message : String(err);
+  toast(msg);
+  console.error(err);
+}
+
+const sizeText = (b) => (b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`);
+const durText = (ms) => (ms ? `${(ms / 1000).toFixed(1)}s` : '');
+
+// --- data -----------------------------------------------------------------
+
+async function load(showSpinner = false) {
+  if (reloading) {
+    reloadAgain = true;
+    return;
+  }
+  reloading = true;
+  if (showSpinner) els.engineText.textContent = '正在检查语音服务…';
+  try {
+    apply(await App.State());
+  } catch (err) {
+    fail(err);
+  } finally {
+    reloading = false;
+    if (reloadAgain) {
+      reloadAgain = false;
+      load();
+    }
+  }
+}
+
+/** Applies a snapshot returned by an action. */
+function apply(next) {
+  if (next) view = next;
+  render();
+}
+
+// --- render ---------------------------------------------------------------
+
+function render() {
+  const v = view;
+  renderEngine(v);
+  renderRoles(v);
+  renderLines(v);
+  renderProgress(v);
+
+  if (!v) return;
+  const c = v.counts || {};
+  const total = (v.lines || []).length;
+  if (c.replaced >= total && total > 0) {
+    els.headline.textContent = `全部使用「${v.activeRoleName || '当前角色'}」的配音`;
+  } else if (c.replaced > 0) {
+    els.headline.textContent = `${c.replaced}/${total} 条使用「${v.activeRoleName || '当前角色'}」的配音`;
+  } else {
+    els.headline.textContent = `全部使用内置配音（${v.builtInRole || '内置'}）`;
+  }
+}
+
+function renderEngine(v) {
+  const ready = !!(v && v.engine && v.engine.ready);
+  els.engineDot.className = `dot ${ready ? 'ok' : 'off'}`;
+
+  if (!v) {
+    els.engineText.textContent = '正在检查语音服务…';
+  } else if (ready) {
+    els.engineText.textContent = v.engine.managed
+      ? `语音服务已就绪（由本程序启动）· ${v.engine.url}`
+      : `语音服务已就绪（外部服务）· ${v.engine.url}`;
+  } else {
+    els.engineText.textContent = `语音服务未运行 · ${v.engine.url}`;
+  }
+
+  els.engineStart.disabled = ready || !!(v && v.busy);
+  // Only offer Stop when WE started it: killing a server the user launched (or the
+  // pet's) would be a surprise.
+  els.engineStop.disabled = !(v && v.engine && v.engine.managed);
+  // The log is only worth offering once a start has failed.
+  els.engineLogToggle.classList.toggle('hidden', ready);
+
+  if (v && v.engine) {
+    if (document.activeElement !== els.cfgURL) els.cfgURL.value = v.engine.url || '';
+    if (document.activeElement !== els.cfgDir) els.cfgDir.value = v.engine.dir || '';
+    if (document.activeElement !== els.cfgVenv) els.cfgVenv.value = v.engine.venv || '';
+  }
+}
+
+function renderRoles(v) {
+  const host = els.roleList;
+  host.innerHTML = '';
+  const roles = (v && v.roles) || [];
+  const active = (v && v.activeRole) || '';
+  const builtIn = !roles.some((r) => r.id === active);
+
+  if (roles.length === 0) {
+    els.rolesHint.textContent = (v && v.available)
+      ? '还没有导入角色，点「重新扫描」'
+      : '没有找到角色。请在「设置」里确认 GPT-SoVITS 目录，目录下 models\\ 里每个角色需要 gpt.ckpt、sovits.pth、ref.wav。';
+  } else if (v && v.roleError) {
+    // The stored character no longer exists. Said plainly, because the alternative
+    // - silently highlighting another card - is a switch the user never made.
+    els.rolesHint.textContent = `${v.roleError}。请重新点一个角色。`;
+  } else if (builtIn) {
+    els.rolesHint.textContent = `共 ${roles.length} 个角色。现在用的是内置音色（${(v && v.activeRoleName) || '内置'}），点一个角色即可切换。`;
+  } else {
+    els.rolesHint.textContent = `共 ${roles.length} 个角色，点一下切换。`;
+  }
+
+  for (const r of roles) {
+    const card = document.createElement('div');
+    card.className = `role${r.id === active ? ' active' : ''}`;
+
+    const name = document.createElement('div');
+    name.className = 'role-name';
+    name.textContent = r.name || r.id;
+    card.appendChild(name);
+
+    const meta = document.createElement('div');
+    meta.className = 'role-meta';
+    // "正在使用" now means the pet really speaks as this character: the selection
+    // IS the playback source, so the label no longer has to hedge.
+    meta.textContent = r.id === active ? '正在使用 · 桌宠现在就是这个音色' : '';
+    card.appendChild(meta);
+
+    card.addEventListener('click', () => selectRole(r.id));
+    host.appendChild(card);
+  }
+
+  const role = roles.find((r) => r.id === active);
+  if (role) {
+    els.speed.value = String(role.speed || 1);
+    els.temp.value = String(role.temperature || 1);
+    els.reppen.value = String(role.repetitionPenalty || 1.35);
+    els.speedOut.textContent = `${Number(role.speed || 1).toFixed(2)}×`;
+    els.tempOut.textContent = Number(role.temperature || 1).toFixed(2);
+    els.reppenOut.textContent = Number(role.repetitionPenalty || 1.35).toFixed(2);
+  }
+
+  const busy = !!(v && v.busy);
+  const canRender = !busy && role && v && v.engine && v.engine.ready;
+  els.adoptAll.disabled = !canRender;
+  els.genAll.disabled = !canRender;
+  els.saveRole.disabled = !role;
+  els.rescan.disabled = busy;
+}
+
+function renderProgress(v) {
+  const busy = !!(v && v.busy);
+  els.progressWrap.classList.toggle('hidden', !busy);
+  els.cancel.classList.toggle('hidden', !busy);
+  if (busy) {
+    const done = (v && v.done) || 0;
+    const total = (v && v.total) || 1;
+    els.progressFill.style.width = `${Math.round((done / total) * 100)}%`;
+    if (v.progress) els.progressText.textContent = v.progress;
+  }
+}
+
+function renderLines(v) {
+  const host = els.lines;
+  host.innerHTML = '';
+  if (!v) return;
+
+  const lines = v.lines || [];
+  const c = v.counts || {};
+  els.linesSummary.textContent =
+    `${lines.length} 条 · ${c.replaced || 0} 条已替换 · 共 ${c.takes || 0} 个版本 ${sizeText(c.bytes || 0)}`;
+
+  for (const line of lines) host.appendChild(lineCard(line, v));
+}
+
+/** Builds one line's card. */
+function lineCard(line, v) {
+  const card = document.createElement('div');
+  card.className = 'line';
+
+  const head = document.createElement('div');
+  head.className = 'line-head';
+
+  const title = document.createElement('span');
+  title.className = 'line-title';
+  title.textContent = line.label || line.line;
+  head.appendChild(title);
+
+  // The badge states what is ACTUALLY in effect, sourced from Go rather than
+  // inferred here, and names the character. It is computed against the CURRENT
+  // character, so a line adopted under a previous character can no longer be shown
+  // as if the pet were speaking it.
+  const badge = document.createElement('span');
+  badge.className = `badge ${line.effectSource}`;
+  badge.textContent = badgeText(line);
+  head.appendChild(badge);
+  card.appendChild(head);
+
+  // The states that mean "this line will not speak as the selected character" get a
+  // sentence, because each has a different fix and silence alone explains nothing.
+  const note = lineNote(line);
+  if (note) {
+    const warn = document.createElement('p');
+    warn.className = 'warn-line';
+    warn.textContent = note;
+    card.appendChild(warn);
+  }
+
+  const text = document.createElement('p');
+  text.className = 'line-text';
+  text.textContent = line.text || '';
+  card.appendChild(text);
+
+  const actions = document.createElement('div');
+  actions.className = 'line-actions';
+
+  const gen = button(line.takes && line.takes.length ? '再生成一版' : '生成', 'primary');
+  gen.disabled = !!(v && v.busy) || !(v && v.engine && v.engine.ready) || (v.roles || []).length === 0;
+  gen.addEventListener('click', () => generate(line.line, gen));
+  actions.appendChild(gen);
+
+  // Labelled with the built-in character's NAME: "试听内置" alone was what made a
+  // newly selected character look like it had not applied.
+  const orig = button(`试听内置（${line.builtInRole || '无'}）`, 'ghost');
+  orig.disabled = !line.embedded;
+  orig.addEventListener('click', () => auditionOriginal(line.line));
+  actions.appendChild(orig);
+
+  if (line.chosen) {
+    // Labelled "清除采用", not "改用内置": while a character is selected this line
+    // cannot fall back to the embedded clips (only clearing the CHARACTER does
+    // that), so the old label promised something the button cannot deliver.
+    const clear = button('清除采用', 'ghost');
+    clear.title = '不再采用这一句的配音。当前角色下它会变成「待生成」，重新生成并采用即可恢复。';
+    clear.addEventListener('click', () => run(() => App.ClearChoice(line.line), '已清除这一句的采用'));
+    actions.appendChild(clear);
+  }
+  card.appendChild(actions);
+
+  const takes = (line.takes || []).slice().reverse();
+  if (takes.length) {
+    const list = document.createElement('div');
+    list.className = 'takes';
+    for (const t of takes) list.appendChild(takeRow(line, t));
+    card.appendChild(list);
+  }
+  return card;
+}
+
+/** The one-line badge for a row: what plays for this line, for the current voice. */
+function badgeText(line) {
+  switch (line.effectSource) {
+    case 'user':
+      return `现在：${line.effect} v${line.chosen}`;
+    case 'builtin':
+      return `现在：内置（${line.effect}）`;
+    case 'stale':
+      // Adopted, but by a character that is no longer selected. Named explicitly:
+      // "not in effect" and "in effect as someone else" are different problems.
+      return `现在：不生效（采用的是 ${line.effect}）`;
+    case 'pending':
+      return `现在：待生成（${line.effect}）`;
+    case 'missing':
+      return `现在：文件缺失（${line.effect}）`;
+    case 'error':
+      return '现在：角色配置有误';
+    default:
+      return '现在：无音频';
+  }
+}
+
+/** The explanatory sentence for a row state that needs one, or "". */
+function lineNote(line) {
+  switch (line.effectSource) {
+    case 'stale':
+      return `这一句采用的是「${line.effect}」的配音，和当前角色不一致，桌宠不会用它。点「整套换成这个角色」即可换成当前角色。`;
+    case 'pending':
+      return `当前角色「${line.effect}」还没有这一句的配音。点「整套换成这个角色」即可生成并采用。`;
+    case 'missing':
+      return `当前角色「${line.effect}」这一句的音频文件不见了，点「整套换成这个角色」可重新生成。`;
+    case 'error':
+      return line.roleError || '保存的角色已不存在，请在左栏重新选一个角色。';
+    default:
+      return '';
+  }
+}
+
+/** Builds one take's row: audition, commit or delete. */
+function takeRow(line, take) {
+  const row = document.createElement('div');
+  row.className = `take${line.chosen === take.version ? ' chosen' : ''}`;
+
+  const label = document.createElement('span');
+  label.className = 'take-label';
+  const when = take.generatedAt ? new Date(take.generatedAt) : null;
+  const stamp = when && !Number.isNaN(when.getTime())
+    ? `${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`
+    : '';
+  label.textContent =
+    `v${take.version} · ${take.roleName || take.role || ''} · ${durText(take.durationMs)}` +
+    (stamp ? ` · ${stamp}` : '');
+  row.appendChild(label);
+
+  const key = `${line.line}:${take.version}`;
+  const play = button(playing === key ? '播放中' : '试听', 'link');
+  play.addEventListener('click', () => audition(line.line, take.version));
+  row.appendChild(play);
+
+  // "桌宠正在用" is claimed only when this take is the adopted one AND it belongs to
+  // the character currently selected - otherwise the row would credit the pet with
+  // a voice it is not speaking in.
+  const inUse = line.chosen === take.version && line.chosenForActiveRole;
+  if (inUse) {
+    const cur = document.createElement('span');
+    cur.className = 'take-current';
+    cur.textContent = '桌宠正在用';
+    row.appendChild(cur);
+  } else {
+    const use = button('用这版', 'link use');
+    use.addEventListener('click', () => run(() => App.Choose(line.line, take.version), `已采用 v${take.version}`));
+    row.appendChild(use);
+  }
+
+  const del = button('×', 'link del');
+  // Not "回退到内置": deleting the take in use clears the adoption, and with a
+  // character still selected the line becomes 「待生成」 rather than falling back to
+  // the embedded clips.
+  del.title = '删除这一版（若正在使用，这一句会变成「待生成」，不会自动挑一版顶上）';
+  del.addEventListener('click', () => run(() => App.DeleteTake(line.line, take.version), '已删除这一版'));
+  row.appendChild(del);
+
+  return row;
+}
+
+function button(text, cls) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = cls || '';
+  b.textContent = text;
+  return b;
+}
+
+/** Runs an action, applies the returned snapshot, and toasts on success. */
+async function run(fn, okMessage) {
+  try {
+    apply(await fn());
+    if (okMessage) toast(okMessage);
+  } catch (err) {
+    fail(err);
+  }
+}
+
+// --- actions --------------------------------------------------------------
+
+async function selectRole(id) {
+  if (view && view.activeRole === id) return;
+  const name = ((view && view.roles) || []).find((r) => r.id === id);
+  const label = (name && (name.name || name.id)) || id;
+  try {
+    // Applied only on success. A failed switch must not leave the new card
+    // highlighted, which would claim the pet changed voice when it did not.
+    const next = await App.SetActiveRole(id);
+    apply(next);
+    const pending = (next.lines || []).filter(
+      (l) => l.effectSource === 'pending' || l.effectSource === 'stale',
+    ).length;
+    toast(
+      pending > 0
+        ? `已切换到 ${label}。桌宠现在就是这个音色，其中 ${pending} 条还没有 ${label} 的配音，点「整套换成这个角色」即可。`
+        : `已切换到 ${label}。桌宠现在就是这个音色。`,
+    );
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function generate(line, btn) {
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '生成中…';
+  }
+  await run(() => App.Generate(line, (view && view.activeRole) || ''));
+  toast('已生成一版，试听后点「用这版」才会生效');
+}
+
+async function generateAll() {
+  await run(() => App.GenerateAll((view && view.activeRole) || ''));
+  toast('开始生成，生成完请逐条试听并采用');
+}
+
+async function adoptAll() {
+  const name = activeRoleName();
+  await run(() => App.AdoptAllAsBuiltIn((view && view.activeRole) || ''));
+  toast(`开始把 5 条全部换成 ${name}，生成一条生效一条`);
+}
+
+function activeRoleName() {
+  const r = ((view && view.roles) || []).find((x) => x.id === (view && view.activeRole));
+  return (r && (r.name || r.id)) || '所选角色';
+}
+
+async function audition(line, version) {
+  const key = `${line}:${version}`;
+  playing = key;
+  render();
+  try {
+    apply(await App.Audition(line, version));
+  } catch (err) {
+    fail(err);
+  } finally {
+    setTimeout(() => {
+      if (playing === key) {
+        playing = null;
+        render();
+      }
+    }, 4000);
+  }
+}
+
+async function auditionOriginal(line) {
+  try {
+    apply(await App.AuditionOriginal(line));
+    const l = ((view && view.lines) || []).find((x) => x.line === line);
+    toast(`正在播放内置配音（${(l && l.builtInRole) || '内置'}）`);
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function saveRole() {
+  const role = ((view && view.roles) || []).find((r) => r.id === (view && view.activeRole));
+  if (!role) return;
+  const next = {
+    ...role,
+    speed: Number(els.speed.value),
+    temperature: Number(els.temp.value),
+    repetitionPenalty: Number(els.reppen.value),
+  };
+  await run(() => App.SaveRole(next), '参数已保存，重新生成才会生效');
+}
+
+async function rescan() {
+  try {
+    apply(await App.RescanRoles());
+    toast('已重新扫描角色');
+  } catch (err) {
+    fail(err);
+  }
+}
+
+// --- wiring ---------------------------------------------------------------
+
+function wire() {
+  els.refresh.addEventListener('click', () => load(true));
+  els.engineStart.addEventListener('click', () => startEngine());
+  els.engineStop.addEventListener('click', () => run(() => App.EngineStop(), '已停止语音服务'));
+  els.rescan.addEventListener('click', rescan);
+  els.saveRole.addEventListener('click', saveRole);
+  els.genAll.addEventListener('click', generateAll);
+  els.adoptAll.addEventListener('click', adoptAll);
+  els.cancel.addEventListener('click', () => run(() => App.CancelGenerate(), '已停止'));
+
+  els.engineSettingsToggle.addEventListener('click', () => {
+    els.engineSettings.classList.toggle('hidden');
+  });
+  els.cfgSave.addEventListener('click', async () => {
+    await run(
+      () => App.SaveEngine(els.cfgURL.value, els.cfgDir.value, els.cfgVenv.value),
+      '设置已保存',
+    );
+  });
+  els.engineLogToggle.addEventListener('click', async () => {
+    try {
+      const text = await App.EngineLog();
+      els.engineLogText.textContent = text || '（没有日志）';
+      els.engineLog.classList.toggle('hidden');
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+  for (const [el, out, fmt] of [
+    [els.speed, els.speedOut, (v) => `${v.toFixed(2)}×`],
+    [els.temp, els.tempOut, (v) => v.toFixed(2)],
+    [els.reppen, els.reppenOut, (v) => v.toFixed(2)],
+  ]) {
+    el.addEventListener('input', () => {
+      out.textContent = fmt(Number(el.value));
+    });
+  }
+
+  // Batch progress arrives as events rather than by blocking, so the window stays
+  // responsive and the user can see which line is being worked on.
+  EventsOn('studio:progress', (p) => onProgress(p));
+}
+
+async function startEngine() {
+  els.engineStart.disabled = true;
+  els.engineText.textContent = '正在启动并加载模型（首次较慢）…';
+  els.progressWrap.classList.remove('hidden');
+  els.progressText.textContent = '正在启动语音服务…';
+  try {
+    apply(await App.EngineStart());
+    els.progressWrap.classList.add('hidden');
+  } catch (err) {
+    els.progressWrap.classList.add('hidden');
+    fail(err);
+    // The log is the actionable part of a failed start, so offer it immediately.
+    els.engineLogToggle.classList.remove('hidden');
+    try {
+      els.engineLogText.textContent = (await App.EngineLog()) || '（没有日志）';
+    } catch {
+      /* nothing more to say */
+    }
+  }
+}
+
+function onProgress(p) {
+  if (!p) return;
+  if (p.finished) {
+    load();
+    if (p.cancelled) toast('已停止');
+    else if (p.failed) toast(`完成，但有 ${p.failed} 条失败，可单独重试`);
+    else if (p.adopted) toast('已整套替换完成');
+    else toast('生成完成');
+    return;
+  }
+  const done = p.done || 0;
+  const total = p.total || 1;
+  els.progressWrap.classList.remove('hidden');
+  els.progressFill.style.width = `${Math.round((done / total) * 100)}%`;
+  els.progressText.textContent = p.error
+    ? `${p.label || p.line} 失败：${p.error}`
+    : `${p.label || p.line || ''}（${done + 1}/${total}）…`;
+}
+
+wire();
+load(true);

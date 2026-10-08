@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>配音工坊 · PetPC</title>
+    
+    <script type="module" crossorigin src="./assets/index-f5f9ff3d.js"></script>
+    <link rel="stylesheet" href="./assets/index-b6973dc1.css">
+  </head>
+  <body>
+    <!-- A full-window workbench. Unlike the pet's panel this is a normal
+         resizable window, so the layout MAY use the whole viewport: there is no
+         OS region crop to stay inside. -->
+    <header class="top">
+      <div class="top-left">
+        <h1>配音工坊</h1>
+        <span id="headline" class="headline"></span>
+      </div>
+      <div class="top-right">
+        <button id="refresh" type="button" class="ghost">刷新</button>
+      </div>
+    </header>
+
+    <!-- Engine strip: always visible, because nothing else works without it and
+         the fix is one button. -->
+    <section class="strip" id="engine-strip">
+      <span id="engine-dot" class="dot"></span>
+      <span id="engine-text" class="engine-text">正在检查语音服务…</span>
+      <div class="strip-actions">
+        <button id="engine-start" type="button" class="primary">启动语音服务</button>
+        <button id="engine-stop" type="button" class="ghost">停止</button>
+        <button id="engine-settings-toggle" type="button" class="link">设置</button>
+        <button id="engine-log-toggle" type="button" class="link hidden">查看日志</button>
+      </div>
+    </section>
+
+    <!-- Engine settings, collapsed. -->
+    <section class="panel hidden" id="engine-settings">
+      <div class="grid">
+        <label class="field">
+          <span>服务地址</span>
+          <input id="cfg-url" type="text" spellcheck="false" />
+        </label>
+        <label class="field">
+          <span>GPT-SoVITS 目录</span>
+          <input id="cfg-dir" type="text" spellcheck="false" />
+        </label>
+        <label class="field">
+          <span>Python 解释器（可留空）</span>
+          <input id="cfg-venv" type="text" spellcheck="false" placeholder="留空则用 <目录>\.venv" />
+        </label>
+      </div>
+      <div class="panel-actions">
+        <button id="cfg-save" type="button" class="primary">保存</button>
+      </div>
+      <p class="hint">
+        引擎<strong>只在生成时需要</strong>。生成好的音频是普通 WAV，
+        播放不需要引擎、不联网。
+      </p>
+    </section>
+
+    <!-- Engine log, shown only after a failed start. -->
+    <section class="panel hidden" id="engine-log">
+      <pre id="engine-log-text" class="log"></pre>
+    </section>
+
+    <!-- The workspace: character column on the left, lines on the right.
+         Two columns because choosing a character and judging a line are different
+         jobs, and the character list stays put while the line list scrolls. -->
+    <main class="work">
+      <aside class="col-roles">
+        <div class="col-head">
+          <h2>角色</h2>
+          <button id="rescan" type="button" class="link">重新扫描</button>
+        </div>
+        <p class="hint" id="roles-hint"></p>
+
+        <div id="role-list" class="role-list"></div>
+
+        <!-- Character parameters, collapsed: the defaults are what the models were
+             set up for, and the point of exposing these is the occasional line
+             that needs a nudge. -->
+        <details id="tune" class="tune">
+          <summary>音色参数（微调）</summary>
+          <label class="slider">
+            <span>语速</span>
+            <input id="speed" type="range" min="0.6" max="1.6" step="0.05" />
+            <output id="speed-out"></output>
+          </label>
+          <label class="slider">
+            <span>随机性</span>
+            <input id="temp" type="range" min="0.1" max="1.5" step="0.05" />
+            <output id="temp-out"></output>
+          </label>
+          <label class="slider">
+            <span>复读惩罚</span>
+            <input id="reppen" type="range" min="1" max="2" step="0.05" />
+            <output id="reppen-out"></output>
+          </label>
+          <p class="hint">
+            <strong>随机性</strong>调低更稳定，调高更有起伏。
+            <strong>复读惩罚</strong>调高可压掉重复音节。
+            改完点「保存参数」，之后<strong>新生成</strong>的台词才会用新参数。
+          </p>
+          <div class="panel-actions">
+            <button id="save-role" type="button" class="primary">保存参数</button>
+          </div>
+        </details>
+
+        <div class="col-foot">
+          <button id="adopt-all" type="button" class="primary wide">整套换成这个角色</button>
+          <button id="gen-all" type="button" class="wide">只生成，不替换</button>
+          <button id="cancel" type="button" class="ghost wide hidden">停止生成</button>
+          <p class="hint">
+            <strong>整套换成这个角色</strong>：5 条全部生成并<strong>立即采用</strong>，
+            等于把这个角色当成新的"内置音色"。
+            <br />
+            <strong>只生成，不替换</strong>：生成后逐条试听，满意再手动采用。
+          </p>
+        </div>
+      </aside>
+
+      <section class="col-lines">
+        <div class="col-head">
+          <h2>台词</h2>
+          <span id="lines-summary" class="summary"></span>
+        </div>
+
+        <div id="progress-wrap" class="progress-wrap hidden">
+          <div class="progress"><div id="progress-fill" class="progress-fill"></div></div>
+          <span id="progress-text" class="hint"></span>
+        </div>
+
+        <div id="lines" class="lines"></div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast hidden"></div>
+  </body>
+</html>
