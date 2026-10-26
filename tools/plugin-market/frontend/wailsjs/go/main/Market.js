@@ -22,6 +22,10 @@ export function Installed() {
   return window['go']['main']['Market']['Installed']();
 }
 
+export function MainSettings() {
+  return window['go']['main']['Market']['MainSettings']();
+}
+
 export function PluginMarketPath() {
   return window['go']['main']['Market']['PluginMarketPath']();
 }
@@ -56,6 +60,10 @@ export function ServePluginAsset(arg1, arg2) {
 
 export function SetEnabled(arg1, arg2) {
   return window['go']['main']['Market']['SetEnabled'](arg1, arg2);
+}
+
+export function SetPetScale(arg1) {
+  return window['go']['main']['Market']['SetPetScale'](arg1);
 }
 
 export function SetTheme(arg1) {

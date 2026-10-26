@@ -637,6 +637,131 @@ export namespace plugins {
 
 }
 
+export namespace store {
+	
+	export class Position {
+	    x: number;
+	    y: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Position(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.x = source["x"];
+	        this.y = source["y"];
+	    }
+	}
+	export class Config {
+	    petImageFile?: string;
+	    originalPath?: string;
+	    petScale: number;
+	    position?: Position;
+	    snapToEdge: boolean;
+	    edgeMargin: number;
+	    autostart: boolean;
+	    marketBaseUrl: string;
+	    globalHotkeys: boolean;
+	    pomodoroOnStartup: boolean;
+	    autoStartNextPhase: boolean;
+	    remindDuringBreak: boolean;
+	    pomodoroSound: boolean;
+	    focusMinutes: number;
+	    shortBreakMinutes: number;
+	    longBreakMinutes: number;
+	    longBreakEvery: number;
+	    reminderOnStartup: boolean;
+	    reminderEnabled: boolean;
+	    reminderIntervalMin: number;
+	    reminderJitterMaxMin: number;
+	    reminderFrom: string;
+	    reminderTo: string;
+	    reminderMaxItems: number;
+	    reminderAutoHideSec: number;
+	    remindWhenEmpty: boolean;
+	    llmEnabled: boolean;
+	    llmProvider: string;
+	    llmBaseUrl: string;
+	    llmModel: string;
+	    llmTemperature: number;
+	    llmMaxTokens: number;
+	    llmTimeoutSec: number;
+	    llmSystemPrompt: string;
+	    llmHistoryTurns: number;
+	    llmContextTodos: boolean;
+	    llmProactive: boolean;
+	    llmProactiveMinGapMin: number;
+	    llmDailyBudget: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Config(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.petImageFile = source["petImageFile"];
+	        this.originalPath = source["originalPath"];
+	        this.petScale = source["petScale"];
+	        this.position = this.convertValues(source["position"], Position);
+	        this.snapToEdge = source["snapToEdge"];
+	        this.edgeMargin = source["edgeMargin"];
+	        this.autostart = source["autostart"];
+	        this.marketBaseUrl = source["marketBaseUrl"];
+	        this.globalHotkeys = source["globalHotkeys"];
+	        this.pomodoroOnStartup = source["pomodoroOnStartup"];
+	        this.autoStartNextPhase = source["autoStartNextPhase"];
+	        this.remindDuringBreak = source["remindDuringBreak"];
+	        this.pomodoroSound = source["pomodoroSound"];
+	        this.focusMinutes = source["focusMinutes"];
+	        this.shortBreakMinutes = source["shortBreakMinutes"];
+	        this.longBreakMinutes = source["longBreakMinutes"];
+	        this.longBreakEvery = source["longBreakEvery"];
+	        this.reminderOnStartup = source["reminderOnStartup"];
+	        this.reminderEnabled = source["reminderEnabled"];
+	        this.reminderIntervalMin = source["reminderIntervalMin"];
+	        this.reminderJitterMaxMin = source["reminderJitterMaxMin"];
+	        this.reminderFrom = source["reminderFrom"];
+	        this.reminderTo = source["reminderTo"];
+	        this.reminderMaxItems = source["reminderMaxItems"];
+	        this.reminderAutoHideSec = source["reminderAutoHideSec"];
+	        this.remindWhenEmpty = source["remindWhenEmpty"];
+	        this.llmEnabled = source["llmEnabled"];
+	        this.llmProvider = source["llmProvider"];
+	        this.llmBaseUrl = source["llmBaseUrl"];
+	        this.llmModel = source["llmModel"];
+	        this.llmTemperature = source["llmTemperature"];
+	        this.llmMaxTokens = source["llmMaxTokens"];
+	        this.llmTimeoutSec = source["llmTimeoutSec"];
+	        this.llmSystemPrompt = source["llmSystemPrompt"];
+	        this.llmHistoryTurns = source["llmHistoryTurns"];
+	        this.llmContextTodos = source["llmContextTodos"];
+	        this.llmProactive = source["llmProactive"];
+	        this.llmProactiveMinGapMin = source["llmProactiveMinGapMin"];
+	        this.llmDailyBudget = source["llmDailyBudget"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace tls {
 	
 	export class ConnectionState {
