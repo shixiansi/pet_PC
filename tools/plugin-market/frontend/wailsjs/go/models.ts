@@ -177,6 +177,20 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class LabelPair {
+	    ID: string;
+	    Label: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LabelPair(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.Label = source["Label"];
+	    }
+	}
 	export class PluginConfig {
 	    pluginId: string;
 	    name: string;

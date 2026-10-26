@@ -19,7 +19,7 @@ export function Installed():Promise<Array<plugins.Installed>>;
 
 export function MainSettings():Promise<store.Config>;
 
-export function PermissionLabels():Promise<Record<string, string>>;
+export function PermissionLabels():Promise<Array<main.LabelPair>>;
 
 export function PluginMarketPath():Promise<string|boolean>;
 

@@ -14,51 +14,125 @@
  *
  * The fakes are deliberately shaped like the real payloads (a plugin row, a Config with
  * the fields the pages read) rather than like what the pages find convenient.
+ *
+ * WHY THE TYPES COME FROM wailsjs/go/models.ts AND ARE NOT DECLARED HERE: they were
+ * declared here once, in camelCase, because camelCase is what the rest of this file uses
+ * and what the fake data was written in. The host sends `plugins.Installed` WITHOUT json
+ * tags, so its keys are its Go field names - `ID`, `Enabled`, `Manifest.Name` - and every
+ * page that read `row.id` got `undefined` for all four fields on every row. In the browser
+ * it looked perfect, because the fake data agreed with the wrong type: the stub was a
+ * parallel universe after all, and the only thing that could see the difference was the
+ * .exe.
+ *
+ * So the row is the generated class itself. A field name that the host does not send now
+ * fails `npm run check`, and the fakes cannot quietly disagree with the host because they
+ * are that same type.
  */
 import * as host from '../../../frontend/wailsjs/go/main/Market';
+import { main, plugins } from '../../../frontend/wailsjs/go/models';
 
 const DEV = import.meta.env.DEV;
 
-export type PluginRow = {
-  id: string;
-  version?: string;
-  enabled: boolean;
-  granted?: string[];
-  error?: string;
-  manifest?: { name?: string; permissions?: string[] };
-};
+// PluginRow IS the host's row. Re-exported so pages import one name for it instead of
+// restating eight fields that then drift.
+export type PluginRow = plugins.Installed;
+export type PermissionLabel = main.LabelPair;
 
+// Three rows, three shapes the host really produces:
+//
+//   - a healthy plugin with a manifest and a mix of granted / not-granted permissions;
+//   - a healthy plugin that is switched off, so `Enabled` and an empty `Granted` are
+//     exercised rather than assumed;
+//   - a row whose on-disk manifest no longer parses. That is the shape that looks like
+//     "an empty object" if a page reads the wrong field names: `ID` is there, `Manifest`
+//     is nil and `Error` says why. A page that falls back to the id still names it.
+//
+// A nil Manifest is `undefined` here and `null` from Go; both are falsy, and the page must
+// not care which.
+// `createFrom` is how the generated models are meant to be built from a payload - it is
+// the same conversion the bindings would do for a real call, so the fake cannot acquire a
+// shape the real one could not have.
 const FAKE_ROWS: PluginRow[] = [
-  {
-    id: 'com.shixiansi.plugin-chat',
-    version: '1.4.1',
-    enabled: true,
-    granted: ['llm.chat', 'pet.bubble', 'pet.surface', 'plugin.config', 'storage', 'todos.read'],
-    manifest: {
+  plugins.Installed.createFrom({
+    ID: 'com.shixiansi.plugin-chat',
+    Version: '1.4.1',
+    Enabled: true,
+    Granted: ['llm.chat', 'pet.bubble', 'pet.surface', 'plugin.config', 'storage', 'todos.read'],
+    InstalledAt: '2026-10-18T09:20:00+08:00',
+    Manifest: {
+      id: 'com.shixiansi.plugin-chat',
       name: '对话插件',
+      version: '1.4.1',
+      author: 'shixiansi',
+      description: '在桌宠旁聊天，并把对话记进自己的私有目录。',
       permissions: ['llm.chat', 'pet.bubble', 'pet.surface', 'plugin.config', 'storage', 'todos.read', 'todos.write'],
+      panel: true,
+      panelSlot: 'chat',
+      entry: 'index.html',
     },
-  },
-  {
-    id: 'com.shixiansi.plugin-voice',
-    version: '1.0.1',
-    enabled: false,
-    granted: [],
-    manifest: { name: '语音插件', permissions: ['audio', 'events', 'storage'] },
-  },
+    Dir: 'C:\\Users\\fan\\AppData\\Roaming\\PetPC\\plugins\\com.shixiansi.plugin-chat',
+    Error: '',
+  }),
+  plugins.Installed.createFrom({
+    ID: 'com.shixiansi.plugin-voice',
+    Version: '1.0.1',
+    Enabled: false,
+    Granted: [],
+    InstalledAt: '2026-10-02T21:05:00+08:00',
+    Manifest: {
+      id: 'com.shixiansi.plugin-voice',
+      name: '语音插件',
+      version: '1.0.1',
+      author: 'shixiansi',
+      description: '把提醒念出来。',
+      permissions: ['audio', 'events', 'storage'],
+      panel: true,
+      entry: 'index.html',
+    },
+    Dir: 'C:\\Users\\fan\\AppData\\Roaming\\PetPC\\plugins\\com.shixiansi.plugin-voice',
+    Error: '',
+  }),
+  // The row the .exe kept showing as an empty object: an id with no manifest. It is here
+  // so that a page reading the wrong field names reproduces the blank row IN THE BROWSER
+  // instead of only after a rebuild.
+  plugins.Installed.createFrom({
+    ID: 'com.example.broken',
+    Version: '0.0.3',
+    Enabled: false,
+    Granted: [],
+    InstalledAt: '2026-09-30T12:00:00+08:00',
+    Manifest: null,
+    Dir: 'C:\\Users\\fan\\AppData\\Roaming\\PetPC\\plugins\\com.example.broken',
+    Error: 'manifest.json: 第 4 行 permissions 里有一项不在权限表内（"todos.remove"）',
+  }),
 ];
 
-const FAKE_LABELS: Record<string, string> = {
-  'llm.chat': '调用你已配置的大模型（流式返回）',
-  'pet.bubble': '让桌宠弹出一句话的气泡',
-  'pet.surface': '在桌宠旁显示自定义浮层面',
-  'plugin.config': '保存你自己的插件设置',
-  storage: '在自己的私有目录里保存数据',
-  'todos.read': '读取待办列表',
-  'todos.write': '新增、修改、完成与删除待办',
-  audio: '保存并播放音频（例如语音提醒）',
-  events: '订阅待办与番茄钟的变化事件',
-};
+// The host's wording, in the host's order (plugins.AllowedPermissions), copied from
+// internal/plugins/capability.go. It is duplicated ON PURPOSE here and only here: this is
+// dev-only fake data, and a browser that shows a bare `timer.control` because the stub is
+// stale is a smaller problem than a page that cannot be run without the .exe. The real
+// screen never reads these - it reads App.PermissionLabels().
+const LABELS: Array<[id: string, label: string]> = [
+  ['todos.read', '读取待办列表'],
+  ['todos.write', '新增、修改、完成与删除待办'],
+  ['pet.bubble', '让桌宠弹出一句话的气泡'],
+  ['timer.read', '读取番茄钟阶段与剩余时间'],
+  ['timer.control', '开始、暂停、继续与停止番茄钟（不能结束阶段或写记录）'],
+  ['events', '订阅待办与番茄钟的变化事件（关闭界面后也会送达）'],
+  ['net.fetch', '访问网络（仅限插件声明的域名）'],
+  ['net.credentials', '以你保存的网站登录凭据发请求（凭据本身不会显示给插件）'],
+  ['storage', '在自己的私有目录里保存数据'],
+  ['pet.surface', '在桌宠旁显示自定义浮层面'],
+  ['llm.chat', '调用你已配置的大模型（流式返回）'],
+  ['plugin.config', '保存你自己的插件配置'],
+  ['audio', '保存并播放音频（例如语音提醒）'],
+  ['net.ws', '保持一条到插件所声明地址的 WebSocket 长连接（收发消息）'],
+  ['llm.borrow', '使用其它插件已配置的大模型与密钥（密钥不会显示给你）'],
+  ['process', '启动本机程序'],
+  ['plugin.share', '与其它插件交换消息（只能读清单里点名的键，只能写自己名下的键）'],
+];
+
+const FAKE_LABELS: PermissionLabel[] = LABELS.map(([ID, Label]) => main.LabelPair.createFrom({ ID, Label }));
 
 const FAKE_CONFIG = {
   petScale: 1.2,
@@ -78,7 +152,7 @@ const FAKE_CONFIG = {
 const later = <T>(v: T, ms = 120): Promise<T> => new Promise((r) => setTimeout(() => r(v), ms));
 
 export const Installed = (): Promise<PluginRow[]> => (DEV ? later(FAKE_ROWS) : host.Installed());
-export const PermissionLabels = (): Promise<Record<string, string>> =>
+export const PermissionLabels = (): Promise<PermissionLabel[]> =>
   DEV ? later(FAKE_LABELS) : host.PermissionLabels();
 export const Grant = (id: string, granted: string[]): Promise<void | unknown> =>
   DEV ? later(undefined) : host.Grant(id, granted);
