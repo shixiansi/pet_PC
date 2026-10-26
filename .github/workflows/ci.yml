@@ -49,6 +49,20 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # gofmt 列出未格式化的文件时退出码仍然是 0，所以判定必须看输出，不能看
+      # $LASTEXITCODE —— 这里把"有输出"当成失败。
+      #
+      # `gofmt -l .` 在新检出里只会看到被跟踪的 Go 文件：.dev/、market/、scratch/、
+      # pet_pc/ 都在 .gitignore 里，CI 中并不存在。所以不需要排除名单。
+      - name: gofmt
+        shell: pwsh
+        run: |
+          $unformatted = gofmt -l .
+          if ($unformatted) {
+            $unformatted | ForEach-Object { Write-Host "unformatted: $_" }
+            throw "gofmt would reformat the files above"
+          }
+
       - name: go vet
         run: go vet ./...
 
