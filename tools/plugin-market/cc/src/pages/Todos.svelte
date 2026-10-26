@@ -58,7 +58,7 @@
       <p class="hint">{todos.length === 0 ? '还没有待办。' : '没有匹配的条目。'}</p>
     {:else}
       <ul>
-        {#each shown as t (t.id)}
+        {#each shown as t, i (t.id + ':' + i)}
           <li class:done={t.done}>
             <span class="mark">{t.done ? '✓' : '·'}</span>
             <span class="title">{t.title}</span>

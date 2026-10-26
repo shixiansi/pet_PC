@@ -89,13 +89,16 @@
   }
 </script>
 
-<Card title="已装插件 · v2">
+<Card title="已装插件 · v3">
+  <p class="hint" style="font: var(--font-mono); opacity:.55">
+    key = 值 + 下标：数据不保证唯一，用值当 key 会在渲染时抛 each_key_duplicate
+  </p>
   {#if !loaded}
     <p class="hint">读取中…</p>
   {:else if rows.length === 0}
     <p class="hint">还没有插件。插件市场仍在旧界面里，从这里安装要到下一批。</p>
   {:else}
-    {#each rows as r (r.id)}
+    {#each rows as r, ri (r.id + ':' + ri)}
       <section>
         <header>
           <label class="name">
@@ -109,7 +112,7 @@
 
         {#if (r.manifest?.permissions?.length ?? 0) > 0}
           <div class="perms">
-            {#each r.manifest?.permissions ?? [] as perm (perm)}
+            {#each r.manifest?.permissions ?? [] as perm, pi (perm + ':' + pi)}
               <label class="perm" title={perm}>
                 <input
                   type="checkbox"
