@@ -1613,6 +1613,11 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 		Model string `json:"model"`
 		// Images are absolute http(s) URLs for the model to look at.
 		Images []string `json:"images"`
+		// Tools are NAMES from the host's catalog (app_plugin_tools.go), not schemas.
+		// The host builds what the model sees, so a tool cannot be described as
+		// something other than what it does, and one the user did not grant is never
+		// offered at all.
+		Tools []string `json:"tools"`
 	}
 	if err := decodePayload(payload, &in); err != nil {
 		return nil, err
@@ -1702,27 +1707,89 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 			a.emitPluginEvent(id, "llm.delta", map[string]any{"requestId": requestID, "text": s})
 		},
 	}
-	res, err := a.llmClient().Chat(ctx, a.llmSettings(cfg, key), msgs, handlers)
-	if res.Usage != nil {
-		// Tokens only, and on top of a FRESH read: another attempt may have been
-		// counted while this one was in flight, and overwriting the file with a
-		// stale copy would lose that attempt.
-		latest := readPluginUsage(dir, time.Now())
-		addReportedTokens(&latest, res.Usage.PromptTokens, res.Usage.CompletionTokens)
-		if err := writePluginUsage(dir, latest); err != nil {
-			a.DebugLog("plugin llm: could not record tokens: " + err.Error())
+	settings := a.llmSettings(cfg, key)
+
+	// send performs ONE round and accounts for it.
+	//
+	// The budget counts ROUNDS rather than questions, deliberately: a round that ran
+	// tools really did cost a round trip, and a request that silently spends four of
+	// them while the counter moves by one would be a cap that does not bound what it
+	// claims to. Tokens are added on top of a FRESH read for the reason the counter
+	// already had: another attempt may have been counted while this one was in flight.
+	send := func(round []llm.Message, tools []llm.ToolSpec) (llm.Result, error) {
+		res, err := a.llmClient().ChatWithTools(ctx, settings, round, tools, handlers)
+		if res.Usage != nil {
+			latest := readPluginUsage(dir, time.Now())
+			addReportedTokens(&latest, res.Usage.PromptTokens, res.Usage.CompletionTokens)
+			if werr := writePluginUsage(dir, latest); werr != nil {
+				a.DebugLog("plugin llm: could not record tokens: " + werr.Error())
+			}
 		}
+		return res, err
 	}
-	if err != nil {
+	fail := func(err error) (any, error) {
 		message, kind := describeChatError(err)
 		a.emitPluginEvent(id, "llm.error", map[string]any{"requestId": requestID, "message": message, "kind": kind})
 		return nil, errors.New(message)
 	}
-	// The delta frames carried the text as it arrived; the done frame carries
-	// the WHOLE reply, so a plugin that dropped a frame can repair itself
-	// instead of leaving a hole in the middle of a sentence.
-	a.emitPluginEvent(id, "llm.done", map[string]any{"requestId": requestID, "text": res.Text})
-	return map[string]any{"requestId": requestID, "text": res.Text}, nil
+	finish := func(text string) (any, error) {
+		// The delta frames carried the text as it arrived; the done frame carries the
+		// WHOLE reply, so a plugin that dropped a frame can repair itself instead of
+		// leaving a hole in the middle of a sentence.
+		a.emitPluginEvent(id, "llm.done", map[string]any{"requestId": requestID, "text": text})
+		return map[string]any{"requestId": requestID, "text": text}, nil
+	}
+
+	specs, err := pluginToolSpecs(a, row.Granted, in.Tools)
+	if err != nil {
+		return nil, err
+	}
+
+	// No usable tools: exactly the request this method has always made.
+	if len(specs) == 0 {
+		res, err := send(msgs, nil)
+		if err != nil {
+			return fail(err)
+		}
+		return finish(res.Text)
+	}
+
+	// With tools the model may ASK instead of answering, and the loop that runs them
+	// lives here rather than in the plugin: the plugin asked one question and gets
+	// one stream, and it never sees a tool round at all.
+	for round := 0; round < maxToolRounds; round++ {
+		res, err := send(msgs, specs)
+		if err != nil {
+			return fail(err)
+		}
+		if len(res.ToolCalls) == 0 {
+			return finish(res.Text)
+		}
+
+		// The assistant turn has to carry the tool_calls VERBATIM: the ids in the
+		// results below refer to them, and a gateway that cannot match the two
+		// rejects the whole request.
+		msgs = append(msgs, llm.Message{Role: "assistant", Content: res.Text, ToolCalls: res.ToolCalls})
+		for _, call := range res.ToolCalls {
+			out, runErr := a.runPluginTool(id, requestID, call)
+			if runErr != nil {
+				// A failed tool goes BACK TO THE MODEL instead of failing the request:
+				// a wrong argument or an unknown id is something it can correct, and
+				// one bad guess should not cost the user their whole question.
+				failed, _ := json.Marshal(map[string]any{"ok": false, "error": runErr.Error()})
+				out = string(failed)
+			}
+			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: call.ID, Content: out})
+		}
+	}
+
+	// Out of rounds. Not a protocol error: the model kept asking for tools instead of
+	// answering, and saying so is better than paying for another round forever.
+	limit := fmt.Sprintf("模型连续调用工具超过 %d 轮，已停止。", maxToolRounds)
+	a.emitPluginEvent(id, "llm.error", map[string]any{
+		"requestId": requestID, "message": limit, "kind": "tool_rounds",
+	})
+	return nil, errors.New(limit)
 }
 
 // pluginChatConfig builds the model settings for one request from the calling

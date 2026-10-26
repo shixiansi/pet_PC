@@ -149,6 +149,43 @@ func TestStreamingToolCallsAccumulateByIndex(t *testing.T) {
 	}
 }
 
+// TestResultMergesInterleavedToolCallFragments covers the merge itself, rather than
+// the frame parsing above it.
+//
+// Two calls, four fragments, interleaved and with the argument text split at awkward
+// points. The result must be two complete calls, each with its own id and its own
+// decoded arguments - which is the property that makes it safe to run them.
+func TestResultMergesInterleavedToolCallFragments(t *testing.T) {
+	var res Result
+	for _, d := range []ToolCallDelta{
+		{Index: 0, ID: "call_a", Name: "todo_add", Arguments: `{"ti`},
+		{Index: 1, ID: "call_b", Name: "pet_say", Arguments: `{"text":"好`},
+		{Index: 0, Arguments: `tle":"写周报"}`},
+		{Index: 1, Arguments: `的"}`},
+	} {
+		res.addToolCallDelta(d)
+	}
+
+	if len(res.ToolCalls) != 2 {
+		t.Fatalf("merged %d calls, want 2", len(res.ToolCalls))
+	}
+	if res.ToolCalls[0].ID != "call_a" || res.ToolCalls[0].Function.Name != "todo_add" {
+		t.Errorf("call 0 = %+v", res.ToolCalls[0])
+	}
+	if res.ToolCalls[1].ID != "call_b" || res.ToolCalls[1].Function.Name != "pet_say" {
+		t.Errorf("call 1 = %+v", res.ToolCalls[1])
+	}
+	for i, c := range res.ToolCalls {
+		if c.Type != "function" {
+			t.Errorf("call %d type = %q, want function", i, c.Type)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal([]byte(c.Function.Arguments), &decoded); err != nil {
+			t.Errorf("call %d arguments are not JSON: %v (%q)", i, err, c.Function.Arguments)
+		}
+	}
+}
+
 // TestToolTurnsMarshalWithTheirOwnShape pins the two new message shapes: the
 // assistant turn that ASKED, and the tool turn that ANSWERS.
 //

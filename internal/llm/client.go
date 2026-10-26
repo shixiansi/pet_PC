@@ -55,6 +55,14 @@ type Result struct {
 	FinishReason string
 	// Model is the model name the server reported.
 	Model string
+	// ToolCalls is what the model asked to run, merged from the stream fragments and
+	// in index order. Empty for every reply that is just text.
+	//
+	// Non-empty ToolCalls with EMPTY Text is the ordinary shape of a tool round: the
+	// model says nothing and asks for a function instead. A caller that reads empty
+	// text as "the model had nothing to say" will silently drop the request - which
+	// is why FinishReason is "tool_calls" on exactly those rounds.
+	ToolCalls []ToolCall
 	// Attempts is how many HTTP requests were made (1 unless a retry happened).
 	Attempts int
 	// ElapsedMS is the wall-clock duration of the whole call.
@@ -126,6 +134,24 @@ func NewClient() *Client {
 // the text the user already watched appear would be worse than showing it with a
 // note.
 func (c *Client) Chat(ctx context.Context, s Settings, msgs []Message, h Handlers) (Result, error) {
+	return c.chat(ctx, s, msgs, nil, h)
+}
+
+// ChatWithTools is Chat with a list of callable functions.
+//
+// A separate entry point rather than a parameter on Chat, because every existing
+// caller means "just talk to me": adding an argument would have made them all spell
+// out `nil` for a feature they do not use, and the byte-identical-body guarantee
+// below is easiest to keep when the no-tools path is a different function.
+//
+// A reply may come back with EMPTY text and a non-empty Result.ToolCalls: the model
+// asked for a function instead of answering. The caller decides whether to run them
+// and send another round - this layer does not loop.
+func (c *Client) ChatWithTools(ctx context.Context, s Settings, msgs []Message, tools []ToolSpec, h Handlers) (Result, error) {
+	return c.chat(ctx, s, msgs, tools, h)
+}
+
+func (c *Client) chat(ctx context.Context, s Settings, msgs []Message, tools []ToolSpec, h Handlers) (Result, error) {
 	start := time.Now()
 	timeout := s.Timeout
 	if timeout <= 0 {
@@ -140,7 +166,7 @@ func (c *Client) Chat(ctx context.Context, s Settings, msgs []Message, h Handler
 		backoff = DefaultRetryBackoff
 	}
 	for attempt := 1; attempt <= len(backoff)+1; attempt++ {
-		res, err := c.attempt(ctx, s, msgs, h)
+		res, err := c.attempt(ctx, s, msgs, tools, h)
 		res.Attempts = attempt
 
 		if err == nil {
@@ -168,7 +194,7 @@ func (c *Client) Chat(ctx context.Context, s Settings, msgs []Message, h Handler
 }
 
 // attempt performs exactly one HTTP request.
-func (c *Client) attempt(ctx context.Context, s Settings, msgs []Message, h Handlers) (Result, *ChatError) {
+func (c *Client) attempt(ctx context.Context, s Settings, msgs []Message, tools []ToolSpec, h Handlers) (Result, *ChatError) {
 	var res Result
 
 	endpoint := strings.TrimRight(s.BaseURL, "/") + "/chat/completions"
@@ -182,6 +208,7 @@ func (c *Client) attempt(ctx context.Context, s Settings, msgs []Message, h Hand
 		Stream:      true,
 		Temperature: s.Temperature,
 		MaxTokens:   s.MaxTokens,
+		Tools:       tools,
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -279,6 +306,9 @@ func (c *Client) consume(ctx context.Context, body io.Reader, h Handlers) (Resul
 			if f.FinishReason != "" {
 				res.FinishReason = f.FinishReason
 			}
+			for _, d := range f.ToolCalls {
+				res.addToolCallDelta(d)
+			}
 			if f.Reasoning != "" {
 				reason.WriteString(f.Reasoning)
 				if reasonC != nil {
@@ -369,6 +399,30 @@ func (c *Client) consume(ctx context.Context, body io.Reader, h Handlers) (Resul
 // Flushing here, on every exit path, is what guarantees the transcript matches
 // the delivered events: a reply that ends one batch short of complete is the
 // classic symptom of forgetting this.
+// addToolCallDelta merges one streamed fragment into r.ToolCalls.
+//
+// The fragments are keyed by index and interleave when the model asks for several
+// tools at once, so this genuinely merges rather than appends: id and name arrive
+// once (on the first fragment for that index) and arguments accumulate as text.
+//
+// A fragment with no index decodes to 0, which is right for the common single-call
+// case. It would be wrong for a multi-call stream from a gateway that omits the
+// index - and there is no way to tell those apart from inside one frame, so the
+// behaviour is documented here rather than guessed at.
+func (r *Result) addToolCallDelta(d ToolCallDelta) {
+	for len(r.ToolCalls) <= d.Index {
+		r.ToolCalls = append(r.ToolCalls, ToolCall{Type: "function"})
+	}
+	cur := &r.ToolCalls[d.Index]
+	if d.ID != "" {
+		cur.ID = d.ID
+	}
+	if d.Name != "" {
+		cur.Function.Name = d.Name
+	}
+	cur.Function.Arguments += d.Arguments
+}
+
 func finishResult(res Result, text, reason string, textC, reasonC *Coalescer) Result {
 	if textC != nil {
 		textC.Flush()
