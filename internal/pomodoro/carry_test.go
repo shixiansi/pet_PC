@@ -1,4 +1,4 @@
-package main
+package pomodoro
 
 import (
 	"testing"
@@ -22,10 +22,10 @@ import (
 func TestFocusEndCarriesTheTodoIntoThePlanGate(t *testing.T) {
 	start := time.Date(2026, 3, 4, 10, 0, 0, 0, time.Local)
 	cfg := testConfig()
-	st := startFocus(enabledIdle(), cfg, "t1", "写周报", start).State
+	st := StartFocus(enabledIdle(), cfg, "t1", "写周报", start).State
 
 	end := start.Add(25 * time.Minute)
-	out := finishPhase(st, cfg, end, end, false)
+	out := FinishPhase(st, cfg, end, end, false)
 
 	if out.State.NextTodoID != "t1" {
 		t.Errorf("nextTodoId = %q, want t1 (the todo of the session that just ended)", out.State.NextTodoID)
@@ -57,9 +57,9 @@ func TestFocusEndCarriesTheTodoIntoThePlanGate(t *testing.T) {
 func TestFocusEndCarriesAnEmptyAssociation(t *testing.T) {
 	now := time.Now()
 	cfg := testConfig()
-	st := startFocus(enabledIdle(), cfg, "", "", now).State
+	st := StartFocus(enabledIdle(), cfg, "", "", now).State
 
-	out := finishPhase(st, cfg, now.Add(25*time.Minute), now.Add(25*time.Minute), false)
+	out := FinishPhase(st, cfg, now.Add(25*time.Minute), now.Add(25*time.Minute), false)
 	if out.State.NextTodoID != "" || out.State.NextTodoTitle != "" {
 		t.Errorf("an unattached session invented an association: %+v", out.State)
 	}
@@ -86,7 +86,7 @@ func TestBreakEndLeavesTheCarriedTodoAlone(t *testing.T) {
 		CurrentTodoID: "", CurrentTodoTitle: "",
 	}
 
-	out := finishPhase(st, cfg, now, now, false)
+	out := FinishPhase(st, cfg, now, now, false)
 
 	if out.State.NextTodoID != "t1" || out.State.NextTodoTitle != "写周报" {
 		t.Errorf("the break rewrote the carried todo: %+v", out.State)
@@ -113,15 +113,15 @@ func TestFocusCycleCarriesTheTodoAcrossTheBreak(t *testing.T) {
 	start := time.Date(2026, 3, 4, 10, 0, 0, 0, time.Local)
 	cfg := testConfig()
 
-	focus := startFocus(enabledIdle(), cfg, "t1", "写周报", start).State
-	afterFocus := finishPhase(focus, cfg, start.Add(25*time.Minute), start.Add(25*time.Minute), false).State
+	focus := StartFocus(enabledIdle(), cfg, "t1", "写周报", start).State
+	afterFocus := FinishPhase(focus, cfg, start.Add(25*time.Minute), start.Add(25*time.Minute), false).State
 	if afterFocus.NextTodoID != "t1" {
 		t.Fatalf("the focus did not carry its todo: %+v", afterFocus)
 	}
 
 	// The break runs out five minutes later.
 	breakEnd := start.Add(30 * time.Minute)
-	afterBreak := finishPhase(afterFocus, cfg, breakEnd, breakEnd, false).State
+	afterBreak := FinishPhase(afterFocus, cfg, breakEnd, breakEnd, false).State
 	if afterBreak.NextTodoID != "t1" || afterBreak.NextTodoTitle != "写周报" {
 		t.Errorf("the carried todo did not survive the break: %+v", afterBreak)
 	}
