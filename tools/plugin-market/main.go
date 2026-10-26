@@ -57,7 +57,9 @@ func main() {
 		AlwaysOnTop:      false,
 		BackgroundColour: &options.RGBA{R: 24, G: 26, B: 32, A: 255},
 		AssetServer: &assetserver.Options{
-			Assets: assets,
+			// Either the embedded frontend or, with PETPC_CC set, the control center's
+			// build from disk. See uiAssets.
+			Assets: uiAssets(assets),
 			// The plugin's OWN files are served from disk, not from the bundle: the
 			// workshop this program draws for the voice plugin is an HTML document
 			// inside the plugin's installed directory. It is the SAME handler the
