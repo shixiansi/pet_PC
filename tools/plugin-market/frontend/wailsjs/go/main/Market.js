@@ -58,12 +58,32 @@ export function ServePluginAsset(arg1, arg2) {
   return window['go']['main']['Market']['ServePluginAsset'](arg1, arg2);
 }
 
+export function SetAutoStartNextPhase(arg1) {
+  return window['go']['main']['Market']['SetAutoStartNextPhase'](arg1);
+}
+
 export function SetEnabled(arg1, arg2) {
   return window['go']['main']['Market']['SetEnabled'](arg1, arg2);
 }
 
+export function SetFocusMinutes(arg1) {
+  return window['go']['main']['Market']['SetFocusMinutes'](arg1);
+}
+
+export function SetLongBreakEvery(arg1) {
+  return window['go']['main']['Market']['SetLongBreakEvery'](arg1);
+}
+
+export function SetLongBreakMinutes(arg1) {
+  return window['go']['main']['Market']['SetLongBreakMinutes'](arg1);
+}
+
 export function SetPetScale(arg1) {
   return window['go']['main']['Market']['SetPetScale'](arg1);
+}
+
+export function SetShortBreakMinutes(arg1) {
+  return window['go']['main']['Market']['SetShortBreakMinutes'](arg1);
 }
 
 export function SetTheme(arg1) {

@@ -33,9 +33,19 @@ export function ServeHTTP(arg1:http.ResponseWriter,arg2:http.Request):Promise<vo
 
 export function ServePluginAsset(arg1:http.ResponseWriter,arg2:http.Request):Promise<void>;
 
+export function SetAutoStartNextPhase(arg1:boolean):Promise<store.Config>;
+
 export function SetEnabled(arg1:string,arg2:boolean):Promise<void>;
 
+export function SetFocusMinutes(arg1:number):Promise<store.Config>;
+
+export function SetLongBreakEvery(arg1:number):Promise<store.Config>;
+
+export function SetLongBreakMinutes(arg1:number):Promise<store.Config>;
+
 export function SetPetScale(arg1:number):Promise<store.Config>;
+
+export function SetShortBreakMinutes(arg1:number):Promise<store.Config>;
 
 export function SetTheme(arg1:string):Promise<void>;
 
