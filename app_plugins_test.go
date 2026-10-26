@@ -2236,7 +2236,7 @@ func TestBubbleSayCapability(t *testing.T) {
 // --- T52: the capability table is complete ----------------------------------
 
 // TestCapabilityTableIsComplete covers T52: the set of permissions the table
-// uses must be EXACTLY the fifteen the manifest validator accepts.
+// uses must be EXACTLY the sixteen the manifest validator accepts.
 //
 // A permission in the vocabulary but used by no method is a switch the user is
 // asked about that does nothing; a method naming a permission outside it is a

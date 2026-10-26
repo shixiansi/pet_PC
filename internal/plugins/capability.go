@@ -5,11 +5,11 @@ import (
 	"strings"
 )
 
-// The fifteen permissions, fixed. A plugin can ask for nothing else, and the
+// The sixteen permissions, fixed. A plugin can ask for nothing else, and the
 // dispatcher refuses any call whose permission the user has not granted.
 //
 // The count is deliberately NOT asserted by this comment alone: manifest_test.go's
-// TestAllowedPermissionsIsTheFifteen pins the exact list, and app_plugins_test.go's
+// TestAllowedPermissionsIsTheSixteen pins the exact list, and app_plugins_test.go's
 // TestCapabilityTableIsComplete requires every permission here to be used by at
 // least one method. A permission with no method behind it would be a switch the user
 // is asked about that does nothing - which is why there is no separate `background`

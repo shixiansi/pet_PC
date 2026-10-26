@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-10-24T15:28:29Z",
+  "updatedAt": "2026-10-25T12:29:08Z",
   "plugins": [
     {
       "id": "com.shixiansi.plugin-bilibili",
@@ -32,7 +32,7 @@
       "permissions": ["net.ws", "net.fetch", "llm.chat", "llm.borrow", "storage", "plugin.config", "process", "plugin.share"],
       "netHosts": ["127.0.0.1:3000", "gchat.qpic.cn", "multimedia.nt.qq.com.cn"],
       "download": "dist/com.shixiansi.plugin-qq-1.12.0.zip",
-      "sha256": "5b386aa9e5cd16505f4fab58b8c1866ad2aafaa72bc87e075f36b29bb311f8ee"
+      "sha256": "52ebe4526b78529fabac7ab2ae8785cfe0c103ef53e6f155cd30559207f17985"
     },
     {
       "id": "com.shixiansi.plugin-voice",
