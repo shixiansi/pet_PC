@@ -400,11 +400,16 @@ func (c Config) PetSize() (int, int) {
 
 // Store is a concurrency-safe JSON store rooted at a single directory.
 type Store struct {
-	mu       sync.Mutex
-	dir      string
-	cfg      Config
-	todos    []Todo
-	warnings []string
+	mu  sync.Mutex
+	dir string
+	cfg Config
+	// settingsStamp identifies the settings.json the in-memory cfg came from
+	// (mtime ^ size); settingsChecked throttles the stat that reads it. Both are
+	// guarded by mu - see refreshSettingsLocked.
+	settingsStamp   int64
+	settingsChecked time.Time
+	todos           []Todo
+	warnings        []string
 	// pomodoro is the timer's runtime state (pomodoro.json) and records is the
 	// permanent archive of finished sessions (pomodoro-records.json). They are
 	// kept here, rather than in a separate package, so that all persistence goes
@@ -466,6 +471,12 @@ func New(dir string) (*Store, error) {
 	}
 	s := &Store{dir: dir, cfg: DefaultConfig()}
 	if err := s.loadConfig(); err != nil {
+		return nil, err
+	}
+	// Preferences come from settings.json, layered ON TOP of config.json. This is also
+	// where an installation that predates the split is migrated - the old file is
+	// copied, never consumed.
+	if err := s.loadSettings(); err != nil {
 		return nil, err
 	}
 	if err := s.loadTodos(); err != nil {
@@ -639,9 +650,15 @@ func (s *Store) Warnings() []string {
 }
 
 // Config returns a copy of the current configuration.
+//
+// It first gives the settings file a chance to be re-read, which is what makes a
+// change made in the control center visible to the running pet without a restart.
+// Every reader benefits from this one call site rather than each of the hundred
+// places that read a setting doing its own reload.
 func (s *Store) Config() Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.refreshSettingsLocked()
 	return s.cfg
 }
 
@@ -649,10 +666,26 @@ func (s *Store) Config() Config {
 func (s *Store) UpdateConfig(fn func(*Config)) (Config, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	before := s.cfg
 	fn(&s.cfg)
 	s.cfg.Normalise()
-	if err := writeJSON(s.configPath(), s.cfg); err != nil {
+	// Runtime keys only. Writing the whole struct here would make the pet a second
+	// writer of the preferences, and would resurrect the legacy keys the migration
+	// deliberately left in the old config.json.
+	if err := s.writeRuntime(s.cfg); err != nil {
 		return s.cfg, err
+	}
+	// ...but the pet still HAS a settings UI until it moves to the control center, so a
+	// preference this call changed has to be persisted somewhere. It goes to
+	// settings.json, and ONLY when a preference actually changed: dragging the pet
+	// writes the position many times an hour and must never touch the settings file.
+	//
+	// This is transitional. When the settings UI leaves the pet (ui-rebuild phase 3),
+	// no caller changes a preference through here and the branch goes quiet.
+	if s.preferencesChanged(before) {
+		if err := s.writeSettings(s.cfg); err != nil {
+			return s.cfg, err
+		}
 	}
 	return s.cfg, nil
 }
