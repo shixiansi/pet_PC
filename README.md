@@ -309,7 +309,7 @@ wails build -s          # -s 跳过前端构建，前端已在上面构建好
 
 `panel`、`surface`、`background` **至少要有一个**——插件总得有个界面落点，或者至少有个宿主会挂起来的文档。
 
-### 十六项权限
+### 十七项权限
 
 | 权限 | 允许它做什么 |
 | --- | --- |
@@ -317,6 +317,7 @@ wails build -s          # -s 跳过前端构建，前端已在上面构建好
 | `todos.write` | 增删改待办 |
 | `pet.bubble` | 让桌宠弹一句话 |
 | `timer.read` | 读番茄钟阶段与倒计时 |
+| `timer.control` | 开始 / 暂停 / 继续 / 停止番茄钟。**不含**结束阶段与写记录：记录归你和时钟管，能写记录的插件等于能伪造一份没真正发生过的成果 |
 | `events` | 订阅待办与番茄钟的变化事件（关闭界面后也会送达） |
 | `net.fetch` | 联网，**仅限** manifest 里 `netHosts` 声明的域名（`encoding: "base64"` 可取回二进制；可带一个受控的请求头集合，见下） |
 | `net.credentials` | **以你保存的网站登录凭据发请求**（`net.fetch` 的第二道门：payload 点名一个 `config` 里声明为密钥的项，由宿主自己把凭据填进请求头；明文永远不进插件，插件只拿到 `{set, mask}`。单独声明它而没有 `net.fetch` 会被拒绝——一个解锁不了任何东西的开关正是这份清单要防的） |
@@ -1384,7 +1385,7 @@ frontend/src/style.css       样式（html/body 必须透明；不许有 shadow/
 frontend/wailsjs/            Wails 生成的绑定（已提交，便于前端类型检查）
 internal/plugins/            插件宿主：manifest 校验、已装索引、zip 安装（sha256+路径校验）、卸载、权限
   manifest.go                manifest 解析与全部校验规则（纯函数；含 background 与 assets）
-  capability.go              十六项权限词表、可订阅事件（含两个边缘事件）、域名白名单匹配（精确匹配，不做后缀通配）
+  capability.go              十七项权限词表、可订阅事件（含两个边缘事件）、域名白名单匹配（精确匹配，不做后缀通配）
   dispatch.go                两个宿主程序共用的那一套调度器与权限闸门
   asset.go                   两个宿主程序共用的资源路由与桥接脚本
   voice_migrate.go           旧语音库 → 语音插件私有目录的一次性迁移

@@ -324,12 +324,18 @@ type pluginMethod struct {
 // permission with no method behind it would be a switch the user is asked about
 // that does nothing, and a method absent from here is simply not callable.
 var pluginMethods = map[string]pluginMethod{
-	"todos.list":       {perm: plugins.PermTodosRead, run: pluginTodosList},
-	"todos.add":        {perm: plugins.PermTodosWrite, run: pluginTodosAdd},
-	"todos.update":     {perm: plugins.PermTodosWrite, run: pluginTodosUpdate},
-	"todos.toggle":     {perm: plugins.PermTodosWrite, run: pluginTodosToggle},
-	"todos.remove":     {perm: plugins.PermTodosWrite, run: pluginTodosRemove},
-	"timer.state":      {perm: plugins.PermTimerRead, run: pluginTimerState},
+	"todos.list":   {perm: plugins.PermTodosRead, run: pluginTodosList},
+	"todos.add":    {perm: plugins.PermTodosWrite, run: pluginTodosAdd},
+	"todos.update": {perm: plugins.PermTodosWrite, run: pluginTodosUpdate},
+	"todos.toggle": {perm: plugins.PermTodosWrite, run: pluginTodosToggle},
+	"todos.remove": {perm: plugins.PermTodosWrite, run: pluginTodosRemove},
+	"timer.state":  {perm: plugins.PermTimerRead, run: pluginTimerState},
+	// Driving the timer, as opposed to watching it. The four are one permission
+	// because they are one power: whoever may start a session may also pause it.
+	"timer.start":      {perm: plugins.PermTimerControl, run: pluginTimerStart},
+	"timer.pause":      {perm: plugins.PermTimerControl, run: pluginTimerPause},
+	"timer.resume":     {perm: plugins.PermTimerControl, run: pluginTimerResume},
+	"timer.stop":       {perm: plugins.PermTimerControl, run: pluginTimerStop},
 	"events.subscribe": {perm: plugins.PermEvents, run: pluginEventsSubscribe},
 	"bubble.say":       {perm: plugins.PermBubble, run: pluginBubbleSay},
 	// net.fetch carries a SECOND gate: with `net.credentials` held it will fill
@@ -584,6 +590,59 @@ func pluginTodosRemove(a *App, _ string, payload []byte) (any, error) {
 
 // pluginTimerState returns the pomodoro snapshot.
 func pluginTimerState(a *App, _ string, _ []byte) (any, error) {
+	return a.pomodoroView(), nil
+}
+
+// pluginTimerStart begins a focus phase, optionally attached to one of the user's
+// todos.
+//
+// Only an ID crosses the bridge: App.StartPomodoro looks the title up in the todo
+// list itself and refuses an unknown id. A caller that could name the session
+// freely could label it with text the user never wrote - and that label is what
+// the record archive shows later, next to the time actually spent.
+//
+// The reply is the same view timer.state returns, so a plugin does not have to
+// poll after acting to find out whether it worked.
+func pluginTimerStart(a *App, _ string, payload []byte) (any, error) {
+	var in struct {
+		TodoID string `json:"todoId"`
+	}
+	if err := decodePayload(payload, &in); err != nil {
+		return nil, err
+	}
+	if _, err := a.StartPomodoro(PomodoroStartInput{TodoID: strings.TrimSpace(in.TodoID)}); err != nil {
+		return nil, err
+	}
+	return a.pomodoroView(), nil
+}
+
+// pluginTimerPause halts the countdown, keeping the remainder.
+func pluginTimerPause(a *App, _ string, _ []byte) (any, error) {
+	if _, err := a.PausePomodoro(); err != nil {
+		return nil, err
+	}
+	return a.pomodoroView(), nil
+}
+
+// pluginTimerResume restarts a paused or stopped phase from where it stopped.
+func pluginTimerResume(a *App, _ string, _ []byte) (any, error) {
+	if _, err := a.ResumePomodoro(); err != nil {
+		return nil, err
+	}
+	return a.pomodoroView(), nil
+}
+
+// pluginTimerStop halts the countdown and records that someone asked for it.
+//
+// Deliberately the recoverable half of the pair the UI labels 停止/继续 rather than
+// 放弃: resume picks the session back up, which is what makes it safe to hand to a
+// plugin at all. Discarding a session is ResetPomodoro, and that stays a user
+// action - a caller that could throw a focus session away could erase work that
+// really happened.
+func pluginTimerStop(a *App, _ string, _ []byte) (any, error) {
+	if _, err := a.StopPomodoro(); err != nil {
+		return nil, err
+	}
 	return a.pomodoroView(), nil
 }
 

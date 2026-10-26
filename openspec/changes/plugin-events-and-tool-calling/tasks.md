@@ -23,9 +23,10 @@
 
 顺序是按"先后能独立验证"排的，不是按重要性。
 
-- [ ] 0. **先定 `pomodoro_start` 的权限归属**：新增 `timer.control`，还是第一批不放它。
-      这是本提案唯一需要产品决定的地方（design 决定 2）。若新增，四处同步 +
-      `TestAllowedPermissionsIsTheSixteen` → Seventeen
+- [x] 0. **`pomodoro_start` 的权限归属已定**：新增第 17 项 `timer.control`
+      （`timer.start` / `timer.pause` / `timer.resume` / `timer.stop` 四个方法共用）。
+      已于 `feat(plugins): 新增第 17 项权限 timer.control` 落地，
+      连带四处同步 + `TestAllowedPermissionsIsTheSixteen` → `...Seventeen`
 - [ ] 1. `internal/plugins` 导出 `HasGranted`，`dispatch.go` 改用它（同一份实现两处共用）
 - [ ] 2. `internal/llm/protocol.go`：`Tools []ToolSpec`、`ToolCall`、`tool_calls` 解析、
       `Message` 表达 `tool` 角色；**确认不带 tools 的请求字节形状不变**（现有测试守着）

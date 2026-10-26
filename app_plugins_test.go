@@ -352,7 +352,8 @@ func TestUnauthorisedCallsChangeNothing(t *testing.T) {
 
 	methods := []string{
 		"todos.list", "todos.add", "todos.update", "todos.toggle", "todos.remove",
-		"timer.state", "events.subscribe", "bubble.say", "net.fetch",
+		"timer.state", "timer.start", "timer.pause", "timer.resume", "timer.stop",
+		"events.subscribe", "bubble.say", "net.fetch",
 		"storage.get", "storage.set", "storage.remove",
 		"surface.show", "surface.hide", "llm.chat",
 		"config.get", "config.set",
@@ -2236,7 +2237,7 @@ func TestBubbleSayCapability(t *testing.T) {
 // --- T52: the capability table is complete ----------------------------------
 
 // TestCapabilityTableIsComplete covers T52: the set of permissions the table
-// uses must be EXACTLY the sixteen the manifest validator accepts.
+// uses must be EXACTLY the seventeen the manifest validator accepts.
 //
 // A permission in the vocabulary but used by no method is a switch the user is
 // asked about that does nothing; a method naming a permission outside it is a
@@ -2248,6 +2249,49 @@ func TestBubbleSayCapability(t *testing.T) {
 // names a secret and the host fills the Cookie header only for a caller that holds
 // it. Leaving it out of `used` would report it as a switch with nothing behind it,
 // which is the very thing this test exists to catch.
+// TestTimerControlIsNotTimerRead pins the split between watching the timer and
+// driving it.
+//
+// The two are separate permissions because they are separate promises: an install
+// dialog that said "read the countdown" while silently also handing over "start a
+// focus session in your name" would be asking for consent it never describes.
+// TestUnauthorisedCallsChangeNothing proves both are refused with NO grant; this
+// one proves the read grant is not an umbrella for the control methods.
+func TestTimerControlIsNotTimerRead(t *testing.T) {
+	a := pluginApp(t)
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"timer.read"}})
+
+	// Reading works, so a failure below is about the grant and not about a broken
+	// fixture.
+	if _, err := a.PluginRequest(id, "timer.state", `{}`); err != nil {
+		t.Fatalf("timer.state must work with timer.read: %v", err)
+	}
+	for _, method := range []string{"timer.start", "timer.pause", "timer.resume", "timer.stop"} {
+		if _, err := a.PluginRequest(id, method, `{}`); err == nil {
+			t.Errorf("%s was allowed with only timer.read", method)
+		} else if !strings.Contains(err.Error(), "未获权限") {
+			t.Errorf("%s failed with %q, want a permission refusal", method, err)
+		}
+	}
+
+	// With the second grant, start really starts - and the reply is the view, so a
+	// plugin does not have to poll afterwards.
+	id2 := installSampleWith(t, a, map[string]any{
+		"id":          "com.example.timer-control",
+		"permissions": []string{"timer.read", "timer.control"},
+	})
+	out, err := a.PluginRequest(id2, "timer.start", `{}`)
+	if err != nil {
+		t.Fatalf("timer.start with timer.control: %v", err)
+	}
+	if !strings.Contains(out, `"phase"`) {
+		t.Errorf("timer.start returned %q, want the same view timer.state returns", out)
+	}
+	if got := a.store.Pomodoro().Phase; got != store.PhaseFocus {
+		t.Errorf("phase = %q, want %q", got, store.PhaseFocus)
+	}
+}
+
 func TestCapabilityTableIsComplete(t *testing.T) {
 	used := map[string]bool{}
 	for name, spec := range pluginMethods {

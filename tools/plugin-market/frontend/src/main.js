@@ -69,6 +69,7 @@ const PERMISSION_LABELS = {
   'todos.write': '新增、修改、完成与删除待办',
   'pet.bubble': '让桌宠弹出一句话的气泡',
   'timer.read': '读取番茄钟阶段与剩余时间',
+  'timer.control': '开始、暂停、继续与停止番茄钟（不能结束阶段或写记录）',
   events: '订阅待办与番茄钟的变化事件（关闭界面后也会送达）',
   'net.fetch': '访问网络（仅限插件声明的域名）',
   'net.credentials': '以你保存的网站登录凭据发请求（凭据本身不会显示给插件）',

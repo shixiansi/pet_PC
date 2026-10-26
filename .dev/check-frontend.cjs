@@ -1237,11 +1237,11 @@ check(
   'the plugin has no way to store or play the audio it renders',
 );
 check(
-  'the permission vocabulary is the expected sixteen, and by `net.ws` + `llm.borrow` + `process` + `net.credentials` + `plugin.share`',
+  'the permission vocabulary is the expected seventeen, and by `net.ws` + `llm.borrow` + `process` + `net.credentials` + `plugin.share` + `timer.control`',
   // The count is asserted so that adding a permission is a VISIBLE two-place edit here,
   // and so that the "no background permission" decision cannot be quietly undone.
   //
-  // Sixteen, not seventeen: a headless frame is a manifest FIELD gated on an existing
+  // Seventeen, not eighteen: a headless frame is a manifest FIELD gated on an existing
   // permission (`events` for host events, `net.ws` for a socket a plugin holds open,
   // `net.fetch` for a polling plugin) rather than a permission of its own. A permission
   // with no method behind it would be a switch the user is asked about that does
@@ -1256,15 +1256,18 @@ check(
   // the SECOND gate of net.fetch (recorded in that entry's `also`, which the pet's
   // completeness test counts), and `plugin.share` gates share.set/get/remove - the tray
   // two plugins use to hand each other a job without either one calling the other.
+  // `timer.control` gates timer.start/pause/resume/stop: driving the timer, as opposed
+  // to watching it, which is what timer.read already covered.
   (() => {
     const list = capsGo.slice(capsGo.indexOf('var AllowedPermissions'), capsGo.indexOf('func IsAllowedPermission'));
     const entries = [...list.matchAll(/Perm[A-Za-z]+,/g)];
-    return entries.length === 16 && /PermAudio,/.test(list) && /PermNetWS,/.test(list) &&
+    return entries.length === 17 && /PermAudio,/.test(list) && /PermNetWS,/.test(list) &&
       /PermLLMBorrow,/.test(list) && /PermProcess,/.test(list) &&
       /PermNetCredentials,/.test(list) && /PermPluginShare,/.test(list) &&
+      /PermTimerControl,/.test(list) &&
       !/PermBackground/.test(capsGo);
   })(),
-  'the permission vocabulary is not the expected sixteen entries (net.ws + llm.borrow + process + net.credentials + plugin.share appended, background deliberately not)',
+  'the permission vocabulary is not the expected seventeen entries (net.ws + llm.borrow + process + net.credentials + plugin.share + timer.control appended, background deliberately not)',
 );
 check(
   'net.credentials is only ever declared together with net.fetch',

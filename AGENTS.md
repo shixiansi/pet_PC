@@ -62,12 +62,23 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 这就是「你拒绝了这项权限」能成立的原因，而不是一句事后打印的话。
 
 - 权限词表：[internal/plugins/capability.go](internal/plugins/capability.go) 的
-  `AllowedPermissions`，**现在 16 项**，顺序就是安装对话框的绘制顺序。
-- **加一项权限要同步四处**：常量 + `AllowedPermissions` + `PermissionLabels` +
-  至少一个注册了它的方法；外加 `manifest_test.go` 的 `want` 列表和 README 的权限表。
+  `AllowedPermissions`，**现在 17 项**，顺序就是安装对话框的绘制顺序。
+- **加一项权限要同步七处**（`timer.control` 那次实测就是七处，漏一处就红）：
+  1. `capability.go` 的常量——注释里写清它 gates 什么、**不** gates 什么
+  2. `AllowedPermissions`（顺序就是安装对话框的绘制顺序）
+  3. `PermissionLabels`（Go 侧的唯一权威文案）
+  4. 至少一个注册了它的方法（否则 `TestCapabilityTableIsComplete` 红）
+  5. `manifest_test.go` 的 `want` 列表 + 测试名里的数字（`…IsTheSeventeen`）
+  6. `.dev/check-frontend.cjs` 里那份**硬编码**的期望词表 —— 它故意不自动跟随
+     `AllowedPermissions`，因为它的职责正是发现那张表被改了
+  7. `tools/plugin-market/frontend/src/main.js` 的 `PERMISSION_LABELS` —— 市场是
+     独立程序，后端允许而市场没解释的权限，会让安装对话框出现一个光秃秃的 id
+
+  外加 README 的权限表和标题里的数字。第 6、7 处是这一路最容易漏的：它们不在
+  `internal/plugins` 里，改完 Go 侧全绿，静态接线检查才红。
   故意没有 `background` 权限——常驻帧由 `events` / `net.ws` / `net.fetch` 门控。
 - 没有方法支撑的权限是一个"用户被问了一个什么也不做的开关"，
-  `TestCapabilityTableIsComplete` 和 `TestAllowedPermissionsIsTheSixteen` 就是拦它的。
+  `TestCapabilityTableIsComplete` 和 `TestAllowedPermissionsIsTheSeventeen` 就是拦它的。
 
 ### 3.2 窗口只有三个占位，且必须精确裁剪
 
@@ -147,7 +158,7 @@ CI 刻意没覆盖的东西和原因，写在 `ci.yml` 的文件头——**别�
 - **README = 用户能看到的行为**；专题细节进 `docs/`；历史留在 git 与 openspec 里。
 - **改了行为就同步文档。** 本仓库最容易腐坏的就是"文档说 X、代码是 Y"，
   已经踩过的例子：
-  - 权限数在 README、代码注释、测试名里各写了一个值（真实是 16）；
+  - 权限数在 README、代码注释、测试名里各写了一个值（真实是 17）；
   - README 说工具调用"留了 `internal/llm/tools.go` 的位置"——该文件从未存在；
   - README 说"`Provider` 接口已留位"——`internal/llm` 里没有这个接口，
     `Provider` 只是配置字段 `LLMProvider`（服务商预设名）。
@@ -182,6 +193,6 @@ Wails 比 Electron 轻是优势，不是待还的技术债。
 
 1. 我改的东西属于哪个边界？（宿主 / `internal` / 独立 module / 独立仓库 / `scratch`）
 2. 我碰到 §3 的某个不变量了吗？碰了就要改守着它的那个检查。
-3. 我加权限了吗？§3.1 的四处 + 测试 + README 都改了吗？
+3. 我加权限了吗？§3.1 的七处 + README 的表格与标题都改了吗？
 4. 我改行为了吗？README 里对应的说法跟着改了吗？
 5. 我跑了什么？把命令和结果写进提交信息（"应该能过"不算验证）。

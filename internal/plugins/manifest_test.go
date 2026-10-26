@@ -153,7 +153,7 @@ func TestManifestVersionFormat(t *testing.T) {
 	}
 }
 
-// TestAllowedPermissionsIsTheSixteen pins the vocabulary itself. The dispatcher's
+// TestAllowedPermissionsIsTheSeventeen pins the vocabulary itself. The dispatcher's
 // completeness check compares against this list, so a permission added or lost
 // here would silently change what users are asked about.
 //
@@ -171,10 +171,13 @@ func TestManifestVersionFormat(t *testing.T) {
 // TestManifestCredentialsRequiresNetFetch keeps it from being declared alone.
 // Fifteen until `plugin.share` arrived with share.set/get/remove, which is what
 // lets two plugins exchange a job without either one calling the other.
-func TestAllowedPermissionsIsTheSixteen(t *testing.T) {
+// Sixteen until `timer.control` arrived with timer.start/pause/resume/stop: the
+// timer could already be READ by a plugin, but not driven, and "you may look at my
+// countdown" was never a sensible umbrella for "you may start a session in my name".
+func TestAllowedPermissionsIsTheSeventeen(t *testing.T) {
 	want := []string{
-		"todos.read", "todos.write", "pet.bubble", "timer.read", "events",
-		"net.fetch", "net.credentials", "storage", "pet.surface", "llm.chat",
+		"todos.read", "todos.write", "pet.bubble", "timer.read", "timer.control",
+		"events", "net.fetch", "net.credentials", "storage", "pet.surface", "llm.chat",
 		"plugin.config", "audio", "net.ws", "llm.borrow", "process", "plugin.share",
 	}
 	if len(AllowedPermissions) != len(want) {
