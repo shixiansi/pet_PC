@@ -1,0 +1,107 @@
+# 这个 workflow 只跑「不依赖外部仓库、不依赖真实桌面」的那部分门禁。
+# 它不是 .dev/check-all.ps1 的替代品，而是它的一个子集：CI 的价值在于每次
+# push 都跑一遍最便宜、最容易漂移的那几项，而不是复现那台开发机。
+#
+# 为什么是 Windows：产品只支持 Windows，而且 internal/desktop 下大量文件是
+# _windows.go —— 在 Linux runner 上 vet 会去编译 _other.go 的桩，测的是另一
+# 套代码，绿了也不说明问题。
+#
+# 这里刻意【没有】覆盖的东西，以及各自的原因：
+#   - .dev/check-frontend.cjs（静态接线检查）：它会读 market/plugins/*，而
+#     market/ 是独立仓库且被 .gitignore 排除，新检出里没有这个目录，脚本会在
+#     启动时抛异常而不是跑出结论。要盖它就得先 checkout 第二个仓库。
+#   - .dev/run-frontend-harness.cjs（真浏览器引擎行为）：同上，依赖 market/。
+#   - market/tests/*.test.js（插件自己的 app.js）：测试对象在 market/ 里。
+#   - .dev/verify-*.ps1 四个像素门禁：需要真实交互桌面和 WebView2 控制器。
+#   - wails build：需要 Wails CLI 与 WebView2，且这几分钟的构建在 PR 上的
+#     收益不如把 go vet/test 稳定跑起来。
+#
+# Go 的两条命令按 module 分别跑，因为 tools/plugin-market 是独立 module：
+# 根目录的 `go vet ./...` 不会下潜进去，漏掉它就等于市场程序没有测试。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同一分支上新的 push 取消上一次还没跑完的，PR 上连推几次不会排队。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go (vet + test)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # go.mod 同时写了 `go 1.22.0` 和 `toolchain go1.22.12`；setup-go 从文件里
+      # 读版本，省得这里和 go.mod 各写一个数字、然后其中一个过期。
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      # 集成测试里有一批要访问 HKCU 的开机自启注册表项。托管 runner 上它是可写的，
+      # 所以这些用例在这里会真的跑起来（开发机上的沙箱不允许，那些用例会以
+      # "open Run key: Access is denied" 失败——那是环境限制，不是代码问题）。
+      - name: go test
+        run: go test ./... -count=1
+
+      # tools/plugin-market 是独立 module：上面两条命令看不到它。
+      - name: plugin market go vet
+        working-directory: tools/plugin-market
+        run: go vet ./...
+
+      - name: plugin market go test
+        working-directory: tools/plugin-market
+        run: go test ./... -count=1
+
+  frontend:
+    name: Frontends (build + vitest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 桌宠前端：lockfile 已提交，所以用 `npm ci` —— 它按 lock 装、装的是
+      # 上一次验证过的那套版本，而不是今天解析出来的另一套。
+      - name: install (pet frontend)
+        working-directory: frontend
+        run: npm ci
+
+      - name: build (pet frontend)
+        working-directory: frontend
+        run: npm run build
+
+      - name: test (pet frontend)
+        working-directory: frontend
+        run: npm test
+
+      # 市场前端：lockfile 也已提交（这次一并补上——在此之前这个目录只有
+      # package.json，靠 ^22.1.0 / ^0.34.6 的浮动范围解析，两台机器能装到
+      # 不同版本）。两个前端现在都是 `npm ci`，装的是验证过的那一套。
+      - name: install (market frontend)
+        working-directory: tools/plugin-market/frontend
+        run: npm ci
+
+      - name: build (market frontend)
+        working-directory: tools/plugin-market/frontend
+        run: npm run build
+
+      - name: test (market frontend)
+        working-directory: tools/plugin-market/frontend
+        run: npm test
