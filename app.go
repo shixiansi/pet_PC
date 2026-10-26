@@ -242,7 +242,11 @@ func (a *App) isForegroundFullscreen() bool {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	// The Wails window only exists once startup runs, so the native handle is
+	// Preferences can be changed by the control center while this runs. The store
+	// re-reads settings.json on demand, which covers everything a render reads - but the
+	// pet's SIZE is baked into the geometry below, so it needs the other half: something
+	// that notices the change and applies it. See app_settingswatch.go.
+	a.startSettingsWatch() // The Wails window only exists once startup runs, so the native handle is
 	// resolved here. A goroutine keeps the UI from waiting on the retry loop.
 	go func() {
 		hwnd, err := desktop.WaitForWindow(5 * time.Second)
@@ -1176,19 +1180,7 @@ func (a *App) SetScale(scale float64) (Layout, error) {
 	if _, err := a.store.UpdateConfig(func(c *store.Config) { c.PetScale = scale }); err != nil {
 		return Layout{}, err
 	}
-	a.mu.Lock()
-	pet := a.petRect
-	a.mu.Unlock()
-
-	newW, newH := a.petPixelSize()
-	// Hold the bottom-right corner of the pet steady.
-	x := pet.X + pet.Width - newW
-	y := pet.Y + pet.Height - newH
-
-	a.mu.Lock()
-	a.petRect = desktop.Bounds{X: x, Y: y, Width: newW, Height: newH}
-	a.mu.Unlock()
-	return a.applyWindowGeometry()
+	return a.applyScale(scale)
 }
 
 // --- state ----------------------------------------------------------------
