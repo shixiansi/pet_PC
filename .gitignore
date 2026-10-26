@@ -103,3 +103,6 @@ market/
 tools/plugin-market/frontend/dist/
 tools/plugin-market/build/bin/
 tools/plugin-market/*.exe
+
+# The control center's Svelte build output.
+tools/plugin-market/cc/dist/

@@ -1,0 +1,47 @@
+/*
+ * Design tokens. Extracted from the two hand-written stylesheets the pet and the
+ * market carry today (1391 + 1585 lines) rather than invented: the colours and the
+ * glass feel are already accepted by the user, and the complaint is about structure,
+ * not about the palette.
+ *
+ * Two things here are NOT cosmetic:
+ *  - the window is cropped with SetWindowRgn, so no element may use box-shadow,
+ *    filter or transform: those paint outside the region and show up as a glass band;
+ *  - body must stay transparent for the same reason.
+ */
+:root {
+  --bg: #14161a;
+  --bg-raised: #1c1f26;
+  --bg-sunken: #101216;
+  --line: #2a2f39;
+  --text: #e8eaee;
+  --text-dim: #9aa2ae;
+  --accent: #4c8dff;
+  --accent-dim: #2f5da8;
+  --danger: #e05561;
+  --ok: #46b17b;
+
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
+  --font: 13px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: 12px/1.5 "Cascadia Mono", "Consolas", monospace;
+}
+
+:root[data-theme='light'] {
+  --bg: #f4f5f7;
+  --bg-raised: #ffffff;
+  --bg-sunken: #eceef1;
+  --line: #d8dce2;
+  --text: #1b1e23;
+  --text-dim: #5f6773;
+  --accent: #2f6fe4;
+  --accent-dim: #a8c2ef;
+}
