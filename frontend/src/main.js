@@ -1777,6 +1777,20 @@ function wire() {
   // the backend until the pointer actually moves past the threshold. That way a
   // plain click never triggers the drag path (which collapses the panel), so
   // click-to-toggle stays unambiguous.
+  // Right-click on the PET opens the host's menu - the same one the tray icon shows, because
+  // it IS the same list and the same command switch (see App.OpenPetMenu). Not on the panel
+  // or a bubble: those are windows with their own contents, and a right-click inside them is
+  // about what is in them, not about the pet.
+  //
+  // The menu itself is a native Win32 popup, deliberately: a menu drawn in the page would
+  // have to live inside the window's region, which would make it a FOURTH occupant of the
+  // one-visible-at-a-time slot the panel, the bubble and the plugin surface already share
+  // (AGENTS.md §3.2). A native menu is its own window and touches none of that.
+  els.pet.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    App.OpenPetMenu().catch(fail);
+  });
+
   els.pet.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     e.preventDefault();

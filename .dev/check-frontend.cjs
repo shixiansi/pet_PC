@@ -354,7 +354,6 @@ check(
 );
 
 // --- 4a. The window region is RECTANGLES ONLY -------------------------------
-//
 // It used to carry the panel's corner radius and the puffs' ellipse and hand them to
 // CreateRoundRectRgn / CreateEllipticRgn. A GDI region is a 1-bit mask, so the OS drew a
 // staircase over the browser's anti-aliased border-radius - every rounded corner in the app
@@ -378,6 +377,26 @@ check(
     !/desktop\.RegionRect/.test(mainGo) &&
     !/Radius:\s*radius/.test(mainGo),
   'the region carries a curve again: rounded/elliptical regions are what made the corners jagged',
+);
+
+// The pet's own menu is a NATIVE popup, and this pins the whole chain: page -> binding ->
+// tray thread -> TrackPopupMenu. It has to be native, not page-drawn: a menu inside the page
+// would have to fit inside the window's region, and the region is the one-visible-placeholder
+// slot that the panel, the bubble and the plugin surface already take turns in.
+//
+// The entries are deliberately NOT checked here: they are the tray's own list, and one list
+// with one command switch is the property being kept - re-listing them would be the second
+// definition this design avoids.
+const goTray = fs.readFileSync(path.join(root, 'internal/desktop/tray_windows.go'), 'utf8');
+check(
+  'right-clicking the pet reaches the host menu, end to end',
+  /els\.pet\.addEventListener\('contextmenu'/.test(mainJs) &&
+    /App\.OpenPetMenu\(\)/.test(mainJs) &&
+    /func \(a \*App\) OpenPetMenu\(\) error \{/.test(mainGo) &&
+    /a\.tray\.ShowMenuAtCursor\(\)/.test(mainGo) &&
+    /func \(t \*Tray\) ShowMenuAtCursor\(\) error \{/.test(goTray) &&
+    /wmShowPetMenu/.test(goTray),
+  'the pet menu is not wired end to end (page -> binding -> tray thread -> native popup)',
 );
 
 // --- 4b. The settings page is GONE, and must stay gone ----------------------

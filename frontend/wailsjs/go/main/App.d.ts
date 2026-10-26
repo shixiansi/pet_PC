@@ -37,6 +37,8 @@ export function OpenChat():Promise<main.Layout>;
 
 export function OpenChatPluginSurface():Promise<main.Layout>;
 
+export function OpenPetMenu():Promise<void>;
+
 export function OpenPluginMarket():Promise<main.State>;
 
 export function OpenPluginSurface(arg1:string):Promise<main.Layout>;

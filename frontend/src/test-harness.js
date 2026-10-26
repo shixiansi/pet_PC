@@ -52,7 +52,7 @@ function installBridge(handlers = {}) {
     'AddTodo', 'ChoosePetImage', 'ClearDone', 'ClosePluginSurface',
     'ConfirmPomodoroStart', 'DebugLog', 'DeleteTodo', 'DismissBubble', 'DragTo',
     'EditPomodoroRecord', 'EndDrag', 'GetLayout', 'GetState', 'HidePet',
-    'HidePetForUser', 'OpenChat', 'OpenChatPluginSurface', 'OpenPluginMarket',
+    'HidePetForUser', 'OpenChat', 'OpenChatPluginSurface', 'OpenPetMenu', 'OpenPluginMarket',
     'OpenPluginSurface', 'OpenTodoPanelFromBubble', 'OpenTodoPanelFromChat',
     'PausePomodoro', 'PetImageURL', 'PluginMarketCandidates',
     'PluginMarketPath', 'PluginRequest', 'PluginsInstalled', 'PomodoroRecords',

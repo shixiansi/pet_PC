@@ -70,6 +70,10 @@ export function OpenChatPluginSurface() {
   return window['go']['main']['App']['OpenChatPluginSurface']();
 }
 
+export function OpenPetMenu() {
+  return window['go']['main']['App']['OpenPetMenu']();
+}
+
 export function OpenPluginMarket() {
   return window['go']['main']['App']['OpenPluginMarket']();
 }

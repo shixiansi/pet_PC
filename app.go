@@ -328,6 +328,22 @@ func (a *App) startup(ctx context.Context) {
 	}()
 }
 
+// OpenPetMenu shows the pet's own menu: the same entries as the tray icon.
+//
+// It is one binding rather than a page-drawn menu because a menu inside the page would have
+// to fit inside the window's region, and the region is the panel/bubble/surface slot - a
+// menu there would be a fourth occupant of a slot that holds one thing at a time
+// (AGENTS.md §3.2). A native popup is its own window: no region, no occupancy, no layout.
+//
+// The actions are NOT re-listed here. The tray thread pops the menu it already builds and
+// routes the choice through the switch in startTray, so there is one list and one handler.
+func (a *App) OpenPetMenu() error {
+	if a.tray == nil {
+		return fmt.Errorf("托盘没起来，菜单不可用")
+	}
+	return a.tray.ShowMenuAtCursor()
+}
+
 // startTray installs the notification-area icon.
 //
 // Wails v2 has no tray support, so desktop.NewTray provides one. It runs on its

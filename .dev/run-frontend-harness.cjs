@@ -89,7 +89,7 @@ ${markup}
     'AddTodo', 'ChoosePetImage', 'ClearDone', 'ClosePluginSurface',
     'ConfirmPomodoroStart', 'DebugLog', 'DeleteTodo', 'DismissBubble', 'DragTo',
     'EditPomodoroRecord', 'EndDrag', 'GetLayout', 'GetState', 'HidePet',
-    'HidePetForUser', 'OpenChat', 'OpenChatPluginSurface', 'OpenPluginMarket',
+    'HidePetForUser', 'OpenChat', 'OpenChatPluginSurface', 'OpenPetMenu', 'OpenPluginMarket',
     'OpenPluginSurface', 'OpenTodoPanelFromBubble', 'OpenTodoPanelFromChat',
     'PausePomodoro', 'PetImageURL', 'PluginMarketCandidates',
     'PluginMarketPath', 'PluginRequest', 'PluginsInstalled', 'PomodoroRecords',
@@ -1158,6 +1158,18 @@ const checksJs = `
     ok('the panel gets out of the way of the window it opened',
       document.getElementById('panel').classList.contains('hidden'),
       'the panel stayed open under the new window');
+
+    // Right-click on the pet asks the HOST for its menu. Nothing is drawn here: a page-drawn
+    // menu would have to live inside the window's region, i.e. become a fourth occupant of
+    // the one-visible-placeholder slot - which is why it is a native popup. What the page
+    // owns is one call, and that is what this checks.
+    window.__calls.length = 0;
+    document.getElementById('pet')
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await waitFor('OpenPetMenu', () => calls('OpenPetMenu').length === 1);
+    ok('right-clicking the pet asks the host for its menu',
+      calls('OpenPetMenu').length === 1,
+      'OpenPetMenu calls: ' + calls('OpenPetMenu').length);
     // Re-open for the sections below, which measure the panel - only if it is closed, so a
     // handler that failed to close it does not become "the panel is closed twice".
     if (document.getElementById('panel').classList.contains('hidden')) {
