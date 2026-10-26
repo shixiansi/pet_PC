@@ -26,6 +26,10 @@ export function HostKey() {
   return window['go']['main']['Market']['HostKey']();
 }
 
+export function HotkeyLabels() {
+  return window['go']['main']['Market']['HotkeyLabels']();
+}
+
 export function Install(arg1) {
   return window['go']['main']['Market']['Install'](arg1);
 }
@@ -82,12 +86,20 @@ export function SetAutoStartNextPhase(arg1) {
   return window['go']['main']['Market']['SetAutoStartNextPhase'](arg1);
 }
 
+export function SetAutostart(arg1) {
+  return window['go']['main']['Market']['SetAutostart'](arg1);
+}
+
 export function SetEnabled(arg1, arg2) {
   return window['go']['main']['Market']['SetEnabled'](arg1, arg2);
 }
 
 export function SetFocusMinutes(arg1) {
   return window['go']['main']['Market']['SetFocusMinutes'](arg1);
+}
+
+export function SetGlobalHotkeys(arg1) {
+  return window['go']['main']['Market']['SetGlobalHotkeys'](arg1);
 }
 
 export function SetLongBreakEvery(arg1) {
@@ -102,8 +114,48 @@ export function SetPetScale(arg1) {
   return window['go']['main']['Market']['SetPetScale'](arg1);
 }
 
+export function SetPomodoroOnStartup(arg1) {
+  return window['go']['main']['Market']['SetPomodoroOnStartup'](arg1);
+}
+
+export function SetPomodoroSound(arg1) {
+  return window['go']['main']['Market']['SetPomodoroSound'](arg1);
+}
+
+export function SetRemindDuringBreak(arg1) {
+  return window['go']['main']['Market']['SetRemindDuringBreak'](arg1);
+}
+
+export function SetRemindWhenEmpty(arg1) {
+  return window['go']['main']['Market']['SetRemindWhenEmpty'](arg1);
+}
+
+export function SetReminderCadence(arg1, arg2) {
+  return window['go']['main']['Market']['SetReminderCadence'](arg1, arg2);
+}
+
+export function SetReminderDisplay(arg1, arg2) {
+  return window['go']['main']['Market']['SetReminderDisplay'](arg1, arg2);
+}
+
+export function SetReminderEnabled(arg1) {
+  return window['go']['main']['Market']['SetReminderEnabled'](arg1);
+}
+
+export function SetReminderOnStartup(arg1) {
+  return window['go']['main']['Market']['SetReminderOnStartup'](arg1);
+}
+
+export function SetReminderWindow(arg1, arg2) {
+  return window['go']['main']['Market']['SetReminderWindow'](arg1, arg2);
+}
+
 export function SetShortBreakMinutes(arg1) {
   return window['go']['main']['Market']['SetShortBreakMinutes'](arg1);
+}
+
+export function SetSnapToEdge(arg1) {
+  return window['go']['main']['Market']['SetSnapToEdge'](arg1);
 }
 
 export function SetTheme(arg1) {

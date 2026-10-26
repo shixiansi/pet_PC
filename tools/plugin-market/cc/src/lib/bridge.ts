@@ -30,7 +30,7 @@
  * field name the host does not send is now a `npm run check` error.
  */
 import * as host from '../../../frontend/wailsjs/go/main/Market';
-import { main, plugins, store } from '../../../frontend/wailsjs/go/models';
+import { desktop, main, plugins, store } from '../../../frontend/wailsjs/go/models';
 
 const DEV = import.meta.env.DEV;
 
@@ -41,6 +41,7 @@ export type PermissionLabel = main.LabelPair;
 export type Config = store.Config;
 export type Todo = store.Todo;
 export type PomodoroRecord = store.PomodoroRecord;
+export type HotkeyView = desktop.HotkeyView;
 
 // Three rows, three shapes the host really produces:
 //
@@ -240,6 +241,42 @@ export const SetLongBreakEvery = (v: number): Promise<Config> =>
   DEV ? savedConfig({ longBreakEvery: v }) : host.SetLongBreakEvery(v);
 export const SetAutoStartNextPhase = (on: boolean): Promise<Config> =>
   DEV ? savedConfig({ autoStartNextPhase: on }) : host.SetAutoStartNextPhase(on);
+
+// --- 外观与启动 / 番茄钟开关 / 对话提醒 ----------------------------------------------
+//
+// These used to be the pet's settings tab. Nothing about them needs the pet to ACT: the
+// hot keys are the one exception, and the pet re-registers them from its settings watcher
+// (app_settingswatch.go), so the switch works while both programs are running.
+
+export const SetSnapToEdge = (on: boolean): Promise<Config> =>
+  DEV ? savedConfig({ snapToEdge: on }) : host.SetSnapToEdge(on);
+export const SetAutostart = (on: boolean): Promise<Config> => (DEV ? savedConfig({ autostart: on }) : host.SetAutostart(on));
+export const SetGlobalHotkeys = (on: boolean): Promise<Config> =>
+  DEV ? savedConfig({ globalHotkeys: on }) : host.SetGlobalHotkeys(on);
+export const HotkeyLabels = (): Promise<HotkeyView> =>
+  DEV
+    ? later(desktop.HotkeyView.createFrom({ enabled: true, show: 'Ctrl+Alt+S', hide: 'Ctrl+Alt+H', active: true }))
+    : host.HotkeyLabels();
+
+export const SetPomodoroOnStartup = (on: boolean): Promise<Config> =>
+  DEV ? savedConfig({ pomodoroOnStartup: on }) : host.SetPomodoroOnStartup(on);
+export const SetPomodoroSound = (on: boolean): Promise<Config> =>
+  DEV ? savedConfig({ pomodoroSound: on }) : host.SetPomodoroSound(on);
+
+export const SetReminderEnabled = (on: boolean): Promise<Config> =>
+  DEV ? savedConfig({ reminderEnabled: on }) : host.SetReminderEnabled(on);
+export const SetReminderOnStartup = (on: boolean): Promise<Config> =>
+  DEV ? savedConfig({ reminderOnStartup: on }) : host.SetReminderOnStartup(on);
+export const SetRemindDuringBreak = (on: boolean): Promise<Config> =>
+  DEV ? savedConfig({ remindDuringBreak: on }) : host.SetRemindDuringBreak(on);
+export const SetRemindWhenEmpty = (on: boolean): Promise<Config> =>
+  DEV ? savedConfig({ remindWhenEmpty: on }) : host.SetRemindWhenEmpty(on);
+export const SetReminderCadence = (intervalMin: number, jitterMaxMin: number): Promise<Config> =>
+  DEV ? savedConfig({ reminderIntervalMin: intervalMin, reminderJitterMaxMin: jitterMaxMin }) : host.SetReminderCadence(intervalMin, jitterMaxMin);
+export const SetReminderWindow = (from: string, to: string): Promise<Config> =>
+  DEV ? savedConfig({ reminderFrom: from, reminderTo: to }) : host.SetReminderWindow(from, to);
+export const SetReminderDisplay = (items: number, autoHideSec: number): Promise<Config> =>
+  DEV ? savedConfig({ reminderMaxItems: items, reminderAutoHideSec: autoHideSec }) : host.SetReminderDisplay(items, autoHideSec);
 
 export const Todos = (): Promise<Todo[]> => (DEV ? later(FAKE_TODOS) : host.Todos());
 export const PomodoroRecords = (): Promise<PomodoroRecord[]> =>

@@ -8,6 +8,8 @@
     SetLongBreakMinutes,
     SetLongBreakEvery,
     SetAutoStartNextPhase,
+    SetPomodoroOnStartup,
+    SetPomodoroSound,
   } from '../lib/bridge';
   import type { Config } from '../lib/bridge';
 
@@ -68,6 +70,26 @@
         onchange={(e) => apply(() => SetAutoStartNextPhase((e.currentTarget as HTMLInputElement).checked))}
       />
       <em></em>
+    </label>
+
+    <label class="field">
+      <span>阶段结束提示音</span>
+      <input
+        type="checkbox"
+        checked={cfg.pomodoroSound}
+        onchange={(e) => apply(() => SetPomodoroSound((e.currentTarget as HTMLInputElement).checked))}
+      />
+      <em></em>
+    </label>
+
+    <label class="field">
+      <span>启动时自动开启番茄钟</span>
+      <input
+        type="checkbox"
+        checked={cfg.pomodoroOnStartup}
+        onchange={(e) => apply(() => SetPomodoroOnStartup((e.currentTarget as HTMLInputElement).checked))}
+      />
+      <em>下次启动生效</em>
     </label>
 
     <p class="hint">

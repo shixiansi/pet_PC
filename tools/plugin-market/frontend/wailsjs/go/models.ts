@@ -1,3 +1,30 @@
+export namespace desktop {
+	
+	export class HotkeyView {
+	    enabled: boolean;
+	    show: string;
+	    hide: string;
+	    active: boolean;
+	    problems?: string[];
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new HotkeyView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.show = source["show"];
+	        this.hide = source["hide"];
+	        this.active = source["active"];
+	        this.problems = source["problems"];
+	        this.note = source["note"];
+	    }
+	}
+
+}
+
 export namespace http {
 	
 	export class Response {

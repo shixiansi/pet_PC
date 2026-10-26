@@ -102,6 +102,10 @@ const range = w.document.querySelector('input[type="range"]');
 check('开始：滑块拿到了宿主的 petScale（1.2）', range?.value === '1.2');
 check('开始：读数也是 1.2×', text().includes('1.2×'));
 check('开始：没有停在读取中', !text().includes('读取中'));
+check(
+  '开始：贴边 / 开机启动 / 快捷键三个开关在，键位来自宿主',
+  text().includes('拖动后自动贴边') && text().includes('开机自动启动') && text().includes('Ctrl+Alt+S'),
+);
 
 await open('待办');
 check('待办：标题来自 store.Todo.title', text().includes('写周报') && text().includes('整理纸箱'));
@@ -111,6 +115,10 @@ await open('专注');
 const number = w.document.querySelector('input[type="number"]');
 check('专注：第一个框拿到了 focusMinutes（25）', number?.value === '25');
 check('专注：自动接续读到了 autoStartNextPhase', text().includes('自动接续下一段'));
+check(
+  '专注：两个番茄钟开关在（提示音 / 启动时开启）',
+  text().includes('阶段结束提示音') && text().includes('启动时自动开启番茄钟') && text().includes('下次启动生效'),
+);
 
 await open('记录');
 check('记录：来自 store.PomodoroRecord', text().includes('写周报') && text().includes('共 1 个番茄'));
@@ -126,6 +134,9 @@ await open('高级');
 check('高级：模型配置来自 store.Config', text().includes('deepseek') && text().includes('deepseek-chat'));
 check('高级：密钥状态来自 HostKey()', text().includes('已设置（DPAPI 密文）') && text().includes('llm-key.bin'));
 check('高级：数据目录来自 DataDir()', text().includes('C:\\fake\\PetPC'));
+check('高级：整组对话提醒搬过来了', text().includes('开启对话提醒') && text().includes('活跃时段') && text().includes('没有待办时也提醒'));
+const numberValues = [...w.document.querySelectorAll('input[type="number"]')].map((i) => i.value);
+check('高级：提醒间隔来自 reminderIntervalMin（30）', numberValues.includes('30'));
 
 // The report is generated on demand, so this also checks that the button is wired and that
 // the text arrives - the two things a "有按钮" screenshot cannot tell you.
