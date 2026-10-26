@@ -1,0 +1,143 @@
+package main
+
+import (
+	"encoding/json"
+	"testing"
+
+	"PetPC/internal/store"
+)
+
+// The two EDGE events are what let the voice plugin replace the host's own
+// speech. They are asserted here rather than through the pomodoro scheduler
+// because the contract under test is the emit itself: exactly one frame, the
+// right name, and a payload of FACTS with no wording in it.
+
+// TestPhaseEndedCarriesTheHostsConclusion covers timer.phaseEnded.
+//
+// The payload is "focus" or "break" rather than the host's own five phase names,
+// because that reduction is the conclusion a plugin would otherwise have to
+// re-derive. It is asserted as an exact string, so a future edit that starts
+// forwarding raw phase names fails here rather than in a plugin.
+func TestPhaseEndedCarriesTheHostsConclusion(t *testing.T) {
+	a := pluginApp(t)
+	collected := collectPluginEvents(a)
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"events"}})
+	if _, err := a.PluginRequest(id, "events.subscribe", `{"names":["timer.phaseEnded"]}`); err != nil {
+		t.Fatalf("events.subscribe: %v", err)
+	}
+
+	// Every way a focus phase can be named must reduce to "focus"; every way a
+	// rest can be named must reduce to "break". This is the classification the
+	// host already owns (store.IsFocusPhase), so the test drives the real one.
+	for _, phase := range []string{store.PhaseFocus} {
+		a.notifyPluginPhaseEnded(phaseKind(phase))
+	}
+	events := collected("timer.phaseEnded")
+	if len(events) != 1 {
+		t.Fatalf("want exactly 1 timer.phaseEnded, got %d (%+v)", len(events), events)
+	}
+	if events[0].PluginID != id {
+		t.Fatalf("the event names %q, want %q", events[0].PluginID, id)
+	}
+	payload, ok := events[0].Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("the payload is %T, want a plain object", events[0].Payload)
+	}
+	if payload["phase"] != "focus" {
+		t.Fatalf("phase = %v, want focus", payload["phase"])
+	}
+	// No wording may travel with it: choosing what to say is the plugin's job,
+	// and a "text" field here would quietly move it back into the host.
+	if len(payload) != 1 {
+		t.Fatalf("the payload carries %d fields (%v); it must carry only the fact", len(payload), payload)
+	}
+
+	// A rest phase reduces to "break".
+	for _, phase := range []string{store.PhaseShortBreak, store.PhaseLongBreak} {
+		if got := phaseKind(phase); got != "break" {
+			t.Fatalf("phaseKind(%q) = %q, want break", phase, got)
+		}
+	}
+}
+
+// TestReminderFiredCarriesTheCounts covers reminder.fired.
+//
+// The three counts travel even though the host's own fixed clips could not use
+// them - that is exactly the capability a plugin brings, so the payload must not
+// be reduced to a single "something is due" flag.
+func TestReminderFiredCarriesTheCounts(t *testing.T) {
+	a := pluginApp(t)
+	collected := collectPluginEvents(a)
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"events"}})
+	if _, err := a.PluginRequest(id, "events.subscribe", `{"names":["reminder.fired"]}`); err != nil {
+		t.Fatalf("events.subscribe: %v", err)
+	}
+
+	a.notifyPluginReminderFired(3, 2, 9)
+	events := collected("reminder.fired")
+	if len(events) != 1 {
+		t.Fatalf("want exactly 1 reminder.fired, got %d (%+v)", len(events), events)
+	}
+	if events[0].PluginID != id {
+		t.Fatalf("the event names %q, want %q", events[0].PluginID, id)
+	}
+	// Round-trip the payload through JSON so the assertion is about what the
+	// frontend will actually receive, not about Go's map typing.
+	raw, err := json.Marshal(events[0].Payload)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got struct {
+		Due     int `json:"due"`
+		Overdue int `json:"overdue"`
+		Total   int `json:"total"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Due != 3 || got.Overdue != 2 || got.Total != 9 {
+		t.Fatalf("the counts are %+v, want due=3 overdue=2 total=9", got)
+	}
+}
+
+// TestEdgeEventsOnlyReachSubscribers pins that these are subscriptions like any
+// other: a plugin that did not ask receives nothing, so a plugin cannot listen in
+// on the pet's timer by accident.
+func TestEdgeEventsOnlyReachSubscribers(t *testing.T) {
+	a := pluginApp(t)
+	collected := collectPluginEvents(a)
+	// Installed and granted events, but never subscribed.
+	installSampleWith(t, a, map[string]any{
+		"id":          "com.example.silent",
+		"permissions": []string{"events"},
+	})
+
+	a.notifyPluginPhaseEnded("focus")
+	a.notifyPluginReminderFired(1, 0, 1)
+
+	if got := collected("timer.phaseEnded"); len(got) != 0 {
+		t.Fatalf("an unsubscribed plugin received %d phase events", len(got))
+	}
+	if got := collected("reminder.fired"); len(got) != 0 {
+		t.Fatalf("an unsubscribed plugin received %d reminder events", len(got))
+	}
+}
+
+// TestEdgeEventsAreSubscribable pins that the two names are in the closed set, so
+// a plugin asking for them is not refused as unknown.
+func TestEdgeEventsAreSubscribable(t *testing.T) {
+	a := pluginApp(t)
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"events"}})
+	out, err := a.PluginRequest(id, "events.subscribe",
+		`{"names":["timer.phaseEnded","reminder.fired"]}`)
+	if err != nil {
+		t.Fatalf("events.subscribe: %v", err)
+	}
+	var names []string
+	if err := json.Unmarshal([]byte(out), &names); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(names) != 2 {
+		t.Fatalf("subscribed to %v, want both edge events", names)
+	}
+}

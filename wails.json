@@ -1,0 +1,16 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "PetPC",
+  "outputfilename": "PetPC",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "info": {
+    "companyName": "PetPC",
+    "productName": "PetPC 桌宠",
+    "productVersion": "1.0.0",
+    "copyright": "MIT Licensed",
+    "comments": "透明贴边桌宠 · 待办与日程 · 开机自启"
+  }
+}

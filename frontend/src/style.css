@@ -1,0 +1,1571 @@
+/*! PetPC stylesheet
+ *
+ * Two hard requirements drive this file:
+ *  1. The window is transparent. html/body/#stage must paint nothing, or the
+ *     webview shows an opaque rectangle behind the pet.
+ *  2. The window resizes at runtime (pet <-> pet+panel), so the pet and the
+ *     panel are absolutely positioned from the layout the Go side computes
+ *     rather than being laid out by the browser.
+ */
+
+:root {
+  --panel-bg: rgba(28, 30, 36, 0.94);
+  --panel-border: rgba(255, 255, 255, 0.10);
+  --text: #eceef2;
+  --text-dim: #9aa2b1;
+  --accent: #4c8dff;
+  --accent-hover: #3d7ae8;
+  --danger: #e0554e;
+  --ok: #46b17b;
+  --warn: #e0a33e;
+  --radius: 14px;
+  --font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* Transparent: the desktop must show through everywhere we do not draw.
+   *
+   * `background-color: transparent` alone is NOT enough. WebView2 has its own
+   * default background, which is opaque white, and it sits BEHIND the document -
+   * so a transparent page still showed a white rectangle exactly the size of the
+   * pet wherever the artwork has no pixels. It was invisible on a white desktop
+   * and obvious on anything else. The fix is in main.js, which clears WebView2's
+   * own background colour at startup (see setWebviewTransparent). */
+  background: transparent !important;
+}
+
+body {
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  /* No text selection or browser drag behaviour inside a desktop pet. */
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+#stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+#stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+/* --- pet ----------------------------------------------------------------- */
+
+#pet {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  /* Dragging is implemented in main.js with pointer events so that a click and
+   * a drag can be told apart (Wails' --wails-draggable hands the move to
+   * Windows as a modal loop, which hides the mouseup from the webview). */
+  cursor: grab;
+  /* Keep touch/pen dragging from scrolling or panning instead. */
+  touch-action: none;
+  /* Above the overlay's guide trail.
+   *
+   * The trail drifts toward the pet, so its last puffs overlap the pet's box.
+   * The region is a union, so that overlap is harmless to the crop - but without
+   * this the puffs would be painted ON TOP of the pet, which looks like the
+   * artwork has been defaced rather than like the cat is thinking. Behind it,
+   * they read as a trail emerging from the pet, which is what they are for. */
+  z-index: 2;
+}
+
+/* Default geometry, overridden by the inline layout from Go.
+ *
+ * Only the size is set here, never the offsets: those come from Go, and a
+ * stylesheet value for the same properties would fight the inline one. */
+#pet {
+  width: 100%;
+  height: 100%;
+}
+
+#pet:active {
+  cursor: grabbing;
+}
+
+#pet-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  /* Dragging the picture would otherwise start the browser's own image drag. */
+  -webkit-user-drag: none;
+  user-drag: none;
+  pointer-events: none;
+  /* No filter, no shadow, no effect of any kind on this element.
+   *
+   * `filter: drop-shadow(...)` does not just draw a shadow: it makes Chromium
+   * give the element its own compositing layer and re-composite the whole 150x200
+   * box every frame. In this window that layer visibly alters the desktop behind
+   * the pet (measured: backdrop detail 104.5 -> 74.9 in the box's transparent
+   * margins, with the noise backdrop blurred/softened).
+   *
+   * The pet must sit on the completely untouched desktop, so nothing is applied
+   * here at all. */
+}
+/* While the panel is open the pet acts as the panel's anchor, not a button. */
+#pet.anchored {
+  cursor: default;
+}
+
+/* --- badge --------------------------------------------------------------- */
+
+.badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.badge.overdue {
+  background: var(--danger);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.badge.soon {
+  background: var(--warn);
+}
+
+/* --- pomodoro badge ------------------------------------------------------ */
+
+/* The timer badge sits above the todo-count badge in the pet's top-right
+ * corner, so both are readable at once (docs 4.4: the countdown says how long
+ * is left, the count says how much is waiting).
+ *
+ * Both badges are INSIDE the pet box. That is a hard requirement, not a layout
+ * preference: the Go side crops the window to the pet's rectangle exactly, so
+ * anything drawn outside it is clipped off - or worse, if the region were grown
+ * to fit, leaves glass-composited pixels that read as a pale blue band. */
+.badge.timer {
+  top: 4px;
+  right: 4px;
+  /* Keep the two badges from overlapping: the timer is the taller string. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* When the timer badge is showing, the count badge drops below it and shrinks
+ * to a dot-sized counter. */
+.badge.timer:not(.hidden) ~ .badge {
+  top: 28px;
+}
+
+.badge.timer.focus {
+  background: var(--accent);
+}
+
+.badge.timer.break {
+  background: var(--ok);
+}
+
+.badge.timer.halted {
+  background: #6b7280;
+  animation: none;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* --- panel --------------------------------------------------------------- */
+
+#panel {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  /* No box-shadow.
+   *
+   * A shadow is drawn OUTSIDE the panel's border box, so it painted over the
+   * desktop beyond the panel's edge - and the pet box sits immediately beside the
+   * panel, so the shadow fell across the pet. Measured against a solid backdrop:
+   * with the panel open the pixels just right of the panel read 227..255 in a
+   * smooth ~26px ramp, while with the panel closed they were a flat 255. That
+   * gradient beside the pet is what looked like a "blurred background".
+   *
+   * The panel is opaque and the desktop is visible around it, so a drop shadow
+   * has nothing to sit on and only dirties the area next to the pet. */
+  overflow: hidden;
+  /* No backdrop-filter: the page behind the panel is transparent, so there is
+   * nothing to blur - it would only cost a compositing pass on every frame.
+   * The Go side fills the window with the panel colour during the resize
+   * instead, which is what actually keeps the transition seamless. */
+  /* The panel is interactive, so it must not inherit the pet's drag handle. */
+  --wails-draggable: no-drag;
+  animation: panel-in 0.14s ease-out;
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--panel-border);
+  flex: 0 0 auto;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tab {
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.tab:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.tab.active {
+  background: rgba(76, 141, 255, 0.16);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.icon-btn {
+  width: 26px;
+  height: 26px;
+  /* The glyph is centred, and the offset is MEASURED rather than guessed.
+   *
+   * The default button metrics centre the line box, not the ink: "×" is a math
+   * symbol whose ink sits high in an ascent-heavy box, so the original rule
+   * (inherited 7px/12px padding, 18px font) drew it 1.5px above the button's
+   * centre - visible on a 26px square, and exactly the kind of "off by a hair"
+   * that reads as a rendering bug.
+   *
+   * Flex centring plus `line-height: 1` removes the font's leading from the box,
+   * which gets the line box centred but leaves the ink 2.5px LOW. `padding-bottom:
+   * 5px` then lifts the content box by half of it, landing the ink at 0.00px.
+   *
+   * Both numbers come from measuring the glyph in the real engine (canvas
+   * TextMetrics actualBoundingBox vs the button's rect), not from eyeballing:
+   * 18px/7px padding -> +1.5px, 17px/padding 0 -> +2.5px, 17px/5px bottom -> 0.
+   * If the font or font-size here changes, re-measure rather than adjusting by
+   * feel. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0 5px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.tab-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 10px;
+  gap: 10px;
+  overflow: hidden;
+}
+
+/* --- forms --------------------------------------------------------------- */
+
+.todo-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.form-row {
+  display: flex;
+  gap: 6px;
+}
+
+input[type="text"],
+input[type="datetime-local"],
+textarea {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+input[type="text"]:focus,
+input[type="datetime-local"]:focus,
+textarea:focus {
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+textarea {
+  resize: none;
+}
+
+input[type="datetime-local"] {
+  flex: 1 1 auto;
+  /* The native picker indicator is near-invisible on dark backgrounds. */
+  color-scheme: dark;
+}
+
+button {
+  padding: 7px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+
+button.primary:hover {
+  background: var(--accent-hover);
+}
+
+button.danger {
+  background: rgba(224, 85, 78, 0.16);
+  border-color: rgba(224, 85, 78, 0.4);
+  color: #ff8b85;
+}
+
+button.danger:hover {
+  background: rgba(224, 85, 78, 0.26);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.link-btn {
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.link-btn:hover {
+  background: transparent;
+  color: var(--text);
+  text-decoration: underline;
+}
+
+/* --- scrollbars ---------------------------------------------------------- */
+
+/* One scrollbar style for every scrolling surface inside the panel.
+ *
+ * WebView2 is Chromium, so the default bar is the desktop's own rounded grey
+ * widget: it is drawn opaque, ignores the panel's dark translucent palette, and
+ * on a 380px panel it eats 15px of the content column. Every surface that
+ * scrolls therefore gets this treatment, through one rule rather than one per
+ * element - the settings tab and the todo list already had private copies, so the
+ * records list and the chat log were left on the default and looked like a
+ * different application.
+ *
+ * The bar is deliberately narrow (8px), trackless, and translucent white: it
+ * reads as a hint about position rather than as a control, which is what a
+ * scrollbar on a 380px panel should be. None of this paints outside its element's
+ * box, so the window-region rules are untouched. */
+.todo-list,
+.record-list,
+.chat-log,
+#tab-settings {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.todo-list::-webkit-scrollbar,
+.record-list::-webkit-scrollbar,
+.chat-log::-webkit-scrollbar,
+#tab-settings::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.todo-list::-webkit-scrollbar-track,
+.record-list::-webkit-scrollbar-track,
+.chat-log::-webkit-scrollbar-track,
+#tab-settings::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.todo-list::-webkit-scrollbar-thumb,
+.record-list::-webkit-scrollbar-thumb,
+.chat-log::-webkit-scrollbar-thumb,
+#tab-settings::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.todo-list::-webkit-scrollbar-thumb:hover,
+.record-list::-webkit-scrollbar-thumb:hover,
+.chat-log::-webkit-scrollbar-thumb:hover,
+#tab-settings::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.30);
+}
+
+/* The corner where two bars meet: without this Chromium paints its default
+ * opaque square there, which is the one pixel of the native widget that survives
+ * `height: 8px` on the horizontal bar. */
+.todo-list::-webkit-scrollbar-corner,
+.record-list::-webkit-scrollbar-corner,
+.chat-log::-webkit-scrollbar-corner,
+#tab-settings::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* --- list ---------------------------------------------------------------- */
+
+.list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.summary {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.todo-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.todo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.045);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.todo-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.todo-item.overdue {
+  border-color: rgba(224, 85, 78, 0.45);
+}
+
+.todo-item.done .todo-title {
+  color: var(--text-dim);
+  text-decoration: line-through;
+}
+
+.todo-item input[type="checkbox"] {
+  margin: 2px 0 0;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.todo-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.todo-title {
+  display: block;
+  word-break: break-word;
+  line-height: 1.35;
+}
+
+.todo-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.todo-meta .due.overdue {
+  color: #ff8b85;
+}
+
+.todo-meta .due.soon {
+  color: var(--warn);
+}
+
+.todo-notes {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.todo-actions {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.todo-item:hover .todo-actions {
+  opacity: 1;
+}
+
+.todo-actions button {
+  padding: 3px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.todo-actions button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+
+.empty {
+  color: var(--text-dim);
+  font-size: 12px;
+  text-align: center;
+  margin: 14px 0;
+}
+
+/* --- settings ------------------------------------------------------------ */
+
+/* Settings is the one tab taller than the panel, so it scrolls INSIDE itself.
+ * It must never grow the panel: the panel's rectangle comes from the layout and
+ * the native window region is cut to exactly it (README 10c / 10d). */
+#tab-settings {
+  /* The form's single source of truth for its layout: a fixed label column plus
+   * everything else. .field and .row both build on it, so every control in the
+   * page starts at the same x BY CONSTRUCTION rather than by two rules happening
+   * to agree. 76px fits 銆岄暱浼戞伅闂撮殧銆?at 12px and still leaves ~172px inside the
+   * 380px panel for the value. */
+  --label-col: 76px;
+  overflow-y: auto;
+  gap: 12px;
+  padding: 10px 10px 14px;
+}
+
+/* One group = one card.
+ *
+ * The grouping is carried by the card rather than by a 1px rule between rows: a
+ * divider only says "something ended", while a card says "these belong together
+ * and the next thing does not". The previous layout drew the same thin line
+ * between every one of ten groups - including between the picture picker and the
+ * size slider, which belong to each other - so nothing was actually grouped. */
+.sgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 10px 11px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.028);
+}
+
+.sgroup-head {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--text);
+}
+
+/* The one-line "what this group is for", under its heading. Groups whose name
+ * already says it (澶栬涓庡惎鍔? 鏁版嵁涓庨€€鍑? do not carry one. */
+.sgroup-desc {
+  margin: -2px 0 1px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* A sub-heading INSIDE a group: 服务 / API Key / 生成参数 / 闃舵鏃堕暱 鈥? *
+ * It marks a change of KIND within one feature, so it is deliberately quieter
+ * than .sgroup-head - smaller, dimmer, and separated by a rule rather than by a
+ * card of its own. In the LLM section these used to be .setting-label inside one
+ * flat card, which made "主动说话" read as another generation parameter instead
+ * of a separate feature. */
+.ssub {
+  margin: 5px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+/* A labelled row: the label column plus whatever the setting is.
+ *
+ * A two-column grid, and the SAME grid the switch rows below use, so the two row
+ * types cannot drift apart: the label column is one variable and both rules
+ * reference it. Flexbox was the earlier attempt and it produced exactly that
+ * drift - a checkbox, a gap and its text put the text at 53px while the fields
+ * put their controls at 107px, so half the page lined up and half of it nearly
+ * did.
+ *
+ * The label is aligned to the TOP so a row whose value is several lines tall (a
+ * hint, a stack of buttons, the prompt box) reads as "this label owns that block"
+ * instead of floating in the middle of it. */
+.field {
+  display: grid;
+  grid-template-columns: var(--label-col) 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.field-label {
+  /* Matches the height of the controls beside it, so a one-line row's label lines
+   * up with the control's own text rather than with its top border. */
+  padding-top: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-dim);
+}
+
+.field-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* A row whose "value" is a paragraph, a button plus its explanation, or the
+ * prompt box: the block is stacked, but it keeps the same column start. */
+.field-input.stack {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* Units and the size read-out: the smallest text in the panel, so a number's
+ * meaning never competes with the number. Tabular figures and a fixed width keep
+ * 銆?00%銆?from shifting the slider as it is dragged. */
+.unit,
+.scale-value {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.scale-value {
+  min-width: 38px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The explainer under a control. Dimmer and smaller than the rows it explains,
+ * so it reads as annotation rather than as another setting: one class used to do
+ * both jobs, which flattened the whole page into a single weight. */
+.setting-note {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+
+/* A one-line status or value the app fills in (the data directory, the reminder
+ * schedule, where the key is stored, an error). Same size as a note, but it is
+ * never prose the author wrote, so it does not take the note's line height. */
+.setting-hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+/* A row of buttons. The buttons themselves are sized further down, with the rest
+ * of the settings tab's compact metrics. */
+.btn-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Settings buttons are smaller than the ones in the todo form: there are
+ * twenty-odd of them in one scrolling column, and at the default size they read
+ * as the loudest thing on the page. */
+#tab-settings button {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+/* The switch rows: a checkbox followed immediately by its own text.
+ *
+ * Deliberately NOT the two-column grid the .field rows use. A checkbox and its
+ * label are one unit - the box IS the control and the text belongs to it - so
+ * pushing the text out to the value column leaves the box stranded 76px from the
+ * words it governs, and the row reads as a checkbox with an unrelated caption.
+ * These rows therefore keep the checkbox and its text adjacent, which is what the
+ * original layout did.
+ *
+ * Only the left edge is shared with the field rows: the checkbox sits on the same
+ * gutter as the .field labels, so the page still has one left margin.
+ *
+ * Nothing is centred vertically: a row whose text wraps to two lines must not
+ * drag its checkbox down with it. */
+#tab-settings .row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 1px 0;
+  font-size: 12.5px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+#tab-settings .row input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  /* Centres the 15px box on the first line of the text beside it (16.9px), so it
+   * reads as sitting in the sentence rather than floating above it. */
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+#tab-settings .row span {
+  min-width: 0;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* The slider shares its row with the read-out, so it takes the space that is
+ * left rather than the full width (which would push the read-out out of the
+ * panel and into the window region's edge). */
+#tab-settings input[type="range"] {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+/* --- speech bubble ------------------------------------------------------- */
+
+/* The reminder, the todo picker and the summary prompt all use this one card,
+ * because all three occupy the panel's slot beside the pet.
+ *
+ * Two rules are absolute here:
+ *
+ *  1. No shadow, no glow, no filter. Those are drawn outside the element's
+ *     border box, and outside the box is the user's desktop (the window is
+ *     cropped to this exact rectangle). This is the same mistake that produced
+ *     the "blurred background" the panel's box-shadow used to cause.
+ *  2. Nothing may overflow the box. The card fills its rectangle exactly, and
+ *     the pointer triangle is positioned INSIDE it rather than hanging off an
+ *     edge. An overflowing child would be clipped by the window region and look
+ *     like a torn edge. */
+#bubble {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  /* Appearing and disappearing is a pure opacity fade - never a translation.
+   * A slide would expose the part of the box the card has not reached yet, and
+   * with the region already cropped to the box that shows as a gap. */
+  animation: bubble-in 0.16s ease-out;
+  --wails-draggable: no-drag;
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* The pointer triangle. It lives inside the bubble's own box, in a reserved
+ * strip along the edge that faces the pet, so it can never draw past the
+ * window region.
+ *
+ * The class names say where the arrow IS (`at-left` = on the bubble's left
+ * edge), not which way it points. `at-left` therefore has to point LEFT, back
+ * at a pet that is sitting to the bubble's left. */
+.bubble-arrow {
+  position: absolute;
+  top: 50%;
+  width: 0;
+  height: 0;
+  margin-top: -6px;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  pointer-events: none;
+}
+
+/* Apex points left: the pet is to the left of this bubble. */
+.bubble-arrow.at-left {
+  left: 0;
+  border-right: 7px solid var(--panel-bg);
+}
+
+/* Apex points right: the pet is to the right of this bubble. */
+.bubble-arrow.at-right {
+  right: 0;
+  border-left: 7px solid var(--panel-bg);
+}
+
+.bubble-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 0 0 auto;
+}
+
+.bubble-todo {
+  margin: 0;
+  font-size: 12px;
+  color: var(--accent);
+  word-break: break-word;
+  flex: 0 0 auto;
+}
+
+/* The plan line, on the summary prompt only: what the user set out to do, above
+ * the box where they type what actually happened. Same family as .bubble-todo -
+ * it is the second hint line of the card - but dimmer, because it is background
+ * for the answer rather than a label on it. */
+.bubble-plan {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  word-break: break-word;
+  flex: 0 0 auto;
+}
+
+.bubble-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.bubble-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 12px;
+}
+
+.bubble-item-title {
+  word-break: break-word;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.bubble-item-due {
+  color: var(--text-dim);
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+
+.bubble-item-due.overdue {
+  color: #ff8b85;
+}
+
+.bubble-item-due.soon {
+  color: var(--warn);
+}
+
+/* Picker rows are clickable and carry a radio button. */
+.bubble-choice {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  cursor: pointer;
+}
+
+.bubble-choice input[type="radio"] {
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.bubble-item-main {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.bubble-more {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  flex: 0 0 auto;
+}
+
+.bubble-input {
+  width: 100%;
+  min-height: 52px;
+  flex: 1 1 auto;
+  resize: none;
+}
+
+.bubble-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* --- pomodoro strip ------------------------------------------------------ */
+
+.pomo-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 9px;
+  border: 1px solid var(--panel-border);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.045);
+  flex: 0 0 auto;
+}
+
+.pomo-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pomo-phase {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pomo-countdown {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+  /* Tabular figures stop the countdown jittering as digits change width. */
+  font-variant-numeric: tabular-nums;
+}
+
+.pomo-todo {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+
+.pomo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.pomo-actions button {
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
+/* --- records ------------------------------------------------------------- */
+
+/* The archive, folded by day.
+ *
+ * The list is a column of day cards rather than a column of sessions: a year of
+ * daily sessions as flat rows put the newest record - the only one anyone reads -
+ * at the top of a screenful of history, and reaching anything else meant scrolling
+ * through all of it. Each card is a header that summarises its day even when
+ * closed, so the folded state is still informative. */
+.record-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.record-day {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+/* The whole header is the control, not a small caret beside it: a 380px panel
+ * with a 12px hit target is a panel where folding never happens by accident. */
+.record-day-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+}
+
+.record-day-head:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+/* The caret. It changes GLYPH rather than rotating.
+ *
+ * A transform here would be harmless - this element is inside the panel's border
+ * box and the panel clips - but the project's one unbreakable rule is that
+ * nothing outside the panel may carry a transform, and a rotation is exactly the
+ * kind of exception that stops being audited. Two characters cost nothing and
+ * keep the rule total. */
+.record-caret {
+  flex: 0 0 auto;
+  width: 9px;
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 1;
+}
+
+.record-day-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-day-meta {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+/* The sessions of one day. Indented and lighter than the header, so the nesting
+ * is visible without a second border. */
+.record-day-list {
+  margin: 0;
+  padding: 0 0 0 8px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.record-item {
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.045);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.record-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.record-when {
+  word-break: break-word;
+}
+
+.record-mins {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.record-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+/* The plan line of a record. Same row as .record-line (so both body lines share
+ * one left edge) but dimmer: it is the intention, and the 实际 line below it is
+ * what the user came to read. It is allowed to wrap onto a second line rather
+ * than overflow the fixed panel width - a plan is prose, not a label. */
+.record-plan {
+  font-size: 12px;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+
+/* The two textareas of the in-place editor, stacked. They are the only body the
+ * row can have while editing, so the column layout keeps them inside the fixed
+ * 380px panel: side by side they would each be half a sentence wide. */
+.record-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.record-summary {
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.record-blank {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.record-input {
+  width: 100%;
+  min-height: 46px;
+  resize: none;
+}
+
+.record-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.record-actions button {
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
+.record-total {
+  margin: 0;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  flex: 0 0 auto;
+}
+
+/* --- settings: compact controls ------------------------------------------- */
+
+/* The compact controls the settings form is built from: a number, a time, a
+ * select, a one-line text field. All four are the SAME height and the same
+ * radius, because they sit in consecutive rows of one form - a dropdown that is
+ * 2px taller than the text field above it is the kind of thing that makes a
+ * settings page look assembled rather than designed.
+ *
+ * They are scoped to the settings tab so the same elements in the todo form and
+ * the chat composer keep their own, larger metrics. */
+#tab-settings input[type="number"],
+#tab-settings input[type="time"],
+#tab-settings input[type="text"],
+#tab-settings input[type="password"],
+#tab-settings select {
+  padding: 4px 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  min-width: 0;
+}
+
+#tab-settings input[type="number"] {
+  width: 58px;
+  flex: 0 0 auto;
+}
+
+/* Time and the native dropdown are drawn by WebView2, so the dark scheme has to
+ * be requested explicitly or they open white-on-white. */
+#tab-settings input[type="time"],
+#tab-settings select {
+  color-scheme: dark;
+}
+
+#tab-settings input[type="time"] {
+  flex: 0 0 auto;
+}
+
+/* The fields that fill their row: the endpoint, the model, the key, the prompt. */
+#tab-settings input[type="text"],
+#tab-settings input[type="password"],
+#tab-settings select {
+  flex: 1 1 auto;
+}
+
+#tab-settings input[type="number"]:focus,
+#tab-settings input[type="time"]:focus,
+#tab-settings input[type="text"]:focus,
+#tab-settings input[type="password"]:focus,
+#tab-settings select:focus {
+  border-color: var(--accent);
+}
+
+#llm-prompt {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Emphasis inside a hint or a note is the SETTING, not decoration: it is what the
+ * user must not miss in a paragraph they are otherwise skimming. */
+.setting-hint strong,
+.setting-note strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.setting-hint.ok,
+.setting-note.ok {
+  color: var(--ok);
+}
+
+.setting-hint.error,
+.setting-note.error {
+  color: #ff8b85;
+}
+
+/* --- confirmation dialog -------------------------------------------------- */
+
+/* Drawn inside the panel, unlike window.confirm() which WebView2 renders as a
+ * native browser-chrome dialog ("wails.localhost 閺勫墽銇?): white, unfocused by the
+ * app's theme, covering the panel, and positioned outside the window region the
+ * app is cropped to.
+ *
+ * Structure is a full-panel scrim plus a centred card, which solves two things
+ * at once:
+ *
+ *  1. SEPARATION. The card sits on a dimmed backdrop, so it does not read as
+ *     just another panel row. An earlier version tinted the card almost exactly
+ *     like the panel it covered, which made the two blend together.
+ *  2. NO MOVEMENT. The scrim is a plain absolutely-positioned box (no transform),
+ *     and the card is centred with flexbox rather than `top:50%` +
+ *     `translateY(-50%)`. That transform used to be clobbered by the shared
+ *     `panel-in` keyframes, which animate `transform: translateY(4px) -> none`,
+ *     so the dialog visibly slid/jumped as it appeared. Centring without a
+ *     transform removes the conflict entirely rather than papering over it. */
+.confirm {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  /* Dim the panel content behind the dialog so the card stands out.
+   *
+   * Deliberately fairly dark: the card is only a little lighter than the panel,
+   * so most of the separation comes from the scrim. Measured against the panel
+   * colour, this pairing gives the card ~2.4:1 over the dimmed panel and ~2.0:1
+   * over an undimmed one, which is enough to read as a raised surface at a
+   * glance. An earlier, gentler scrim left the card at 1.3:1 - visually
+   * indistinguishable, which is exactly what made it look like part of the
+   * panel. */
+  background: rgba(6, 7, 9, 0.68);
+  animation: fade-in 0.12s ease-out;
+}
+
+.confirm-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  /* Clearly lighter than both the panel (28,30,36) and the dimmed panel, so the
+   * card reads as a distinct raised surface rather than another panel row. */
+  background: #4a5162;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 11px;
+}
+
+.confirm-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.confirm-actions button {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
+/* Opacity-only transitions, for the same reason the bubble uses them: this
+ * window is cropped to exactly what the page draws, so anything that MOVES an
+ * element briefly exposes the part of its box that has not been drawn yet.
+ *
+ * The card deliberately does NOT scale in. A scale is motion, and motion here is
+ * both against that rule and the very thing that made the dialog look like it
+ * was jumping - the previous version inherited `panel-in`, whose
+ * `translateY(4px) -> none` fought the `translateY(-50%)` centring. Struggling
+ * transform against transform was the bug; the fix is to not animate transform
+ * at all. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* --- chat tab ------------------------------------------------------------ */
+
+/* The 对话 tab's body is a MOUNT POINT, not a conversation UI.
+ *
+ * The conversation itself is a plugin: the host resolves which installed plugin
+ * claims the slot and mounts its sandboxed iframe here, and until one is
+ * installed there is nothing to draw but a sentence saying so. That is why the
+ * rules below are three lines of layout and one hint, and why they carry no
+ * message styles at all - the messages belong to the plugin, which brings its
+ * own stylesheet inside its own iframe.
+ *
+ * Two consequences for the rules below:
+ *
+ *  1. Nothing here may draw outside the panel box. Same rule as the bubble: no
+ *     shadow, no filter, no transform that spills. Immediately outside is the
+ *     user's desktop.
+ *  2. The slot stretches to fill the tab body (a fixed-height flex child) and the
+ *     frame inside it stretches to fill the slot. Neither may size itself from
+ *     its content: the panel is cropped to a fixed 380x520 rectangle, so a plugin
+ *     page that grew its container would put the drawn box and the region out of
+ *     step. */
+
+.chat-slot {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The placeholder shown when no plugin owns the slot.
+ *
+ * It is deliberately plain text rather than an empty box: a blank tab is
+ * indistinguishable from a broken one, and the user's next move - open the
+ * plugin market, install the chat plugin, tick its permissions - cannot be
+ * guessed from nothing. The text itself is written by main.js, next to the same
+ * sentence Go returns when the pet is double-clicked with no plugin installed,
+ * so the two cannot drift. */
+.chat-slot-empty {
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.7;
+  text-align: center;
+  padding: 0 18px;
+}
+
+/* The plugin's frame fills the slot. `height: 0` plus a grow factor is the
+ * standard way to size a flex child from its container rather than from its
+ * content, which is what keeps the frame inside the rectangle the window was
+ * cropped to no matter how tall the plugin's page wants to be. */
+.chat-slot > .plugin-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 0;
+}
+
+/* The host's own conversation UI used to be styled here: the message list, the
+ * bubbles, the streaming caret, the input form, and - below the panel section -
+ * the live overlay's reply card, thought puffs and input bar.
+ *
+ * All of it is gone with the code that built it. The conversation is a plugin
+ * now: it renders inside its own sandboxed iframe and brings its own stylesheet
+ * (see .chat-slot above, which is the only thing left for the host to lay out).
+ * Keeping the old rules would have been worse than dead CSS - they name
+ * rectangles the window is no longer cropped to, so the next person to reuse a
+ * class would size a box against a region that does not exist.
+ *
+ * .chat-log survives in the scrollbar group at the top of this file: it is a
+ * selector in a shared rule, and removing it there is a separate decision about
+ * that rule's membership. */
+
+/* --- plugin surface ------------------------------------------------------- */
+
+/* The host's plugin frames, and the floating surface's mount point.
+ *
+ * The base `.plugin-frame` rule is shared with the 对话 slot (see `.chat-slot >
+ * .plugin-frame` above): both places mount a sandboxed plugin iframe into a box
+ * the host sizes, and neither may size itself from the plugin's content - the
+ * panel is cropped to a fixed 380x520 rectangle, so a page that grew its frame
+ * would put the drawn box and the window region out of step.
+ *
+ * The mount point is a pass-through: it covers the window and takes no clicks
+ * itself, so the desktop stays reachable everywhere a plugin did not declare a
+ * rectangle. Each frame is placed at the coordinates the layout carried, which
+ * are the same rectangles the native window region was cropped to - that is why
+ * nothing here computes a size.
+ *
+ * No shadow, filter or transform anywhere in this section: a floating panel that
+ * decorated outside its box would paint directly onto the desktop. */
+
+.plugin-frame {
+  border: 0;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: transparent;
+}
+
+#plugin-surface {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#plugin-surface .plugin-frame {
+  position: absolute;
+  pointer-events: auto;
+  background: var(--panel-bg);
+}
+
+/* --- toast --------------------------------------------------------------- */
+
+.toast {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: rgba(224, 85, 78, 0.92);
+  color: #fff;
+  font-size: 12px;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  animation: panel-in 0.14s ease-out;
+}

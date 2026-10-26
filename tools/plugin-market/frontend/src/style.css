@@ -1,0 +1,1785 @@
+/* --- plugin market */
+
+/* Plugin market styling.
+ *
+ * A normal desktop window, so unlike the pet's panel there is no OS region crop
+ * to stay inside: this may use the whole viewport, scroll anywhere, and use
+ * elevation. The pet's "nothing may paint outside its box" rule does NOT apply
+ * here, and copying it would only make the window look flat for no reason.
+ *
+ * SIX ROUNDS OF CHANGES LIVE HERE, and the comments say which round a rule answers
+ * so a later edit can tell "load-bearing" from "taste".
+ *
+ *  ROUND 1 - SPACE. The management surface moved out of the pet's fixed 380x520
+ *  panel into this window: long permission explanations wrap instead of being
+ *  clipped, and the list and the detail are two independent scrollers.
+ *
+ *  ROUND 2 - INFORMATION. The left pane stacked 已安装 over 市场 and drew the same
+ *  plugin twice, so three plugins read as six cards. It became two views behind one
+ *  segmented switch.
+ *
+ *  ROUND 3 - CRAFT. A plugin gained an identity (a monogram tinted from its id, the
+ *  same on its row and in the detail header), surfaces got a four-step scale, and
+ *  one accent colour was spent on three things only.
+ *
+ *  ROUND 4 - SURFACES, NOT PANELS. 权限 became a popover pinned to its button and 设置
+ *  a dialog, so neither took layout space; the plugin's own interface became the rest
+ *  of the pane rather than a card inside it.
+ *
+ *  ROUND 5 - HEADER AND THEME. The top bar became one row with the theme switch at its
+ *  left, the detail head became one card with the controls on the name's line, and the
+ *  window got a light scheme built from the same tokens.
+ *
+ *  ROUND 6 - RHYTHM. One 34px control height, one 16px gutter, the version chip demoted
+ *  to plain monospace, the head's description clamped to three lines, a light-mode
+ *  input well.
+ *
+ *  ROUND 7 - THE SKELETON (this pass). Six rounds of tuning added up to "still ugly",
+ *  and the diagnosis was that the SHAPE was wrong, not the paint:
+ *
+ *   1. THE WINDOW IS A STORE, NOT A TWO-PANE MANAGER. A 310px column of rows put a
+ *      plugin's own runtime page on the main stage of a MARKET, and left browsing as
+ *      a sidebar. The catalogue is now a grid of cards (#grid-view), and one plugin
+ *      is a page of its own (#detail-view) with a breadcrumb back to the grid. Both
+ *      are plain sections in the same scroll-less body; only one is ever visible.
+ *   2. THE MIRROR URL LEFT THE HEADER. A 70-character URL in the most valuable strip
+ *      of the window is what made the program read as a developer tool. It is a field
+ *      in #market-sheet, behind the gear. Search took its place, because search is
+ *      the one control a catalogue actually needs.
+ *   3. THE PERMISSION LIST IS A COLUMN, NOT A POPOVER. With the plugin's page laid out
+ *      as a page, the list has somewhere to live (the right rail), so it is always
+ *      visible, needs no click, and its count sits in its header.
+ *   4. THE PLUGIN'S INTERFACE GOT ITS BOUNDARY BACK. Round 4 removed the card around
+ *      the iframe to stop "a box in a box"; the result was that the plugin's own
+ *      cards looked like the market's page continuing, and the user named that area
+ *      as the ugliest thing in the window. It is a .workspace with a caption strip
+ *      now - ONE box, with one scrollbar inside it.
+ *   5. STATE MOVED ONTO THE ICON. A row printed 已启用 in words under every plugin;
+ *      a card carries a dot on its app icon instead, and only the detail page spells
+ *      the state out (with the switch that changes it).
+ *
+ * READ THE COMMENTS BEFORE CHANGING NUMBERS. `.pane`'s horizontal padding and the
+ * scrollbar width are MEASURED by .dev/verify-plugin-market.ps1 in a real window: it
+ * samples the 2px strip inside the content edge and requires it to stay background, so
+ * a card that reached further right would fail that check rather than merely look
+ * tight. The header's ink-run measurement from rounds 1-6 is GONE with the address
+ * field; see the note in that script for what replaced it.
+ */
+
+:root {
+  /* Surfaces, darkest to lightest. The page is a canvas, the cards are panels, the
+     wells sit inside them. The steps are ~6-8 levels apart on purpose: closer than
+     that and a card reads as the same flat page with a border drawn on it. */
+  --bg: #0b0e13;
+  --bg-soft: #151a22;
+  --bg-card: #1c232e;
+  --bg-card-hi: #252d3a;
+  --bg-input: #080a0e;
+  --bg-active: #2a3242;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-hi: rgba(255, 255, 255, 0.16);
+  --border-strong: rgba(255, 255, 255, 0.26);
+  --text: #e9edf3;
+  --text-strong: #ffffff;
+  --text-body: #c3cad6;
+  --dim: #98a2b3;
+  --dimmer: #6f7a8a;
+  --accent: #5b8cff;
+  --accent-hover: #4a7cf5;
+  --accent-soft: rgba(91, 140, 255, 0.14);
+  --accent-glow: rgba(91, 140, 255, 0.26);
+  --accent-line: rgba(91, 140, 255, 0.45);
+  --accent-line-strong: rgba(91, 140, 255, 0.65);
+  --accent-fill: rgba(91, 140, 255, 0.22);
+  --accent-text: #a9c2ff;
+  --accent-text-strong: #cfe0ff;
+  --ok: #47b881;
+  --ok-fg: #8fe0b6;
+  --ok-line: rgba(71, 184, 129, 0.5);
+  --ok-fill: rgba(71, 184, 129, 0.12);
+  --warn: #e2a33d;
+  --warn-fg: #f0c377;
+  --warn-line: rgba(226, 163, 61, 0.45);
+  --warn-fill: rgba(226, 163, 61, 0.1);
+  --danger: #e2594f;
+  --danger-fg: #ff9a92;
+  --danger-line: rgba(226, 89, 79, 0.45);
+  --danger-fill: rgba(226, 89, 79, 0.12);
+  /* Translucent white is how this window draws "a surface got a little lighter".
+   * In light mode the same role is translucent BLACK, so every one of these is a
+   * token rather than a literal. */
+  --hover: rgba(255, 255, 255, 0.06);
+  --hover-strong: rgba(255, 255, 255, 0.1);
+  --hover-faint: rgba(255, 255, 255, 0.025);
+  --well: rgba(255, 255, 255, 0.015);
+  --hairline: rgba(255, 255, 255, 0.055);
+  --inset: #10141b;
+  /* The catalogue's canvas, which is one step off the page. */
+  --pane-bg: #0f131a;
+  --track: #0b0e13;
+  --track-pill: #252d3a;
+  --track-pill-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  /* The selected card: fill, border, shadow and stripe width. A token group because
+   * the light scheme has to shout where the dark one only has to lean. */
+  --row-sel-bg: linear-gradient(180deg, rgba(91, 140, 255, 0.16) 0%, rgba(91, 140, 255, 0.09) 100%);
+  --row-sel-border: rgba(91, 140, 255, 0.75);
+  --row-sel-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --row-sel-stripe: 3px;
+  --row-sel-text: #ffffff;
+  --scroll-thumb: #2b323f;
+  --scroll-thumb-hover: #3c4557;
+  --switch-off: #333a49;
+  --switch-thumb: #a8b0bd;
+  --toast-bg: #232a36;
+  --toast-err-bg: #2a1e21;
+  --scrim: rgba(4, 6, 10, 0.62);
+  /* Elevation. Two steps, both tokens: a card lifts off the canvas, a modal lifts
+   * off everything. In the dark scheme a shadow is nearly invisible, which is why it
+   * is paired with the surface step rather than relied on alone. */
+  --shadow-card: 0 8px 22px -16px rgba(0, 0, 0, 0.9);
+  --shadow-card-hover: 0 16px 34px -18px rgba(0, 0, 0, 0.95);
+  --shadow-pop: 0 24px 60px rgba(0, 0, 0, 0.6);
+  --radius: 12px;
+  --radius-sm: 7px;
+  --font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  /* Native widgets (the caret, the select popup, the default scrollbar in a plugin
+   * frame) follow this, so a light window does not get dark native chrome. */
+  color-scheme: dark;
+}
+
+/* THE LIGHT THEME.
+ *
+ * Same tokens, different values - no rule below this block knows which theme it is
+ * drawing. The palette is tuned for contrast rather than for symmetry: body text is
+ * near-black on white, the dim greys stay above 4.5:1, and the three state colours
+ * (ok / warn / danger) get a DARKER foreground on a PALE fill, because the dark
+ * theme's pale-on-translucent values are illegible on white.
+ *
+ * What this cannot reach: the plugin's own hosted document inside its iframe. A
+ * plugin ships its own CSS, so a light market window can still host a dark workshop
+ * - that is the plugin's business, and the frame is transparent so a plugin that
+ * draws nothing shows this window's background. */
+:root[data-theme="light"] {
+  --bg: #f2f5f9;
+  --bg-soft: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hi: #eef2f8;
+  --bg-input: #f2f5fa;
+  --bg-active: #e2e9f3;
+  --border: rgba(16, 24, 40, 0.12);
+  --border-hi: rgba(16, 24, 40, 0.24);
+  --border-strong: rgba(16, 24, 40, 0.36);
+  --text: #131a26;
+  --text-strong: #060b14;
+  --text-body: #33404f;
+  --dim: #566274;
+  --dimmer: #78849a;
+  --accent: #2f6bea;
+  --accent-hover: #245cd4;
+  --accent-soft: rgba(47, 107, 234, 0.1);
+  --accent-glow: rgba(47, 107, 234, 0.18);
+  --accent-line: rgba(47, 107, 234, 0.4);
+  --accent-line-strong: rgba(47, 107, 234, 0.62);
+  --accent-fill: rgba(47, 107, 234, 0.16);
+  --accent-text: #2456bb;
+  --accent-text-strong: #1b46a0;
+  --ok: #17855a;
+  --ok-fg: #10694a;
+  --ok-line: rgba(23, 133, 90, 0.4);
+  --ok-fill: rgba(23, 133, 90, 0.1);
+  --warn: #b8720f;
+  --warn-fg: #8a5405;
+  --warn-line: rgba(184, 114, 15, 0.38);
+  --warn-fill: rgba(184, 114, 15, 0.1);
+  --danger: #c33a2f;
+  --danger-fg: #ab2419;
+  --danger-line: rgba(195, 58, 47, 0.36);
+  --danger-fill: rgba(195, 58, 47, 0.08);
+  --hover: rgba(16, 24, 40, 0.06);
+  --hover-strong: rgba(16, 24, 40, 0.1);
+  --hover-faint: rgba(16, 24, 40, 0.035);
+  --well: rgba(16, 24, 40, 0.025);
+  --hairline: rgba(16, 24, 40, 0.09);
+  --inset: #f8fafd;
+  --pane-bg: #e9eef6;
+  --track: #e3e9f3;
+  --track-pill: #ffffff;
+  --track-pill-shadow: 0 1px 2px rgba(16, 24, 40, 0.14), 0 0 0 1px rgba(16, 24, 40, 0.06);
+  --row-sel-bg: linear-gradient(180deg, #e8f0ff 0%, #d9e6ff 100%);
+  --row-sel-border: #6d95ee;
+  --row-sel-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
+  --row-sel-stripe: 4px;
+  --row-sel-text: var(--text-strong);
+  --scroll-thumb: #c3ccda;
+  --scroll-thumb-hover: #a7b3c6;
+  --switch-off: #c7d1e0;
+  --switch-thumb: #5f6b7d;
+  --toast-bg: #ffffff;
+  --toast-err-bg: #fdf1ef;
+  --scrim: rgba(16, 24, 40, 0.32);
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-card-hover: 0 12px 26px -16px rgba(16, 24, 40, 0.4);
+  --shadow-pop: 0 24px 60px rgba(16, 24, 40, 0.24);
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* The icon sprite from index.html. Zero-sized and out of flow rather than
+ * `display: none`, which some engines treat as "do not paint the referenced
+ * symbols" - and every glyph in this window comes out of it. */
+.icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* One glyph. `currentColor` for the stroke is what lets the same symbol be grey in
+ * a card, accent-blue in the active chip and white on the primary button without
+ * three copies of the path. `pointer-events: none` keeps clicks landing on the
+ * button around it, so the delegated handlers do not have to special-case a click
+ * that happened to hit the <svg>. */
+.ico {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13.5px;
+  line-height: 1.6;
+  overflow: hidden; /* the views scroll, the page does not */
+}
+
+/* Scrollbars, so the views read as part of the same surface instead of as a
+ * browser default dropped into a dark window.
+ *
+ * The width is a MEASURED quantity: the pixel gate samples a column 18px inside
+ * the client's right edge and requires it to be background. With a scrollbar the
+ * content box stops 16px + 12px short of that edge, so the strip lands in the
+ * view's padding; a much narrower scrollbar would move the sample inside a card.
+ * Do not shrink this. */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* --- top bar --------------------------------------------------------------- */
+
+/* A store header: mark, search, three window controls. No page title (the window's
+ * title bar says it) and no address field (it is a setting - see #market-sheet). */
+.top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+/* The mark is the window's only identity, and it is decorative: the product name
+ * lives in the title bar, so this carries no text. */
+.brand-mark {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: linear-gradient(140deg, #6d9bff 0%, var(--accent) 58%, #6c4bf0 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  user-select: none;
+}
+
+/* The search field claims the width the header's controls leave, and wraps its own
+ * glyph. `.search` is a <label>, which is what makes the whole box a hit target for
+ * focus - the one place a wrapping label is right, because there is nothing else in
+ * this row that needs to share its flex line. */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1 1 auto;
+  max-width: 440px;
+  min-width: 150px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-input);
+  color: var(--dimmer);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.search:hover {
+  border-color: var(--border-hi);
+}
+
+.search:focus-within {
+  border-color: var(--accent-line-strong);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.search .ico {
+  width: 15px;
+  height: 15px;
+}
+
+.search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  font-size: 12.5px;
+}
+
+.search input:focus {
+  outline: none;
+  border: 0;
+  box-shadow: none;
+}
+
+.top-spacer {
+  flex: 1 1 auto;
+}
+
+/* An icon-only button: square, so the three window controls line up with the search
+ * box's height. */
+.icon-only {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: var(--dim);
+}
+
+.icon-only:hover:not(:disabled) {
+  color: var(--text);
+}
+
+/* The headline is only ever the catalogue's provenance ("内置示例源") or the fact
+ * that a fallback source is in use. Empty most of the time, and an empty pill leaves
+ * the flow - `gap` is charged per ITEM, so a zero-width span between items would cost
+ * its own two gaps for nothing. */
+.headline {
+  color: var(--dim);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.headline:not(:empty) {
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.headline:empty {
+  display: none;
+}
+
+/* --- the two views --------------------------------------------------------- */
+
+/* Both views are the same box: fill what the header leaves, scroll on their own. Only
+ * one is in the flow at a time (`.hidden`), so there is never a second scrollbar. */
+.view {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.grid-view {
+  background: var(--pane-bg);
+}
+
+/* --- filters --------------------------------------------------------------- */
+
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 20px 2px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+/* A chip is a filter, not a tab: several can be meaningful at once conceptually, but
+ * exactly one is applied - so it is a radio group in the markup (aria-pressed), and
+ * it reads as pills rather than as a segmented track, because the track said "these
+ * are the only two lists" and this says "narrow the list". */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--dim);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.chip:hover:not(.is-on) {
+  border-color: var(--border-hi);
+  color: var(--text);
+}
+
+.chip.is-on {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.count {
+  color: var(--dimmer);
+  font-size: 11.5px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.chip.is-on .count {
+  color: var(--bg);
+  opacity: 0.7;
+}
+
+.count:empty {
+  display: none;
+}
+
+/* --- the grid -------------------------------------------------------------- */
+
+.grid-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* The horizontal 20px is MEASURED: the pixel gate samples the 2px strip inside the
+   * content edge and requires it to stay background. */
+  padding: 14px 20px 28px;
+  scrollbar-gutter: stable;
+}
+
+.grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  /* auto-fill with a 268px minimum: at the default 964px client that is three cards
+   * per row, and it degrades to two and then one without a media query. */
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: 14px;
+  align-items: stretch;
+}
+
+/* A card is one plugin: icon, name, version·author, a two-line pitch, and a footer
+ * carrying the state and the action. It is a <button> in spirit (the whole card is
+ * clickable) but an <li> with a real <button> inside, so the action is reachable by
+ * keyboard without turning the card's description into a button label. */
+.card {
+  display: flex;
+  flex-direction: column;
+  padding: 15px 16px 13px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.card:hover {
+  border-color: var(--border-hi);
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-1px);
+}
+
+/* The selected card. Same token pair the row used in earlier rounds: the light scheme
+ * needs a real tint and a solid border, the dark one only a lean. */
+.card.is-selected {
+  border-color: var(--row-sel-border);
+  background: var(--row-sel-bg);
+  box-shadow: var(--shadow-card-hover);
+}
+
+.card.is-selected .card-name {
+  color: var(--row-sel-text);
+}
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  min-width: 0;
+}
+
+/* The app icon. The two gradient stops are custom properties set inline from the
+ * plugin id (see main.js), because the hue has to be the same here and in the detail
+ * hero for the same plugin and a static stylesheet cannot know the id.
+ *
+ * `position: relative` is what lets the state dot sit on its corner. */
+.app-icon {
+  position: relative;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  color: #fff;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0;
+  background: linear-gradient(140deg, var(--tint-a, #5b8cff) 0%, var(--tint-b, #8f6bff) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  user-select: none;
+}
+
+/* THE STATE IS A DOT ON THE ICON (round 7). It used to be a pill under every row
+ * saying 已启用, four times in a four-plugin list - the same word in the same place on
+ * every card. The dot is read at a glance and takes no line. Its ring is the card's
+ * own colour, so it reads as a badge on the icon rather than as a floating dot. */
+.app-dot {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2.5px solid var(--bg-card);
+  background: var(--dimmer);
+}
+
+.app-dot.is-on {
+  background: var(--ok);
+}
+
+.app-dot.is-off {
+  background: var(--warn);
+}
+
+.app-dot.is-err {
+  background: var(--danger);
+}
+
+.app-dot.is-update {
+  background: var(--accent);
+}
+
+.card.is-selected .app-dot {
+  border-color: var(--bg-card-hi);
+}
+
+.card-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.card-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.1px;
+  overflow-wrap: anywhere;
+}
+
+.card-meta {
+  margin-top: 3px;
+  color: var(--dimmer);
+  font-size: 11.5px;
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-desc {
+  margin: 11px 0 12px;
+  color: var(--dim);
+  font-size: 12.5px;
+  line-height: 1.62;
+  overflow-wrap: anywhere;
+  /* Two lines at most. A card is a scanner, not a reader, and the detail page is one
+   * click away for the whole text. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 11px;
+  border-top: 1px solid var(--border);
+}
+
+/* The footer's word for the state. It exists only for the cases the dot cannot say
+ * (可更新), and for screen readers - which is why it is text and not another colour. */
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--dimmer);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.state.is-on {
+  color: var(--ok);
+}
+
+.state.is-update {
+  color: var(--accent-text);
+}
+
+.state.is-err {
+  color: var(--danger);
+}
+
+.state:empty {
+  display: none;
+}
+
+/* --- buttons --------------------------------------------------------------- */
+
+button {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-hi);
+  background: var(--bg-card);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  /* Inline-flex so a button and its glyph share one baseline: the icons are
+   * <svg> elements and a text-only button is unaffected by the gap. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+button:hover:not(:disabled) {
+  background: var(--bg-card-hi);
+  border-color: var(--border-strong);
+}
+
+button:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+button.primary {
+  background: linear-gradient(180deg, #6d9bff 0%, var(--accent) 100%);
+  border-color: #6d9bff;
+  color: #fff;
+  font-weight: 600;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+}
+
+button.primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #7ea8ff 0%, var(--accent-hover) 100%);
+  border-color: #7ea8ff;
+}
+
+/* The destructive action is OUTLINED rather than filled. A filled red button beside a
+ * filled blue one reads as two equal choices. */
+button.danger {
+  color: var(--danger);
+  border-color: var(--danger-line);
+  background: transparent;
+}
+
+button.danger:hover:not(:disabled) {
+  background: var(--danger-fill);
+  border-color: var(--danger);
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--dim);
+}
+
+button.ghost:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* A compact button: card footers and the hero's bar. 30px, so four of them fit beside
+ * a card's description or under a hero's name without becoming the loudest thing on
+ * screen. */
+button.small {
+  height: 30px;
+  padding: 0 13px;
+  font-size: 12.5px;
+}
+
+/* The hero's actions: one height for all of them, and the same 34px the switch and
+ * the sheets use, so a bar of controls never has a ragged top edge. */
+.action-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+
+.action-bar > button,
+.action-bar > .switch {
+  height: 34px;
+}
+
+/* --- inputs ---------------------------------------------------------------- */
+
+input[type="text"],
+input[type="number"],
+input[type="password"],
+input[type="search"],
+select,
+textarea {
+  font: inherit;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  min-width: 0;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+input[type="text"]:hover:not(:focus),
+input[type="number"]:hover:not(:focus),
+input[type="password"]:hover:not(:focus),
+input[type="search"]:hover:not(:focus),
+select:hover:not(:focus),
+textarea:hover:not(:focus) {
+  border-color: var(--border-hi);
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus,
+input[type="password"]:focus,
+input[type="search"]:focus,
+textarea:focus {
+  border-color: var(--accent-line-strong);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* Checkboxes are drawn rather than inherited: the platform control is a bright white
+ * square in a dark window, and the permissions list is mostly checkboxes. The tick is
+ * an inline SVG so it needs no extra element and no font. */
+input[type="checkbox"] {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  border: 1px solid var(--border-hi);
+  background: var(--bg-input);
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+input[type="checkbox"]:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+input[type="checkbox"]:checked {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round' d='M3.6 8.4 6.6 11.3 12.4 5.2'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
+}
+
+input[type="checkbox"]:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* --- notice and toast ------------------------------------------------------ */
+
+.notice {
+  margin: 0;
+  padding: 7px 20px;
+  background: var(--warn-fill);
+  border-bottom: 1px solid var(--warn-line);
+  color: var(--warn-fg);
+  font-size: 12.5px;
+  flex: 0 0 auto;
+  overflow-wrap: anywhere;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  padding: 9px 18px;
+  border-radius: 10px;
+  background: var(--toast-bg);
+  border: 1px solid var(--border-hi);
+  box-shadow: var(--shadow-pop);
+  font-size: 13px;
+  max-width: 70vw;
+  z-index: 40;
+}
+
+.toast.error {
+  border-color: var(--danger-line);
+  color: var(--danger-fg);
+  background: var(--toast-err-bg);
+}
+
+/* --- empty states ---------------------------------------------------------- */
+
+.empty {
+  color: var(--dim);
+  font-size: 13px;
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+
+/* An empty view states what to do next instead of standing alone as a sentence on an
+ * otherwise blank panel. */
+#grid-empty {
+  margin: 40px auto 0;
+  max-width: 420px;
+  padding: 34px 22px;
+  border: 1px dashed var(--border-hi);
+  border-radius: 14px;
+  text-align: center;
+  color: var(--dimmer);
+  background: var(--well);
+}
+
+.hint {
+  color: var(--dim);
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 12.5px;
+  margin: 8px 0 0;
+  overflow-wrap: anywhere;
+}
+
+/* --- detail: breadcrumb ---------------------------------------------------- */
+
+.detail-view {
+  background: var(--bg);
+}
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px 0;
+  flex: 0 0 auto;
+  color: var(--dimmer);
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.crumb-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 4px 4px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dim);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.crumb-back:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.crumb-back .ico {
+  width: 15px;
+  height: 15px;
+}
+
+.crumb-sep {
+  opacity: 0.6;
+}
+
+.crumb-name {
+  color: var(--text-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* --- detail: the hero ------------------------------------------------------ */
+
+/* The plugin as a product header: icon, name, one-line pitch, badges, actions.
+ *
+ * This replaced a card whose four controls sat at the far end of a row the name did
+ * not fill - the "middle is empty" complaint. The pitch now sits under the name
+ * (where it belongs, next to what it describes) instead of as a paragraph spanning
+ * the whole card, and the actions are a group at the top right. */
+.hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin: 12px 20px 0;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg-soft);
+  box-shadow: var(--shadow-card);
+  flex: 0 0 auto;
+}
+
+.avatar {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  color: #fff;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0;
+  background: linear-gradient(
+    140deg,
+    var(--tint-a, #5b8cff) 0%,
+    var(--tint-b, #8f6bff) 100%
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  user-select: none;
+}
+
+.avatar-lg {
+  width: 60px;
+  height: 60px;
+  border-radius: 17px;
+  font-size: 25px;
+}
+
+.hero-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.hero-body h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.3;
+  letter-spacing: -0.25px;
+  overflow-wrap: anywhere;
+}
+
+/* TWO lines, clamped, with the full text in `title` (set in renderDetail).
+ *
+ * One ellipsised line was the first attempt and it read as a CUT-OFF SENTENCE - "…被 @
+ * 时借…" is not a pitch, it is a broken sentence. Two lines is a pitch: the hero is a
+ * header, and the whole thing is on the card behind this page, so the clamp costs
+ * nothing that is not one click away. */
+.tagline {
+  margin: 5px 0 0;
+  color: var(--text-body);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+/* A badge is a FACT about the install (version, author, how many permissions), which
+ * is why it is dim and quiet - unlike the state, which the switch states. `:empty` is
+ * display:none so a plugin with no author does not leave a blank pill in the row. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--dim);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.badge:empty {
+  display: none;
+}
+
+.badge.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.badge.is-ok {
+  border-color: var(--ok-line);
+  background: var(--ok-fill);
+  color: var(--ok-fg);
+}
+
+/* --- detail: the body (workspace + rail) ----------------------------------- */
+
+.detail-body {
+  display: flex;
+  gap: 14px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 14px 20px 20px;
+}
+
+/* The plugin's own interface. It IS a box now, with a caption strip: one box, one
+ * scrollbar (the plugin document's), and a visible boundary between the market's
+ * chrome and a document the market does not style. */
+.workspace {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--bg-soft);
+  box-shadow: var(--shadow-card);
+}
+
+.workspace-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--well);
+  color: var(--dimmer);
+  font-size: 11.5px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.workspace-bar b {
+  color: var(--dim);
+  font-weight: 600;
+}
+
+.workspace-bar span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plugin-ui {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.plugin-ui-frame {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The frame fills its box exactly. `display: block` matters: an inline iframe sits on
+ * a text baseline, which leaves a few pixels of the container's background showing
+ * beneath it as a stray stripe. */
+.plugin-ui-frame .plugin-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+}
+
+/* No interface: the workspace box is gone and this sentence takes its place, so an
+ * installed-but-headless plugin still gets the full width for its rail. */
+.workspace-empty {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 28px 22px;
+  border: 1px dashed var(--border-hi);
+  border-radius: 16px;
+  background: var(--well);
+  color: var(--dimmer);
+  font-size: 13px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+/* The rail: permissions and facts. 300px is what an identifier plus its explanation
+ * needs before the explanation starts wrapping every two words.
+ *
+ * THE RAIL SCROLLS AS ONE COLUMN, and its panels do not scroll individually. The first
+ * attempt gave the permission panel its own `overflow-y: auto` - which is right for a
+ * fixed-height panel, and wrong here: the panel has no height of its own, so the list
+ * simply grew and pushed the 关于 panel out of the page, where it was unreachable and
+ * invisible. One scroll container for the column is the honest answer.
+ *
+ * `margin-right: 12px` is a MEASURED constant. The rail is the page's right-hand column,
+ * so with the gutter reserved its scrollbar would sit 2px inside the page's content
+ * edge - hugging the window frame, which looks cramped, and putting the pixel gate's
+ * "is this strip background?" sample straight onto the thumb. The margin moves the whole
+ * column in far enough that the scrollbar has somewhere to be. */
+.rail {
+  flex: 0 0 300px;
+  min-width: 0;
+  margin-right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-soft);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.panel h4 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--dim);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.panel-note {
+  color: var(--dimmer);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.panel-title .ico {
+  width: 14px;
+  height: 14px;
+  opacity: 0.85;
+}
+
+.panel-note:empty {
+  display: none;
+}
+
+/* The permission panel does not scroll on its own - the rail does (see .rail). */
+.panel .perms {
+  padding: 4px 6px 8px;
+}
+
+/* The facts: a two-column definition list. Values wrap, labels do not. */
+.about {
+  margin: 0;
+  padding: 12px 14px 14px;
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.about div {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.about dt {
+  margin: 0;
+  flex: 0 0 58px;
+  color: var(--dimmer);
+}
+
+.about dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-body);
+  overflow-wrap: anywhere;
+}
+
+.about dd.mono {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* --- permission rows ------------------------------------------------------- */
+/* One full-width row per permission: the checkbox, the name and the explanation
+ * share a wrapping container and there is no fixed pixel width anywhere, so a
+ * long explanation wraps onto a second line instead of running past the panel's
+ * right edge. That clipping is exactly what the old in-panel tab did.
+ *
+ * The rows are FLAT LINES inside the permission panel - a bordered card per
+ * permission inside a bordered panel was two borders saying the same thing. */
+
+.perms {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.perm {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+  padding: 7px 8px;
+  border-radius: 7px;
+  background: transparent;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  transition: background-color 0.12s ease;
+}
+
+.perm:hover {
+  background: var(--hover-faint);
+}
+
+/* An ungranted permission is dimmed as a whole, so "this one is off" reads at a
+ * glance rather than only from the small 未授予 note. */
+.perm.is-off {
+  opacity: 0.62;
+}
+
+.perm input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 2px 0 0;
+}
+
+/* The name and the explanation share ONE line while they fit, and the explanation
+ * drops to its own line when they do not.
+ *
+ * `min-width: 0` is load-bearing here: as a flex item this container is not allowed to
+ * shrink below its content width without it, and then a long name would push the row
+ * wider than the panel instead of wrapping. */
+.perm-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.perm-name {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent-text);
+}
+
+/* IN THE RAIL the explanation gets its OWN LINE, under the identifier.
+ *
+ * Side by side is right in a wide list; at 300px it produced "net.ws 保持一条到插件所
+ * 声明地址的" on the first line and the rest of the sentence indented under the label,
+ * which reads as a mis-indented paragraph rather than as one permission.
+ *
+ * `flex-basis: 100%` is what forces the break, and the container stays a WRAPPING ROW.
+ * The obvious alternative - `flex-direction: column` on `.perm-text` - is the trap this
+ * rule replaces: a column container that also wraps sizes itself to its items'
+ * max-content width, so the sentence ran off the right edge of the WINDOW instead of
+ * wrapping inside the panel. The real-window gate caught it (18% of the strip inside the
+ * right padding read as glyphs); jsdom could not, because it does not lay out. */
+.panel .perm-label {
+  flex: 1 1 100%;
+  margin-top: 1px;
+}
+
+.perm-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-body);
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.perm-note {
+  flex: 1 1 100%;
+  color: var(--warn);
+  font-size: 11.5px;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* --- config form ----------------------------------------------------------- */
+
+/* A responsive two-column grid. The form used to be one full-width column, which is a
+ * lot of scrolling for the twelve-item voice plugin and left most of a wide window
+ * empty. Fields whose content is long opt into the full width with `.wide`, which
+ * main.js sets from the item's own shape rather than from a list of key names - so a
+ * plugin's new field is laid out without touching this file.
+ *
+ * The grid is also the settings CARD: a darker inset panel says "these fields belong
+ * to this plugin". It is one step LIGHTER than the inputs it contains (var(--inset)
+ * against var(--bg-input)), because a panel whose fill equals its own fields' fill
+ * leaves the fields visible only by their 1px border. */
+.cfg {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px 16px;
+  align-items: start;
+  padding: 14px 15px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--inset);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.field.wide {
+  grid-column: 1 / -1;
+}
+
+.field > span {
+  color: var(--dim);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.field input[type="text"],
+.field input[type="number"],
+.field input[type="password"],
+.field select,
+.field textarea {
+  width: 100%;
+}
+
+.field input[type="checkbox"] {
+  align-self: flex-start;
+}
+
+.field textarea {
+  resize: vertical;
+  min-height: 72px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.field .field-note {
+  color: var(--dimmer);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+/* A multi-select is a checkbox group, and it WRAPS.
+ *
+ * Twelve category names in one 230px grid cell would either overflow or become a box
+ * that scrolls inside a pane that already scrolls. The group takes the whole row
+ * (fieldWantsFullWidth) and lays itself out in as many lines as it needs. */
+.field .checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--inset);
+}
+
+.field .check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.field .check:hover {
+  color: var(--text);
+}
+
+.field .check input[type="checkbox"] {
+  align-self: center;
+  margin: 0;
+}
+
+.field.set .field-note {
+  color: var(--ok);
+}
+
+/* The note and the save button share one row, so the button always sits beside
+ * the explanation of what saving does instead of under a stray line of hint
+ * text. */
+.form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+/* --- the sheets (install / settings / market) ------------------------------ */
+
+.sheet {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 30;
+}
+
+.sheet-box {
+  width: 100%;
+  max-width: 560px;
+  max-height: 100%;
+  /* A COLUMN, not a scrolling box: the body scrolls and the action row stays put.
+   * Before this, a plugin with twelve settings pushed 保存 below the fold, so the one
+   * button the dialog exists for was the one you had to go looking for. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-hi);
+  border-radius: 14px;
+  padding: 20px 22px;
+  box-shadow: var(--shadow-pop);
+}
+
+/* Everything in the dialog keeps its height... */
+.sheet-box > * {
+  flex: 0 0 auto;
+}
+
+/* ...except the part that can be long: the field grid, and the permission list the
+ * install sheet draws. Those scroll inside the dialog. */
+.sheet-box .cfg,
+.sheet-box .perms {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The settings dialog is wider than the install sheet: the same two-column grid with
+ * twelve paths in it needs the room. */
+#settings-sheet .sheet-box {
+  max-width: 640px;
+}
+
+.sheet-box h2 {
+  margin: 0;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+
+/* The dialog's own description and its field grid need a gap between them; the sheet
+ * is a column, so a margin is the whole mechanism. */
+.sheet-box .desc {
+  margin: 8px 0 0;
+  color: var(--text-body);
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.sheet-box .cfg {
+  margin-top: 14px;
+}
+
+.sheet-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.sheet-actions > button {
+  height: 34px;
+}
+
+/* The consent list sits between the description and the note, so it needs its own
+ * separation - and it has no checkboxes (nothing is granted yet), which is why the
+ * rows are pulled flush to the box's left edge instead of leaving the gap a
+ * checkbox would occupy. */
+.sheet-box .perms {
+  margin-top: 12px;
+}
+
+.sheet-box .perm {
+  padding: 7px 0;
+}
+
+.sheet-box .perm:first-child {
+  padding-top: 0;
+}
+
+#cfg-note {
+  margin-top: 10px;
+}
+
+/* --- the enable switch ----------------------------------------------------- */
+
+/* A real switch rather than a bare checkbox: the input is visually replaced by
+ * the track while staying in the DOM and focusable, which is what the label
+ * toggles. Note that main.js hides `#detail-enabled-row`, never the input alone:
+ * hiding only the input would leave the track and the word 启用 on screen for a
+ * plugin that is not installed.
+ *
+ * It is FRAMED like the buttons beside it: an unframed control in a row of framed
+ * ones reads as a label, not as a setting you can change. */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid var(--border-hi);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--dim);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  flex: 0 0 auto;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.switch:hover {
+  background: var(--hover);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/* Specificity wins over the generic checkbox rule above, and the input has to
+ * stay focusable, so it is moved off-screen rather than hidden. */
+.switch input[type="checkbox"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+  appearance: none;
+  background: none;
+}
+
+.switch-track {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--switch-off);
+  border: 1px solid var(--border-hi);
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+  flex: 0 0 auto;
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--switch-thumb);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  transition: transform 0.14s ease, background-color 0.14s ease;
+}
+
+.switch input:checked + .switch-track {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.switch input:checked + .switch-track .switch-thumb {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+/* The focus ring has to be drawn on the TRACK, because the input is off-screen. */
+.switch input:focus-visible + .switch-track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.switch input:disabled + .switch-track {
+  opacity: 0.45;
+}
+
+.switch input:disabled ~ .switch-text {
+  opacity: 0.45;
+}
+
+.switch input:checked ~ .switch-text {
+  color: var(--text);
+}
+
+/* The glyph brightens with the switch itself, so the icon reads as part of the
+ * control's state and not as a label in front of it. :has() is the only way to reach a
+ * glyph that precedes the input - there is no preceding-sibling selector in CSS - and
+ * it ships in every WebView2 this program runs on. Where it is missing the icon simply
+ * stays neutral, which is a silence, not a break. */
+.switch:has(input:checked) .ico {
+  color: var(--ok);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* A narrow window stacks the workspace over the rail instead of squeezing both: below
+ * 900px the 292px rail stops leaving the plugin's document a usable width. */
+@media (max-width: 900px) {
+  .detail-body {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .rail {
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .rail > .panel {
+    flex: 1 1 260px;
+  }
+
+  .workspace,
+  .workspace-empty {
+    flex: 0 0 auto;
+    min-height: 380px;
+  }
+
+  .top {
+    padding: 12px 14px;
+  }
+
+  .filters,
+  .grid-scroll,
+  .crumb {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .hero {
+    margin: 12px 14px 0;
+  }
+}

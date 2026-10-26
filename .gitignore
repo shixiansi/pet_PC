@@ -1,0 +1,96 @@
+# Build output
+build/bin/
+frontend/dist/
+
+# Throwaway experiments, probe tests, review screenshots and stray logs. Anything
+# that is not project source goes here instead of the repository root.
+scratch/
+
+# Runtime config of the QQ protocol backend (credentials and access tokens),
+# written to the working directory when the backend is started from the repo
+# root. PetPC's own config.json lives in its data directory, not here.
+/config.json
+
+# A second copy of the sandboxed toolchain (.dev/, Go module cache, npm cache,
+# test binaries) nested under the repository. Same reasoning as .dev/* below.
+/pet_pc/
+
+# ACL backup/restore reports left by workspace permission repair tooling.
+/.acl-recovery/
+/.dsh-file-attachment/
+
+# Per-machine Claude Code permissions.
+.claude/settings.local.json
+
+# Frontend dependencies
+node_modules/
+
+# Local development toolchain and scratch space created by this workspace's
+# sandboxed setup (Go module cache, Wails CLI, test data, screenshots).
+#
+# The whole directory is excluded, then the three frontend verification gates are
+# put back: README documents them as the project's regression checks (structure,
+# real-browser behaviour, geometry dump), so they are project source rather than
+# scratch, and a change to a gate has to be reviewable alongside the code it
+# guards. Everything else under .dev/ (hundreds of MB of toolchain and probe
+# output) stays out.
+.dev/*
+!.dev/check-frontend.cjs
+!.dev/run-frontend-harness.cjs
+!.dev/layout-report.cjs
+
+# Wails generated native bindings are committed on purpose so the frontend
+# type-checks without running the CLI; nothing to ignore for them here.
+
+# Python bytecode left by the archived probe scripts.
+__pycache__/
+*.pyc
+
+# Agent session memory (tool scratch, not project source).
+.memsearch/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+
+# The plugin market lives in market/ as its own git repository (see
+# openspec/changes/plugin-market). Ignoring it here keeps the host repo from
+# tracking it as an embedded repository.
+market/
+
+# The plugin-surface pixel gate is the fourth frontend verification gate, and it
+# is project source for the same reason the other three are.
+!.dev/verify-plugin-surface.ps1
+
+# The plugin market's real-window gate is the fifth, and it was the one gate
+# missing from this list: it is named by .dev/check-all.ps1 and it verifies the
+# market window's frame, size, address row and detail-pane edge, but with no
+# whitelist entry here it was ignored by git - so the change that introduced it
+# could not actually land it, and a later fix to the gate would not have been
+# reviewable next to the code it guards. Same reasoning as the four above.
+!.dev/verify-plugin-market.ps1
+
+# The ENTRY POINT of every gate, and the two scripts it cannot run without.
+#
+# This is the same defect as the two notes above, one level up: check-all.ps1 is
+# the one command README documents for "run every gate", it dot-sources env.ps1
+# for the toolchain and launches verify-region.ps1 / verify-live.ps1 as child
+# processes - and NONE of those four were whitelisted, so the only documented way
+# to reproduce a green build was the one file git would not accept. A gate that
+# cannot be committed is a gate that dies with the machine that wrote it.
+#
+# The whitelist is now closed over the dependency: everything .dev/check-all.ps1
+# reaches by path is tracked. Everything else under .dev/ (~200 probe scripts,
+# screenshots, CSV dumps, toolchain archives) stays ignored.
+!.dev/check-all.ps1
+!.dev/env.ps1
+!.dev/verify-region.ps1
+!.dev/verify-live.ps1
+
+# The plugin market is a third Wails program, so its bundle is build output for
+# the same reason frontend/dist/ is. The rest of the program (Go sources, the
+# wailsjs bindings, index.html) is source and stays tracked.
+tools/plugin-market/frontend/dist/
+tools/plugin-market/build/bin/
+tools/plugin-market/*.exe

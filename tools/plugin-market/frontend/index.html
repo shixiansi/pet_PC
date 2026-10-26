@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>插件市场 · PetPC</title>
+    <script type="module" src="/src/main.js"></script>
+  </head>
+  <body>
+    <!-- The icon sprite. Every glyph in this window is a symbol here, referenced
+         as <use href="#ico-…">, so there is ONE definition of each and no image
+         assets to load: the same reason the monogram tiles are CSS gradients.
+
+         It is sized to 0x0 and taken out of flow rather than `display: none`,
+         because a `display: none` root can stop a referenced <symbol> from being
+         painted in some engines - and a missing icon would look like a missing
+         button label. Strokes are `currentColor` (see .ico in the stylesheet), so
+         an icon inherits the colour of whatever it sits in. -->
+    <svg class="icon-sprite" width="0" height="0" aria-hidden="true" focusable="false">
+      <symbol id="ico-power" viewBox="0 0 24 24">
+        <path d="M18.4 6.6a9 9 0 1 1-12.8 0" />
+        <path d="M12 2.5v9.5" />
+      </symbol>
+      <symbol id="ico-gear" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="3.2" />
+        <path
+          d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.55V21a2 2 0 0 1-4 0v-.1A1.7 1.7 0 0 0 9 19.35a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.65 15a1.7 1.7 0 0 0-1.55-1.03H3a2 2 0 0 1 0-4h.1A1.7 1.7 0 0 0 4.65 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.65a1.7 1.7 0 0 0 1.03-1.55V3a2 2 0 0 1 4 0v.1A1.7 1.7 0 0 0 15 4.65a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.35 9v.1A1.7 1.7 0 0 0 20.9 10.1H21a2 2 0 0 1 0 4h-.1A1.7 1.7 0 0 0 19.4 15z"
+        />
+      </symbol>
+      <symbol id="ico-plus" viewBox="0 0 24 24">
+        <path d="M12 5v14" />
+        <path d="M5 12h14" />
+      </symbol>
+      <symbol id="ico-up" viewBox="0 0 24 24">
+        <path d="M12 19V5" />
+        <path d="M5 12l7-7 7 7" />
+      </symbol>
+      <symbol id="ico-trash" viewBox="0 0 24 24">
+        <path d="M3.5 6.5h17" />
+        <path d="M9.5 6.5V4.2h5v2.3" />
+        <path d="M18.5 6.5l-.9 13a1.5 1.5 0 0 1-1.5 1.4H7.9a1.5 1.5 0 0 1-1.5-1.4l-.9-13" />
+        <path d="M10.5 10.5v6.5" />
+        <path d="M13.5 10.5v6.5" />
+      </symbol>
+      <symbol id="ico-shield" viewBox="0 0 24 24">
+        <path d="M12 21.5s7.5-3.6 7.5-9.4V5.2L12 2.6 4.5 5.2v6.9c0 5.8 7.5 9.4 7.5 9.4z" />
+        <path d="M9 11.9l2.1 2.1 4-4.1" />
+      </symbol>
+      <symbol id="ico-search" viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="6.5" />
+        <path d="M16 16l4.5 4.5" />
+      </symbol>
+      <symbol id="ico-refresh" viewBox="0 0 24 24">
+        <path d="M20 12a8 8 0 1 1-2.4-5.7" />
+        <path d="M20 4v4.6h-4.6" />
+      </symbol>
+      <symbol id="ico-back" viewBox="0 0 24 24">
+        <path d="M14.5 5.5 8 12l6.5 6.5" />
+      </symbol>
+      <!-- The theme pair. Each one is drawn for the scheme it LEADS TO, so the
+           button always shows the destination rather than the current state. -->
+      <symbol id="ico-moon" viewBox="0 0 24 24">
+        <path d="M20.5 14.3A8.5 8.5 0 1 1 9.7 3.5a7 7 0 0 0 10.8 10.8z" />
+      </symbol>
+      <symbol id="ico-sun" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="4.2" />
+        <path d="M12 2.5v2.2M12 19.3v2.2M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6" />
+        <path d="M2.5 12h2.2M19.3 12h2.2M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6" />
+      </symbol>
+    </svg>
+
+    <!-- THE TOP BAR IS A STORE HEADER: a mark, a search field, and three window
+         controls. There is no page title and no address field on it.
+
+         Both of those were removed for a reason found in use. The title said
+         「插件市场」 inside a window whose title bar already says it (round 5). The
+         ADDRESS was worse: a 70-character mirror URL in the most valuable strip of
+         the window made the whole program read as a developer tool, and it was a
+         setting nobody changes twice. It lives in the gear's sheet now
+         (#market-sheet), where it can be read and edited deliberately.
+
+         What replaced them is the one control a catalogue needs: search. It is a
+         <label> wrapping its input, which is fine HERE (the old rule against a
+         wrapping label existed only because the address input had to absorb the
+         header's leftover width for the pixel gate; that measurement is gone with
+         the address). -->
+    <header class="top">
+      <span class="brand-mark" aria-hidden="true">P</span>
+      <label class="search">
+        <svg class="ico" aria-hidden="true"><use href="#ico-search" /></svg>
+        <input
+          id="search"
+          type="text"
+          placeholder="搜索插件、作者或权限…"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="搜索插件"
+        />
+      </label>
+      <span class="top-spacer"></span>
+      <!-- The catalogue's provenance ("内置示例源") as a pill. Empty most of the
+           time, and an empty pill leaves the flow. -->
+      <span id="headline" class="headline"></span>
+      <button id="market-refresh" type="button" class="ghost icon-only" title="重新读取目录" aria-label="重新读取目录">
+        <svg class="ico" aria-hidden="true"><use href="#ico-refresh" /></svg>
+      </button>
+      <button id="market-settings" type="button" class="ghost icon-only" title="市场设置" aria-label="市场设置"
+        aria-expanded="false" aria-controls="market-sheet">
+        <svg class="ico" aria-hidden="true"><use href="#ico-gear" /></svg>
+      </button>
+      <!-- Icon-only, and it shows what you will GET: a moon while the window is dark
+           (click for light), a sun while it is light (click for dark). -->
+      <button id="theme-toggle" type="button" class="ghost icon-only"
+        aria-label="切换到浅色主题" title="切换到浅色主题">
+        <svg class="ico" aria-hidden="true"><use href="#ico-moon" /></svg>
+      </button>
+    </header>
+
+    <p id="notice" class="notice hidden"></p>
+
+    <!-- ==== VIEW 1: the catalogue ============================================
+         One grid of cards, behind four filter chips. This replaced a two-pane
+         master-detail: the left pane used to be a 310px column of rows, which put
+         a plugin's own runtime page on the main stage of a MARKET window and left
+         the browsing surface as a narrow sidebar.
+
+         The chips are not tabs over two lists any more: every plugin appears
+         ONCE, and the filter decides whether you are looking at all of them, the
+         installed ones, the ones with a newer version, or the ones you do not have
+         yet. A plugin that is installed but absent from the catalogue still shows,
+         which is the case the old 已安装 list existed to cover. -->
+    <section id="grid-view" class="view grid-view">
+      <div class="filters" role="group" aria-label="筛选插件">
+        <button id="filter-all" type="button" class="chip" data-filter="all" aria-pressed="true">
+          全部 <span id="count-all" class="count"></span>
+        </button>
+        <button id="filter-installed" type="button" class="chip" data-filter="installed" aria-pressed="false">
+          已安装 <span id="count-installed" class="count"></span>
+        </button>
+        <button id="filter-update" type="button" class="chip" data-filter="update" aria-pressed="false">
+          可更新 <span id="count-update" class="count"></span>
+        </button>
+        <button id="filter-market" type="button" class="chip" data-filter="market" aria-pressed="false">
+          未安装 <span id="count-market" class="count"></span>
+        </button>
+      </div>
+
+      <div class="grid-scroll">
+        <ul id="plugin-grid" class="grid"></ul>
+        <p id="grid-empty" class="empty hidden"></p>
+      </div>
+    </section>
+
+    <!-- ==== VIEW 2: one plugin ==============================================
+         A product page: breadcrumb, hero (icon, name, one-line pitch, badges,
+         actions), then the plugin's own interface and a right-hand rail holding
+         the permission list and the facts about the install.
+
+         The permission list USED TO BE A POPOVER pinned to a 权限 button, because
+         it was one of three surfaces fighting for the same pane. On a page it is
+         simply a column: always visible, no click to consult, and the granted
+         count lives in its header instead of on a button. -->
+    <section id="detail-view" class="view detail-view hidden">
+      <nav class="crumb" aria-label="位置">
+        <button id="back-to-grid" type="button" class="crumb-back">
+          <svg class="ico" aria-hidden="true"><use href="#ico-back" /></svg>
+          <span>插件市场</span>
+        </button>
+        <span class="crumb-sep" aria-hidden="true">/</span>
+        <span id="crumb-name" class="crumb-name"></span>
+      </nav>
+
+      <div class="hero">
+        <span id="detail-avatar" class="avatar avatar-lg" aria-hidden="true"></span>
+        <div class="hero-body">
+          <h2 id="detail-name"></h2>
+          <p id="detail-tagline" class="tagline"></p>
+          <div class="badges">
+            <span id="detail-version" class="badge mono"></span>
+            <span id="detail-author" class="badge"></span>
+            <span id="detail-perms-badge" class="badge"></span>
+          </div>
+          <p id="detail-error" class="error hidden"></p>
+        </div>
+
+        <!-- The actions, right-aligned in the hero. 权限 is NOT here: the list is
+             part of the page now. 卸载 stays last and outlined - the most
+             destructive control farthest from the one a user touches most. -->
+        <div class="hero-actions action-bar">
+          <button id="detail-install" type="button" class="primary">
+            <svg class="ico" aria-hidden="true"><use href="#ico-plus" /></svg>
+            <span>安装并授权</span>
+          </button>
+          <!-- Shown only when the catalogue offers a NEWER version than the one
+               installed. Without it the only way to move a plugin forward was to
+               uninstall it first, which deletes its private directory - and that is
+               where a plugin keeps its saved settings and API key. -->
+          <button id="detail-update" type="button" class="primary hidden">
+            <svg class="ico" aria-hidden="true"><use href="#ico-up" /></svg>
+            <span id="detail-update-label">更新到新版本</span>
+          </button>
+          <!-- The enable toggle. `#detail-enabled-row` is hidden as a WHOLE, not by
+               hiding the checkbox: the input is visually replaced by the switch
+               track, so hiding only the input would leave the track and the word
+               启用 on screen for a plugin that is not installed. -->
+          <label id="detail-enabled-row" class="switch" title="启用或停用这个插件">
+            <svg class="ico" aria-hidden="true"><use href="#ico-power" /></svg>
+            <input id="detail-enabled" type="checkbox" />
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-text">启用</span>
+          </label>
+          <button id="detail-settings" type="button" class="ghost hidden"
+            aria-haspopup="dialog" title="打开这个插件的设置">
+            <svg class="ico" aria-hidden="true"><use href="#ico-gear" /></svg>
+            <span>设置</span>
+          </button>
+          <button id="detail-uninstall" type="button" class="danger">
+            <svg class="ico" aria-hidden="true"><use href="#ico-trash" /></svg>
+            <span>卸载</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="detail-body">
+        <!-- The plugin's OWN interface, hosted where the pet hosts it: a sandboxed
+             iframe served from /plugin-asset/<id>/<entry>. The caption strip above
+             it is the boundary between the market's chrome and a document the
+             market does not style - without it the plugin's own cards read as
+             "the market's page continues", which is what made this area look like a
+             README dump bolted under a toolbar. -->
+        <div id="panel-interface" class="workspace hidden">
+          <div class="workspace-bar">
+            <b>插件界面</b>
+            <span>· 在沙箱里运行，只拿到你勾选的权限</span>
+          </div>
+          <section id="plugin-ui" class="plugin-ui hidden">
+            <div id="plugin-ui-frame" class="plugin-ui-frame"></div>
+          </section>
+        </div>
+        <p id="workspace-empty" class="workspace-empty hidden"></p>
+
+        <aside class="rail">
+          <div class="panel">
+            <h4>
+              <span class="panel-title">
+                <svg class="ico" aria-hidden="true"><use href="#ico-shield" /></svg>
+                权限
+              </span>
+              <span id="perm-count" class="panel-note"></span>
+            </h4>
+            <ul id="perm-list" class="perms"></ul>
+            <p id="perm-empty" class="empty hidden">这个插件不申请任何权限。</p>
+          </div>
+          <div class="panel">
+            <h4>关于</h4>
+            <dl id="detail-facts" class="about"></dl>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- The market's own setting: where the catalogue is read from. It used to be
+         the top bar; see the note there. -->
+    <div id="market-sheet" class="sheet hidden">
+      <div class="sheet-box">
+        <h2>市场设置</h2>
+        <div class="cfg">
+          <div class="field wide">
+            <span>市场地址</span>
+            <input id="market-url" type="text" placeholder="留空则用内置示例源"
+              autocomplete="off" spellcheck="false" />
+            <span class="field-note">目录从这里读取：指向一个 https 目录，里面是 index.json。</span>
+          </div>
+        </div>
+        <p id="market-note" class="hint"></p>
+        <div class="sheet-actions">
+          <button id="market-cancel" type="button" class="ghost">关闭</button>
+          <button id="market-save" type="button" class="primary">保存并刷新</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- The install sheet: the permissions a plugin asks for, before anything is
+         downloaded. Reusing the detail page's renderer would be wrong - this has to
+         be answerable without the plugin being installed yet, and it must not be
+         clamped: it is the text a user reads before consenting. -->
+    <div id="install-sheet" class="sheet hidden">
+      <div class="sheet-box">
+        <h2 id="sheet-title"></h2>
+        <p id="sheet-desc" class="desc"></p>
+        <ul id="sheet-perms" class="perms"></ul>
+        <p id="sheet-status" class="hint"></p>
+        <div class="sheet-actions">
+          <button id="sheet-cancel" type="button" class="ghost">取消</button>
+          <button id="sheet-confirm" type="button" class="primary">安装</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- The settings dialog: the plugin's declared settings, edited in a modal.
+         The gear in the hero opens it; 关闭 discards nothing (a field is only
+         written when 保存 is pressed) and 保存 writes and closes.
+
+         The control ids inside are the ones the settings editor has always used
+         (cfg-form, cfg-empty, cfg-note, cfg-save), so nothing about how a setting
+         is read, written or masked changed - only where the form lives. -->
+    <div id="settings-sheet" class="sheet hidden">
+      <div class="sheet-box">
+        <h2 id="settings-title"></h2>
+        <p id="cfg-empty" class="empty hidden">这个插件没有声明任何配置项。</p>
+        <div id="cfg-form" class="cfg"></div>
+        <p id="cfg-note" class="hint"></p>
+        <div class="sheet-actions">
+          <button id="settings-cancel" type="button" class="ghost">关闭</button>
+          <button id="cfg-save" type="button" class="primary">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+  </body>
+</html>

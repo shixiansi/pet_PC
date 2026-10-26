@@ -1,0 +1,413 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+
+	"PetPC/internal/plugins"
+	"PetPC/internal/store"
+)
+
+// Market is the struct bound to the frontend.
+//
+// Every method here is a PROJECTION over internal/plugins: this program decides
+// nothing about what a plugin may do, what a package may contain or what an
+// install means. It shows the manager's rows and forwards the user's decisions
+// back to it. That is what keeps the pet and the market from disagreeing about
+// what is installed - there is one implementation and both programs call it.
+type Market struct {
+	ctx context.Context
+
+	// dataDir is the directory shared with the pet.
+	dataDir string
+	// cfgPath is this program's own settings file.
+	cfgPath string
+	// manager is the shared lifecycle implementation.
+	manager *plugins.Manager
+	// keeper encrypts declared secrets at rest.
+	keeper plugins.SecretKeeper
+
+	// registry is this program's capability table, built on first use.
+	//
+	// It is per program on purpose: see pluginhost.go for why the market serves
+	// audio/storage/config/net.fetch and NOT todos/timer/bubble/surface/llm.
+	registry *plugins.Registry
+
+	// audioMu guards the audition sink, and audioOut is that sink. Separate from
+	// mu because an audition runs on a plugin's request goroutine, and the
+	// catalogue reads must not queue behind it.
+	audioMu  sync.Mutex
+	audioOut audioSink
+
+	mu  sync.Mutex
+	cfg marketConfig
+}
+
+// NewMarket opens the shared data directory and this program's settings.
+func NewMarket() (*Market, error) {
+	dir, err := store.DefaultDir()
+	if err != nil {
+		return nil, fmt.Errorf("找不到数据目录：%w", err)
+	}
+	return newMarketAt(dir, "")
+}
+
+// newMarketAt opens a market rooted at dir, with an optional settings-file
+// override.
+//
+// It is split out from NewMarket so the tests can drive the real code against a
+// temp directory: NewMarket's only job is resolving the default location, which
+// is the one part that cannot be tested without touching the user's real data.
+func newMarketAt(dir, cfgPathOverride string) (*Market, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	m := &Market{
+		dataDir: dir,
+		cfgPath: filepath.Join(dir, "plugin-market.json"),
+		keeper:  marketSecretKeeper{},
+	}
+	if cfgPathOverride != "" {
+		m.cfgPath = cfgPathOverride
+	}
+	m.cfg = loadMarketConfig(m.cfgPath, dir)
+
+	manager, err := plugins.NewManager(dir)
+	if err != nil {
+		return nil, err
+	}
+	// The base address is read through a function so the manager always sees the
+	// CURRENT value: the user can retype it in the address box, and the next
+	// catalogue fetch has to use the new one without the manager being rebuilt.
+	manager.BaseURL = func() string {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return m.cfg.MarketBaseURL
+	}
+	m.manager = manager
+
+	// Either program may be the first one opened after the upgrade, so both run
+	// the one-shot migration (T64c). It is idempotent and safe when there is
+	// nothing to move.
+	if err := plugins.MigrateChatData(dir, m.keeper); err != nil {
+		// Not fatal: the plugin still works, it just has no settings yet, and
+		// the pet will retry on its next start.
+		fmt.Fprintf(os.Stderr, "plugin-market: 迁移对话插件数据失败：%v\n", err)
+	}
+	return m, nil
+}
+
+// startup records the Wails context.
+func (m *Market) startup(ctx context.Context) { m.ctx = ctx }
+
+// shutdown exists so the window's lifecycle is explicit; there is nothing to
+// flush, because every binding writes through to disk.
+func (m *Market) shutdown(context.Context) {}
+
+// --- location ---------------------------------------------------------------
+
+// PluginMarketPath reports where this program's executable is.
+//
+// The pet launches this program by looking for it beside its own executable
+// first, so showing the path answers "which copy is the pet actually going to
+// start?" - a question that only comes up when there are two.
+func (m *Market) PluginMarketPath() (string, bool) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", false
+	}
+	path, err := filepath.Abs(exe)
+	if err != nil {
+		return exe, true
+	}
+	return path, true
+}
+
+// --- catalogue and installed list -------------------------------------------
+
+// Installed returns every installed plugin, in index order.
+//
+// The manager holds no in-memory state (it re-reads plugins.json on every call),
+// so a change the PET made - or a second market window - is visible here
+// immediately, with no refresh protocol between the two processes.
+func (m *Market) Installed() ([]plugins.Installed, error) {
+	return m.manager.Plugins(), nil
+}
+
+// Warnings returns non-fatal problems found while reading the index, so a
+// quarantined index is reported rather than looking like "no plugins".
+func (m *Market) Warnings() []string { return m.manager.Warnings() }
+
+// Catalogue fetches the market catalogue.
+func (m *Market) Catalogue() (plugins.MarketView, error) {
+	return m.manager.Market()
+}
+
+// SaveMarketURL stores a new base address and returns the catalogue fetched from
+// it.
+//
+// A bad address is refused BEFORE anything is written, so a typo cannot leave
+// the market pointing at a source it cannot use - the previous, working address
+// stays in place and the user sees why.
+func (m *Market) SaveMarketURL(raw string) (plugins.MarketView, error) {
+	trimmed := strings.TrimSpace(raw)
+	if err := checkMarketURL(trimmed); err != nil {
+		return plugins.MarketView{}, err
+	}
+	m.mu.Lock()
+	m.cfg.MarketBaseURL = strings.TrimRight(trimmed, "/")
+	cfg := m.cfg
+	m.mu.Unlock()
+	if err := saveMarketConfig(m.cfgPath, cfg); err != nil {
+		return plugins.MarketView{}, err
+	}
+	return m.manager.Market()
+}
+
+// --- lifecycle --------------------------------------------------------------
+
+// Install downloads, verifies and unpacks a plugin. It does NOT enable it:
+// installing and enabling are separate steps so the user can look at what was
+// installed before letting it run.
+func (m *Market) Install(id string) error {
+	entry, err := m.catalogueEntry(id)
+	if err != nil {
+		return err
+	}
+	_, err = m.manager.Install(entry)
+	return err
+}
+
+// Update replaces an installed plugin with the newer package the catalogue offers,
+// keeping it enabled and keeping the permissions the user already granted.
+//
+// This is a separate binding from Install rather than a flag on it, because the two
+// do different things to state the user cares about: Install adds a DISABLED plugin
+// with nothing granted, while Update must not touch either. Folding them together
+// would mean either an update that silently disables the plugin or an install that
+// silently enables one the user has not looked at yet.
+//
+// It exists because without it an outdated plugin had no way forward: the market
+// hides the install button once a plugin is installed, and the manager refuses a
+// second install of a present id, so the only route was uninstall-then-install -
+// which deletes the plugin's private directory, taking its saved settings and API
+// key with it.
+func (m *Market) Update(id string) error {
+	entry, err := m.catalogueEntry(id)
+	if err != nil {
+		return err
+	}
+	_, err = m.manager.Update(entry)
+	return err
+}
+
+// catalogueEntry finds one catalogue row by id.
+func (m *Market) catalogueEntry(id string) (plugins.MarketEntry, error) {
+	got, err := m.manager.Market()
+	if err != nil {
+		return plugins.MarketEntry{}, err
+	}
+	for _, e := range got.Entries {
+		if e.ID == id {
+			return e, nil
+		}
+	}
+	return plugins.MarketEntry{}, fmt.Errorf("市场里没有插件 %s", id)
+}
+
+// Uninstall removes a plugin's files, its private storage and its index entry.
+func (m *Market) Uninstall(id string) error {
+	return m.manager.Uninstall(id)
+}
+
+// SetEnabled switches a plugin on or off.
+func (m *Market) SetEnabled(id string, on bool) error {
+	return m.manager.SetEnabled(id, on)
+}
+
+// Grant records the permissions the user ticked. The manager refuses any name
+// the plugin did not declare.
+func (m *Market) Grant(id string, granted []string) error {
+	_, err := m.manager.GrantPermissions(id, granted)
+	return err
+}
+
+// --- plugin settings --------------------------------------------------------
+
+// ConfigEditor is one declared setting, ready to draw.
+//
+// It is the manifest's declaration JOINED with the stored value, so the frontend
+// never has to correlate two structures - and, for a secret, carries only
+// whether one is stored and how it masks. The plaintext is never in this type.
+type ConfigEditor struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Type  string `json:"type"`
+	// Value is the current value for a non-secret item, "" for a secret one.
+	Value string `json:"value"`
+	// Default is shown as a placeholder when Value is empty.
+	Default string `json:"default,omitempty"`
+	// Secret marks the item whose value is write-only.
+	Secret bool `json:"secret,omitempty"`
+	// HostWhitelist marks the item that feeds the net.fetch allow-list.
+	HostWhitelist bool `json:"hostWhitelist,omitempty"`
+	// SecretSet / SecretMask describe a stored secret without revealing it.
+	SecretSet  bool   `json:"secretSet,omitempty"`
+	SecretMask string `json:"secretMask,omitempty"`
+	// Options / Multiple describe a `select` item's choices, straight from the
+	// manifest: the editor draws them, it does not invent them.
+	Options  []plugins.ConfigOption `json:"options,omitempty"`
+	Multiple bool                   `json:"multiple,omitempty"`
+}
+
+// PluginConfig is one plugin's settings as the editor sees them.
+type PluginConfig struct {
+	PluginID string         `json:"pluginId"`
+	Name     string         `json:"name"`
+	Dir      string         `json:"dir"`
+	Items    []ConfigEditor `json:"items"`
+	Usage    string         `json:"usage,omitempty"`
+	Error    string         `json:"error,omitempty"`
+}
+
+// GetConfig returns the editor for one plugin's declared settings.
+func (m *Market) GetConfig(id string) (PluginConfig, error) {
+	row, ok := m.manager.Get(id)
+	if !ok {
+		return PluginConfig{}, fmt.Errorf("插件 %s 未安装", id)
+	}
+	if row.Manifest == nil {
+		return PluginConfig{}, fmt.Errorf("插件 %s 的 manifest 无法解析", id)
+	}
+	dir, err := m.manager.PrivateDir(id)
+	if err != nil {
+		return PluginConfig{}, err
+	}
+	store := plugins.NewConfigStore(dir, *row.Manifest, m.keeper)
+	values, err := store.Read()
+	if err != nil {
+		return PluginConfig{}, err
+	}
+
+	out := PluginConfig{
+		PluginID: id,
+		Name:     row.Manifest.Name,
+		Dir:      dir,
+		Items:    make([]ConfigEditor, 0, len(row.Manifest.Config)),
+	}
+	for _, item := range row.Manifest.Config {
+		editor := ConfigEditor{
+			Key:           item.Key,
+			Label:         item.Label,
+			Type:          item.Type,
+			Default:       item.Default,
+			Secret:        item.Secret,
+			HostWhitelist: item.HostWhitelist,
+			Options:       item.Options,
+			Multiple:      item.Multiple,
+		}
+		if item.Secret {
+			state := values.Secrets[item.Key]
+			editor.SecretSet = state.Set
+			editor.SecretMask = state.Mask
+		} else {
+			editor.Value = values.Values[item.Key]
+		}
+		out.Items = append(out.Items, editor)
+	}
+	out.Usage = m.usageLine(dir)
+	return out, nil
+}
+
+// SaveConfig writes the plugin's settings.
+//
+// A secret arrives only when the user actually typed a new one - the editor
+// sends the mask back untouched otherwise - so an absent secret key means "leave
+// it alone" rather than "clear it".
+func (m *Market) SaveConfig(id string, values map[string]string) error {
+	row, ok := m.manager.Get(id)
+	if !ok {
+		return fmt.Errorf("插件 %s 未安装", id)
+	}
+	if row.Manifest == nil {
+		return fmt.Errorf("插件 %s 的 manifest 无法解析", id)
+	}
+	dir, err := m.manager.PrivateDir(id)
+	if err != nil {
+		return err
+	}
+	store := plugins.NewConfigStore(dir, *row.Manifest, m.keeper)
+	return store.Write(values)
+}
+
+// RememberSelection stores which plugin the user last had open.
+func (m *Market) RememberSelection(id string) error {
+	m.mu.Lock()
+	m.cfg.LastSelectedID = id
+	cfg := m.cfg
+	m.mu.Unlock()
+	return saveMarketConfig(m.cfgPath, cfg)
+}
+
+// SelectedID returns the remembered selection, so reopening the window lands
+// where the user left off.
+func (m *Market) SelectedID() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cfg.LastSelectedID
+}
+
+// Theme returns the remembered colour scheme: "dark" or "light". An empty value
+// means the file predates themes, and empty is DARK - the scheme this window
+// shipped with - so an existing settings file keeps opening exactly as it did.
+func (m *Market) Theme() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return normalizeTheme(m.cfg.Theme)
+}
+
+// SetTheme remembers the colour scheme.
+//
+// An unknown value is normalised to dark rather than refused: a look must never be
+// able to fail a save and leave the window in a scheme the file does not name. The
+// write goes through the same saveMarketConfig as every other preference, so the
+// pet's config file is still never touched.
+func (m *Market) SetTheme(name string) error {
+	m.mu.Lock()
+	m.cfg.Theme = normalizeTheme(name)
+	cfg := m.cfg
+	m.mu.Unlock()
+	return saveMarketConfig(m.cfgPath, cfg)
+}
+
+// normalizeTheme maps anything that is not "light" onto "dark".
+func normalizeTheme(name string) string {
+	if strings.EqualFold(strings.TrimSpace(name), themeLight) {
+		return themeLight
+	}
+	return themeDark
+}
+
+// usageLine reads the usage counter the pet keeps for this plugin.
+//
+// Only this program and the pet read it; the PET is the only writer, because the
+// budget has to be enforced where the request is made.
+func (m *Market) usageLine(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "llm-usage"))
+	if err != nil {
+		return ""
+	}
+	var raw struct {
+		Date     string `json:"date"`
+		Requests int    `json:"requests"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil || raw.Date == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s：%d 次请求", raw.Date, raw.Requests)
+}

@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "updatedAt": "2026-10-24T15:28:29Z",
+  "plugins": [
+    {
+      "id": "com.shixiansi.plugin-bilibili",
+      "name": "B 站刷视频插件",
+      "version": "1.0.0",
+      "author": "shixiansi",
+      "description": "按你指定的分区与偏好自己去刷 B 站：把字幕拉下来让大模型摘要、打分，觉得有用才叫桌宠弹一句，卡片留在收件箱；人设、条数、频率由你定，评论默认只出草稿。",
+      "permissions": ["net.fetch", "net.credentials", "llm.chat", "llm.borrow", "storage", "plugin.config", "pet.bubble", "plugin.share"],
+      "netHosts": ["api.bilibili.com", "passport.bilibili.com", "aisubtitle.hdslb.com", "i0.hdslb.com", "i1.hdslb.com", "i2.hdslb.com", "s1.hdslb.com", "www.bilibili.com", "m.bilibili.com", "b23.tv", "space.bilibili.com", "bili2233.cn"],
+      "download": "dist/com.shixiansi.plugin-bilibili-1.0.0.zip",
+      "sha256": "f33012a74ac36c752f95bf7d2653e29bdd8de3aedc3ffee074c8c8ff0af7a4df"
+    },
+    {
+      "id": "com.shixiansi.plugin-chat",
+      "name": "对话插件",
+      "version": "1.4.1",
+      "author": "shixiansi",
+      "description": "在面板里与桌宠旁和大模型对话的官方插件；自己的 AI 配置与密钥由自己保存。",
+      "permissions": ["llm.chat", "pet.bubble", "pet.surface", "plugin.config", "storage"],
+      "download": "dist/com.shixiansi.plugin-chat-1.4.1.zip",
+      "sha256": "c81c8306af47e40d764c3946a6b64cee435ffafbe3d1b73b307b28a27042db93"
+    },
+    {
+      "id": "com.shixiansi.plugin-qq",
+      "name": "QQ 群聊插件",
+      "version": "1.12.0",
+      "author": "shixiansi",
+      "description": "把大模型接进 QQ 群：用 Milky 协议端（Yogurt 等）的长连接接收群消息，被 @ 时借用对话插件的模型配置回答。它会记群里的要点和群友、有高低的社交能量、会自己挑表情包并收藏群里的新图。",
+      "permissions": ["net.ws", "net.fetch", "llm.chat", "llm.borrow", "storage", "plugin.config", "process", "plugin.share"],
+      "netHosts": ["127.0.0.1:3000", "gchat.qpic.cn", "multimedia.nt.qq.com.cn"],
+      "download": "dist/com.shixiansi.plugin-qq-1.12.0.zip",
+      "sha256": "5b386aa9e5cd16505f4fab58b8c1866ad2aafaa72bc87e075f36b29bb311f8ee"
+    },
+    {
+      "id": "com.shixiansi.plugin-voice",
+      "name": "语音插件",
+      "version": "1.0.1",
+      "author": "shixiansi",
+      "description": "让桌宠在番茄钟结束与待办提醒时说话的官方插件；台词、音色与开关都由它自己管。",
+      "permissions": ["audio", "events", "storage", "plugin.config", "net.fetch"],
+      "netHosts": ["127.0.0.1:9880"],
+      "download": "dist/com.shixiansi.plugin-voice-1.0.1.zip",
+      "sha256": "2d32d44ba0592cb7572887ce595d47693fdc13efbfed1424624071ebf3b1d2a6"
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 200" width="150" height="200" role="img" aria-label="桌宠">
+  <defs>
+    <linearGradient id="fur" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd79a"/>
+      <stop offset="1" stop-color="#f7b267"/>
+    </linearGradient>
+  </defs>
+
+  <!-- tail -->
+  <path d="M118 168 q26 -12 17 -40" fill="none" stroke="#f7b267" stroke-width="9"
+        stroke-linecap="round" opacity="0.95"/>
+
+  <!-- ears -->
+  <path d="M37 58 L27 20 L65 44 Z" fill="#f7b267"/>
+  <path d="M113 58 L123 20 L85 44 Z" fill="#f7b267"/>
+  <path d="M40 53 L34 31 L57 45 Z" fill="#ffc9c9"/>
+  <path d="M110 53 L116 31 L93 45 Z" fill="#ffc9c9"/>
+
+  <!-- body -->
+  <ellipse cx="75" cy="150" rx="41" ry="43" fill="url(#fur)"/>
+
+  <!-- head -->
+  <ellipse cx="75" cy="80" rx="48" ry="43" fill="url(#fur)"/>
+
+  <!-- eyes -->
+  <ellipse cx="58" cy="79" rx="7" ry="9.5" fill="#3a2d3f"/>
+  <ellipse cx="92" cy="79" rx="7" ry="9.5" fill="#3a2d3f"/>
+  <circle cx="60.5" cy="75" r="2.6" fill="#ffffff"/>
+  <circle cx="94.5" cy="75" r="2.6" fill="#ffffff"/>
+
+  <!-- blush -->
+  <ellipse cx="45" cy="95" rx="8.5" ry="5" fill="#ff9aa2" opacity="0.7"/>
+  <ellipse cx="105" cy="95" rx="8.5" ry="5" fill="#ff9aa2" opacity="0.7"/>
+
+  <!-- nose and mouth -->
+  <path d="M75 90 L70.5 94.5 L79.5 94.5 Z" fill="#e8846b"/>
+  <path d="M75 95 q-6.5 7 -13 1" fill="none" stroke="#e8846b" stroke-width="2.2"
+        stroke-linecap="round"/>
+  <path d="M75 95 q6.5 7 13 1" fill="none" stroke="#e8846b" stroke-width="2.2"
+        stroke-linecap="round"/>
+
+  <!-- whiskers -->
+  <path d="M28 84 h-11 M29 92 l-11 4" stroke="#e8b98a" stroke-width="1.6"
+        stroke-linecap="round" opacity="0.8"/>
+  <path d="M122 84 h11 M121 92 l11 4" stroke="#e8b98a" stroke-width="1.6"
+        stroke-linecap="round" opacity="0.8"/>
+
+  <!-- paws -->
+  <ellipse cx="58" cy="187" rx="13" ry="8.5" fill="#f7b267"/>
+  <ellipse cx="92" cy="187" rx="13" ry="8.5" fill="#f7b267"/>
+  <ellipse cx="58" cy="187" rx="6" ry="4" fill="#ffd7b0"/>
+  <ellipse cx="92" cy="187" rx="6" ry="4" fill="#ffd7b0"/>
+</svg>

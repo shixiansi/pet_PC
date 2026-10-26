@@ -1,0 +1,16 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "PetPCPluginMarket",
+  "outputfilename": "PetPCPluginMarket",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "info": {
+    "companyName": "PetPC",
+    "productName": "PetPC 插件市场",
+    "productVersion": "1.0.0",
+    "copyright": "MIT Licensed",
+    "comments": "管理 PetPC 桌宠的插件：浏览市场、安装、授权、配置"
+  }
+}

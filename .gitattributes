@@ -1,0 +1,40 @@
+# Line-ending policy for the generated files this repo commits on purpose.
+#
+# The plugin sample package is a ZIP produced by the MARKET repository's
+# packaging script and copied here as the built-in offline source. Git's
+# core.autocrlf rewrites text files to CRLF on checkout, and it does not know
+# that a .zip is binary: with autocrlf on, the archived bytes were rewritten on
+# the way into the object store, so the committed package no longer matched the
+# sha256 its own catalogue publishes and the built-in source failed its own
+# integrity check on a fresh clone.
+#
+# Marking archives binary (plus `-text` for the plugin sources that are copied
+# into them) keeps the bytes that the digest was computed over.
+*.zip binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.dll binary
+*.exe binary
+
+# The embedded voice clips are already-compressed audio: same reasoning.
+*.wav binary
+*.mp3 binary
+
+# Plugin front-end sources and the packaged manifest. `-text` keeps them exactly
+# as authored, so a re-packaged archive is byte-identical to the one committed
+# here and the published hash stays valid.
+*.html text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.json text eol=lf
+*.ts text eol=lf
+*.go text eol=lf
+*.md text eol=lf
+
+# Windows scripts are consumed by PowerShell, which accepts LF, but keeping them
+# LF avoids spurious diffs when the toolchain is the Linux side.
+*.ps1 text eol=lf
+*.cjs text eol=lf

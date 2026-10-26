@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PetPC</title>
+  <script type="module" src="/src/main.js"></script>
+</head>
+<body>
+  <!-- Everything is positioned from the layout the Go side computes. -->
+  <div id="stage">
+    <div id="pet" title="拖动移动 · 单击打开待办">
+      <img id="pet-image" alt="桌宠" draggable="false" />
+      <!-- Two badges, stacked: the pomodoro countdown on top of the open-todo
+           count. Both are inside the pet box so neither can draw outside the
+           window region. -->
+      <span id="timer-badge" class="badge timer hidden"></span>
+      <span id="badge" class="badge hidden"></span>
+    </div>
+
+    <!-- Speech bubble: the todo reminder, the todo picker and the summary
+         prompt all use this one card, because they all occupy the same slot
+         beside the pet. Only one of {bubble, panel} is ever visible. -->
+    <section id="bubble" class="bubble hidden" aria-live="polite">
+      <div id="bubble-arrow" class="bubble-arrow"></div>
+      <h2 id="bubble-title" class="bubble-title"></h2>
+      <p id="bubble-todo" class="bubble-todo hidden"></p>
+      <p id="bubble-plan" class="bubble-plan hidden"></p>
+      <ul id="bubble-list" class="bubble-list hidden"></ul>
+      <p id="bubble-more" class="bubble-more hidden"></p>
+      <textarea id="bubble-input" class="bubble-input hidden" rows="3" placeholder="写点什么…（Enter 保存）" maxlength="2000"></textarea>
+      <div id="bubble-actions" class="bubble-actions">
+        <button id="bubble-secondary" type="button"></button>
+        <button id="bubble-primary" type="button" class="primary"></button>
+      </div>
+    </section>
+
+    <!-- Plugin floating surface: the mount point for a plugin's own window,
+         placed at the rectangles Go computed for it.
+
+         It is the THIRD occupant of the slot beside the pet (with the panel and
+         the speech bubble), and only one of the three is ever visible. What it is
+         NOT is a second window: Wails v2 has no multi-window API and the app finds
+         its window by class name, so a plugin's interface has to live inside this
+         one. The rectangles come from the layout - this element never derives a
+         size of its own.
+
+         The markup inside is built by src/plugin-host.js. -->
+    <div id="plugin-surface" class="hidden"></div>
+
+    <!-- The headless plugin frame: one plugin that declared `background` and was
+         granted `events` runs here, permanently mounted and hidden.
+
+         It exists because a plugin's events are delivered only to a frame the host
+         has mounted, and some plugins must act while no interface is on screen - a
+         voice plugin has to hear the pomodoro end whether or not the panel is open.
+         Hidden rather than merely unpainted, so it can never be clicked or take
+         layout space. See plugin-host.js's openBackground. -->
+    <div id="plugin-background" class="hidden"></div>
+
+    <section id="panel" class="hidden" aria-label="待办与日程">
+      <header class="panel-head">
+        <div class="tabs">
+          <button class="tab active" data-tab="todos">待办</button>
+          <!-- The 对话 tab exists only while a plugin fills it. It is hidden
+               (not merely disabled) when none does, because a tab that opens onto
+               an explanation of why it is empty is worse than no tab: the pet has
+               no conversation of its own any more, so there is nothing for the
+               user to do there. main.js owns the visibility; the markup always
+               contains the button so the four data-tab values stay stable. -->
+          <button class="tab" id="tab-chat-btn" data-tab="chat">对话</button>
+          <button class="tab" data-tab="records">记录</button>
+          <button class="tab" data-tab="settings">设置</button>
+        </div>
+        <button id="close-panel" class="icon-btn" title="收起面板">×</button>
+      </header>
+
+      <!-- Conversation view: a MOUNT POINT, not controls.
+           Since the chat plugin renders the conversation, this tab body holds
+           nothing but #chat-slot. The host resolves which installed plugin owns
+           the slot and mounts its sandboxed iframe here; with none installed the
+           slot shows an explanation instead of an empty frame (see main.js).
+           One id is all that is left on purpose: the controls that used to live
+           here are the plugin's own business now, and a second copy of them in
+           the host is the thing this change removed. -->
+      <div id="tab-chat" class="tab-body hidden">
+        <div id="chat-slot" class="chat-slot"></div>
+      </div>
+
+      <!-- Todo view -->
+      <div id="tab-todos" class="tab-body">
+        <!-- Pomodoro strip: the timer's controls and countdown. -->
+        <div id="pomo-strip" class="pomo-strip">
+          <div class="pomo-line">
+            <span id="pomo-phase" class="pomo-phase">番茄钟未开启</span>
+            <span id="pomo-countdown" class="pomo-countdown"></span>
+          </div>
+          <p id="pomo-todo" class="pomo-todo hidden"></p>
+          <div class="pomo-actions">
+            <button id="pomo-toggle" type="button" class="link-btn">开启番茄钟</button>
+            <button id="pomo-start" type="button" class="primary hidden">开始专注</button>
+            <button id="pomo-pause" type="button" class="hidden">暂停</button>
+            <button id="pomo-resume" type="button" class="hidden">继续</button>
+            <button id="pomo-stop" type="button" class="hidden">停止</button>
+            <button id="pomo-skip" type="button" class="hidden">跳过</button>
+          </div>
+        </div>
+
+        <form id="todo-form" class="todo-form">
+          <input id="todo-title" type="text" placeholder="添加一件事…" autocomplete="off" maxlength="200" />
+          <div class="form-row">
+            <input id="todo-due" type="datetime-local" title="截止时间（可选）" />
+            <button type="submit" class="primary">添加</button>
+          </div>
+          <textarea id="todo-notes" rows="2" placeholder="备注（可选）" maxlength="2000"></textarea>
+        </form>
+
+        <div class="list-head">
+          <span id="summary" class="summary"></span>
+          <button id="clear-done" class="link-btn">清除已完成</button>
+        </div>
+
+        <ul id="todo-list" class="todo-list"></ul>
+        <p id="empty-hint" class="empty">还没有待办，上面添加一条吧。</p>
+      </div>
+
+      <!-- Records view: the permanent archive of finished focus sessions. -->
+      <div id="tab-records" class="tab-body hidden">
+        <p id="records-empty" class="empty">还没有记录。完成一个番茄后会自动记录在这里。</p>
+        <ul id="records-list" class="record-list"></ul>
+        <p id="records-total" class="record-total"></p>
+      </div>
+
+      <!-- Settings view.
+           Five groups of controls in one scrolling column. Two structural rules,
+           both inherited from the window rather than chosen for looks:
+
+            1. This tab scrolls INSIDE #tab-settings, never by growing. The panel's
+               rectangle comes from the layout and the native window region is cut
+               to it, so a settings page that pushed the panel taller would put the
+               drawn box and the region out of step (same rule as the chat log).
+            2. Every row is a .field: a fixed-width label column plus its value.
+               Switch rows put their checkbox on the same edge as the labels, so
+               the whole page has two shared columns and the eye can run down
+               either one. Before, each row found its own left edge.
+
+           Nothing in here may carry a shadow, a filter or a transform: each paints
+           outside the border box, and immediately outside is the user's desktop
+           (README 9 / 11). -->
+      <div id="tab-settings" class="tab-body hidden">
+        <!-- Appearance and startup: the things that decide what the pet looks
+             like and whether it comes back after a reboot. -->
+        <section class="sgroup">
+          <h3 class="sgroup-head">外观与启动</h3>
+
+          <div class="field">
+            <span class="field-label">桌宠图片</span>
+            <div class="field-input stack">
+              <p class="setting-hint" id="image-path">当前使用默认图片</p>
+              <div class="btn-row">
+                <button id="choose-image" class="primary" type="button">更换图片</button>
+                <button id="reset-image" type="button">恢复默认</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="scale">大小</label>
+            <div class="field-input">
+              <input id="scale" type="range" min="50" max="250" step="5" value="100" />
+              <span id="scale-value" class="scale-value">100%</span>
+            </div>
+          </div>
+
+          <label class="row">
+            <input id="snap" type="checkbox" />
+            <span>拖动后自动贴边</span>
+          </label>
+
+          <label class="row">
+            <input id="autostart" type="checkbox" />
+            <span>开机自动启动</span>
+          </label>
+
+          <!-- Global shortcuts: the way back to a hidden pet.
+               Its own sub-block rather than another switch row, because the keys
+               themselves have to be visible: the user cannot guess a global
+               shortcut, and it is the only way back once the pet is hidden. -->
+          <h4 class="ssub">隐藏与显示</h4>
+          <label class="row">
+            <input id="hotkey-enabled" type="checkbox" />
+            <span>用全局快捷键隐藏 / 显示桌宠</span>
+          </label>
+          <div class="field">
+            <span class="field-label">快捷键</span>
+            <div class="field-input stack">
+              <p class="setting-hint">
+                <strong id="hotkey-show">Ctrl+Alt+S</strong> 显示 ·
+                <strong id="hotkey-hide">Ctrl+Alt+H</strong> 隐藏
+              </p>
+            </div>
+          </div>
+          <p class="setting-hint" id="hotkey-status"></p>
+          <p class="setting-note">
+            快捷键<strong>全局生效</strong>：在别的程序里也能用，所以开启后会占用这两个组合键。
+            隐藏时桌宠会把面板和气泡一起收起来，番茄钟、提醒和对话照常在后台运行（
+            隐藏期间不会弹提醒）。托盘菜单里也有「显示桌宠 / 隐藏桌宠」，快捷键用不了时用那个。
+            <strong>唯一的例外</strong>是番茄钟的提问：隐藏期间专注或休息到点，桌宠会自己
+            显示出来让你写总结、写计划（不抢键盘焦点），答完再自动隐藏回去。
+          </p>
+        </section>
+
+        <!-- Pomodoro: the timer, its phases and the reset escape hatch. -->
+        <section class="sgroup">
+          <h3 class="sgroup-head">番茄钟</h3>
+          <p class="sgroup-desc">专注计时，默认关闭。</p>
+
+          <label class="row">
+            <input id="pomo-on-startup" type="checkbox" />
+            <span>启动时自动开启番茄钟</span>
+          </label>
+          <label class="row">
+            <input id="pomo-auto-next" type="checkbox" />
+            <span>自动开始下一阶段</span>
+          </label>
+          <label class="row">
+            <input id="pomo-sound" type="checkbox" />
+            <span>阶段结束提示音</span>
+          </label>
+
+          <p class="setting-note">
+            <strong>专注结束后一定先问你「这个番茄做了什么」</strong>，休息等你填完（或点「跳过」）才开始计时
+            —— 没记录就不占用休息时间。休息结束后会自动接上下一个专注，不受影响。
+          </p>
+
+          <h4 class="ssub">阶段时长</h4>
+          <div class="field">
+            <label class="field-label" for="pomo-focus">专注</label>
+            <div class="field-input">
+              <input id="pomo-focus" type="number" min="1" max="120" step="1" />
+              <span class="unit">分钟</span>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="pomo-short">短休息</label>
+            <div class="field-input">
+              <input id="pomo-short" type="number" min="1" max="60" step="1" />
+              <span class="unit">分钟</span>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="pomo-long">长休息</label>
+            <div class="field-input">
+              <input id="pomo-long" type="number" min="1" max="60" step="1" />
+              <span class="unit">分钟</span>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="pomo-every">长休息间隔</label>
+            <div class="field-input">
+              <span class="unit">每</span>
+              <input id="pomo-every" type="number" min="2" max="10" step="1" />
+              <span class="unit">个专注后</span>
+            </div>
+          </div>
+
+          <!-- Reset is not the same as Stop, and the difference is the thing
+               users get wrong, so the button carries its own explanation rather
+               than sitting loose at the bottom of the section. -->
+          <h4 class="ssub">当前番茄</h4>
+          <div class="field">
+            <span class="field-label">放弃</span>
+            <div class="field-input stack">
+              <button id="pomo-reset" type="button" class="danger">放弃当前番茄钟</button>
+              <p class="setting-hint">「停止」可以随时继续；这里才是彻底放弃。</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Reminder: when the pet is allowed to interrupt. -->
+        <section class="sgroup">
+          <h3 class="sgroup-head">对话提醒</h3>
+          <p class="sgroup-desc">隔一段时间用气泡提醒待办。</p>
+
+          <label class="row">
+            <input id="rem-enabled" type="checkbox" />
+            <span>开启对话提醒</span>
+          </label>
+          <label class="row">
+            <input id="rem-on-startup" type="checkbox" />
+            <span>启动时自动开启提醒</span>
+          </label>
+          <label class="row">
+            <input id="rem-during-break" type="checkbox" />
+            <span>休息时允许提醒</span>
+          </label>
+          <label class="row">
+            <input id="rem-empty" type="checkbox" />
+            <span>没有待办时也提醒</span>
+          </label>
+
+          <h4 class="ssub">节奏</h4>
+          <div class="field">
+            <label class="field-label" for="rem-interval">提醒间隔</label>
+            <div class="field-input">
+              <input id="rem-interval" type="number" min="5" max="240" step="5" />
+              <span class="unit">分钟，另加随机</span>
+              <input id="rem-jitter" type="number" min="0" max="60" step="1" />
+              <span class="unit">分钟</span>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="rem-from">活跃时段</label>
+            <div class="field-input">
+              <input id="rem-from" type="time" />
+              <span class="unit">到</span>
+              <input id="rem-to" type="time" />
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="rem-items">每次显示</label>
+            <div class="field-input">
+              <input id="rem-items" type="number" min="1" max="5" step="1" />
+              <span class="unit">条，停留</span>
+              <input id="rem-hide" type="number" min="5" max="60" step="1" />
+              <span class="unit">秒</span>
+            </div>
+          </div>
+
+          <div class="field">
+            <span class="field-label">手动</span>
+            <div class="field-input">
+              <button id="rem-now" type="button">立刻提醒一次</button>
+            </div>
+          </div>
+          <p class="setting-hint" id="rem-status"></p>
+        </section>
+
+        <!-- AI configuration used to live here: two groups (大模型对话 and
+             主动说话) of endpoint, key, generation parameters and proactive
+             switches. They now belong to the chat PLUGIN and are edited in
+             PetPCPluginMarket.exe, because the plugin is what makes the
+             requests - a host that also held the credentials would be a second,
+             silently diverging copy of the same settings. The settings page
+             keeps one button that opens that program; nothing about the
+             conversation is configured here any more. -->
+
+        <!-- Speech has NO section here, and that is the point rather than an
+             omission.
+
+             The pet used to own it: three switches, an audition button and a
+             button to launch a standalone voice studio. All of that is the voice
+             plugin's business now (com.shixiansi.plugin-voice) - the lines, the
+             character library, the switches and the rendered clips - and its
+             workshop is hosted by the PLUGIN MARKET program, which is a 980x700
+             resizable window where a work surface listing five lines with several
+             takes each actually fits.
+
+             So there is nothing to render here and nothing to keep in step: the
+             pet emits timer.phaseEnded and reminder.fired, and serves the audio.*
+             capability the plugin stores and plays through. What to say, in which
+             voice, and whether to speak at all are the plugin's decisions. -->
+
+        <!-- Where the data lives, and the way out. -->
+        <section class="sgroup">
+          <h3 class="sgroup-head">数据与退出</h3>
+
+          <!-- The way to the plugin market.
+               It is the only product entry point to PetPCPluginMarket.exe, and it
+               sits in this group rather than in one of its own because it is
+               neither appearance nor a feature setting: everything installed,
+               granted, enabled and configured for plugins is managed over there,
+               and this button is where the host hands the user over.
+               The program is NOT bundled: it is a sibling executable, so this can
+               fail with a clear message and changes nothing here. -->
+          <div class="field">
+            <span class="field-label">插件</span>
+            <div class="field-input stack">
+              <div class="btn-row">
+                <button id="open-plugin-market" type="button">打开插件市场</button>
+              </div>
+              <p class="setting-hint">
+                安装、启用、授权插件，以及填写对话插件的 AI 配置，都在独立的
+                <strong>插件市场</strong>窗口里完成。
+              </p>
+            </div>
+          </div>
+
+          <!-- The path is long and must wrap inside its column rather than
+               stretch the row: .field-input is the flex child that may shrink
+               (min-width: 0), which a bare <p> in a flex row may not. -->
+          <div class="field">
+            <span class="field-label">数据目录</span>
+            <div class="field-input stack">
+              <p class="setting-hint" id="data-dir"></p>
+            </div>
+          </div>
+
+          <div class="field">
+            <span class="field-label">退出</span>
+            <div class="field-input">
+              <button id="quit" class="danger" type="button">退出桌宠</button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <p id="toast" class="toast hidden"></p>
+
+      <!-- Confirmation dialog. It is drawn INSIDE the panel rather than with
+           window.confirm(), because a native dialog is rendered by WebView2 as a
+           separate browser-chrome window: it ignores the app's styling, covers
+           the panel, and sits outside the region the window is cropped to, so it
+           looks nothing like the rest of the pet.
+
+           The outer element is a dimming scrim over the whole panel and the
+           inner one is the card, so the dialog reads as clearly separate from
+           the panel content behind it. -->
+      <div id="confirm" class="confirm hidden" role="dialog" aria-modal="true">
+        <div class="confirm-card">
+          <p id="confirm-text" class="confirm-text"></p>
+          <div class="confirm-actions">
+            <button id="confirm-cancel" type="button">取消</button>
+            <button id="confirm-ok" type="button" class="danger">确定</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  
+</body>
+</html>
