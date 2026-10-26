@@ -246,7 +246,7 @@ func (a *App) initPomodoro() {
 	if out.ClockJump {
 		a.DebugLog("pomodoro: clock jumped backwards, reset to idle")
 	}
-	if out.finished() {
+	if out.Finished() {
 		a.completePhase(out, true)
 		return
 	}
@@ -487,7 +487,7 @@ func (a *App) SetPomodoroEnabled(enabled bool) (State, error) {
 		// Switching back on picks the session up where it was left, and catches
 		// up on any phase that ran out while the feature was off.
 		out := reconcile(st, a.store.Config(), time.Now())
-		if out.finished() {
+		if out.Finished() {
 			a.completePhaseLocked(out, true)
 			a.pomoMu.Unlock()
 			a.emitPomodoro()

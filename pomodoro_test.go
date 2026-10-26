@@ -365,7 +365,7 @@ func TestCatchUpDoesNotCascade(t *testing.T) {
 	// Feeding the result straight back in must complete nothing: a parked phase has
 	// nothing to expire, so a long absence cannot fabricate a second record.
 	again := reconcile(out.State, cfg, reopened)
-	if again.finished() {
+	if again.Finished() {
 		t.Errorf("the parked phase expired by itself: %+v", again)
 	}
 	if again.Record != nil {
@@ -381,7 +381,7 @@ func TestReconcileLeavesRunningPhaseAlone(t *testing.T) {
 	st := startFocus(enabledIdle(), cfg, "t1", "写周报", start).State
 
 	out := reconcile(st, cfg, start.Add(10*time.Minute))
-	if out.finished() || out.ClockJump {
+	if out.Finished() || out.ClockJump {
 		t.Errorf("a live phase should be left alone: %+v", out)
 	}
 	if got := Remaining(out.State, start.Add(10*time.Minute)); got != 15*time.Minute {
@@ -423,7 +423,7 @@ func TestReconcileIgnoresDisabledTimer(t *testing.T) {
 		Enabled: false, Phase: store.PhaseFocus, RunState: store.RunRunning, EndsAt: &end,
 	}
 	out := reconcile(st, cfg, now)
-	if out.finished() || out.Record != nil {
+	if out.Finished() || out.Record != nil {
 		t.Errorf("a disabled timer must not advance: %+v", out)
 	}
 }
@@ -458,10 +458,10 @@ func TestNoOpTransitionsAreHarmless(t *testing.T) {
 	if out := stop(idle, now); out.State.Phase != store.PhaseIdle {
 		t.Errorf("stopping idle changed the state: %+v", out.State)
 	}
-	if out := finishPhase(idle, cfg, now, now, false); out.finished() || out.Record != nil {
+	if out := finishPhase(idle, cfg, now, now, false); out.Finished() || out.Record != nil {
 		t.Errorf("finishing idle produced something: %+v", out)
 	}
-	if out := skipPhase(idle, cfg, now); out.finished() {
+	if out := skipPhase(idle, cfg, now); out.Finished() {
 		t.Errorf("skipping idle produced something: %+v", out)
 	}
 
