@@ -1737,7 +1737,17 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 		requestID = newID()
 	}
 
-	msgs := buildPluginChatMessages(a, cfg, in.System, in.History, text)
+	// The snapshot is included only when BOTH gates agree: the user has not turned the
+	// schedule context off globally, AND this plugin holds todos.read.
+	//
+	// The second gate is what makes the tools consistent with the prompt. Without it a
+	// plugin could hold todo_add and still be told "用户关闭了日程上下文" - the model then
+	// has a tool in one hand and a sentence saying it cannot do anything in the other,
+	// and it answers by refusing. That is not hypothetical: reading the flag off the
+	// plugin's zero-valued config made it false every time.
+	includeTodos := a.store.Config().LLMContextTodos &&
+		plugins.HasGranted(row.Granted, plugins.PermTodosRead)
+	msgs := buildPluginChatMessages(a, cfg, in.System, in.History, text, includeTodos)
 	if len(images) > 0 {
 		// The pictures belong to the question, i.e. the LAST message. Attaching them
 		// to an earlier turn would ask the model to look at them "again" and some
@@ -1994,7 +2004,7 @@ func sanitizePluginHistory(turns []pluginTurn) []llm.Message {
 //     pomodoro state to everyone in the room. A plugin that asks for its own
 //     system prompt is saying "I know what context belongs here"; the host does
 //     not second-guess that, it just refuses to add the user's day to it.
-func buildPluginChatMessages(a *App, cfg store.Config, system string, history []pluginTurn, text string) []llm.Message {
+func buildPluginChatMessages(a *App, cfg store.Config, system string, history []pluginTurn, text string, includeTodos bool) []llm.Message {
 	turns := sanitizePluginHistory(history)
 	system = clampPluginText(strings.TrimSpace(system), maxPluginChatSystem)
 	if system != "" {
@@ -2004,7 +2014,7 @@ func buildPluginChatMessages(a *App, cfg store.Config, system string, history []
 		msgs = append(msgs, llm.Message{Role: "user", Content: text})
 		return msgs
 	}
-	return llm.BuildMessages(a.promptContext(cfg), append(turns, llm.Message{Role: "user", Content: text}))
+	return llm.BuildMessages(a.promptContext(cfg, includeTodos), append(turns, llm.Message{Role: "user", Content: text}))
 }
 
 // pluginChatCredential is the model settings ONE llm.chat call runs with, plus

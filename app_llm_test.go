@@ -199,7 +199,8 @@ func TestPromptContextIncludesTodosAndPomodoro(t *testing.T) {
 		t.Fatalf("SaveTodos: %v", err)
 	}
 
-	ctx := a.promptContext(a.store.Config())
+	promptCfg := a.store.Config()
+	ctx := a.promptContext(promptCfg, promptCfg.LLMContextTodos)
 
 	if ctx.OpenCount != 1 || ctx.OverdueCount != 1 {
 		t.Errorf("counts = open %d overdue %d, want 1/1", ctx.OpenCount, ctx.OverdueCount)
@@ -231,7 +232,8 @@ func TestPromptContextIncludesPomodoroState(t *testing.T) {
 		t.Fatalf("SavePomodoro: %v", err)
 	}
 
-	ctx := a.promptContext(a.store.Config())
+	promptCfg := a.store.Config()
+	ctx := a.promptContext(promptCfg, promptCfg.LLMContextTodos)
 	if !ctx.Pomodoro.Enabled {
 		t.Fatal("the pomodoro did not reach the prompt context")
 	}
@@ -261,7 +263,8 @@ func TestPromptContextReplaysRecentSummaries(t *testing.T) {
 		t.Fatalf("AddPomodoroRecord: %v", err)
 	}
 
-	ctx := a.promptContext(a.store.Config())
+	promptCfg := a.store.Config()
+	ctx := a.promptContext(promptCfg, promptCfg.LLMContextTodos)
 	if len(ctx.RecentSessions) == 0 {
 		t.Fatal("no sessions reached the context")
 	}
@@ -283,7 +286,8 @@ func TestPromptContextRespectsContextSwitch(t *testing.T) {
 		t.Fatalf("UpdateConfig: %v", err)
 	}
 
-	ctx := a.promptContext(a.store.Config())
+	promptCfg := a.store.Config()
+	ctx := a.promptContext(promptCfg, promptCfg.LLMContextTodos)
 	if ctx.IncludeTodos {
 		t.Fatal("the switch was not honoured")
 	}

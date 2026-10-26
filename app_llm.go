@@ -118,14 +118,25 @@ func describeChatError(err error) (message, kind string) {
 // --- prompt context --------------------------------------------------------
 
 // promptContext snapshots the pet's world for the system message.
-func (a *App) promptContext(cfg store.Config) llm.PromptContext {
+//
+// includeTodos is a PARAMETER rather than cfg.LLMContextTodos because the two callers
+// answer it differently, and reading it off `cfg` gave the wrong answer for one of
+// them. A plugin's config starts from zero, so cfg.LLMContextTodos was always false -
+// which made EVERY plugin conversation tell the model "用户关闭了日程上下文". The model
+// therefore never saw a todo in a plugin chat, and once tools existed it held todo_add
+// in one hand and a sentence saying it could not add anything in the other. That is the
+// reply the user got.
+//
+// So the caller decides: the pet's own settings for a pet-side request, and
+// "the user's global switch AND this plugin may read todos" for a plugin's.
+func (a *App) promptContext(cfg store.Config, includeTodos bool) llm.PromptContext {
 	now := time.Now()
 	ctx := llm.PromptContext{
 		Persona:      cfg.LLMSystemPrompt,
 		Now:          now,
-		IncludeTodos: cfg.LLMContextTodos,
+		IncludeTodos: includeTodos,
 	}
-	if !cfg.LLMContextTodos {
+	if !includeTodos {
 		return ctx
 	}
 

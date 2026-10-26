@@ -49,6 +49,42 @@ func textOf(msgs []map[string]any) string {
 	return b.String()
 }
 
+// TestPluginChatSeesTheDayOnlyWithTheReadGrant covers the two gates on the snapshot.
+//
+// The bug this pins was live and invisible: a plugin's config starts from zero, so
+// reading "include the user's day" off it answered false for EVERY plugin request. Every
+// plugin conversation therefore told the model 用户关闭了日程上下文 - it never saw a
+// todo. Nobody noticed while the answer was just text. Once tools existed the model held
+// todo_add in one hand and a sentence saying it could not add anything in the other, and
+// it refused - which looks exactly like the permission system being broken.
+func TestPluginChatSeesTheDayOnlyWithTheReadGrant(t *testing.T) {
+	const turnedOff = "关闭了日程上下文"
+
+	// With todos.read: the snapshot is real, so the refusal line must be gone.
+	stub := newChatStub(t)
+	a := pluginApp(t)
+	withRead := installToolPlugin(t, a, "llm.chat", "plugin.config", "storage", "todos.read")
+	setPluginConfig(t, a, withRead, map[string]string{"llmBaseUrl": stub.URL(), "llmModel": "m"})
+	if _, err := a.PluginRequest(withRead, "llm.chat", `{"text":"我今天要做什么"}`); err != nil {
+		t.Fatalf("llm.chat: %v", err)
+	}
+	if got := textOf(chatMessages(t, stub)); strings.Contains(got, turnedOff) {
+		t.Errorf("a plugin holding todos.read was still told the day context is off:\n%s", got)
+	}
+
+	// Without it: the refusal is the honest answer, and it must be there.
+	bare := newChatStub(t)
+	a2 := pluginApp(t)
+	noRead := installToolPlugin(t, a2, "llm.chat", "plugin.config", "storage")
+	setPluginConfig(t, a2, noRead, map[string]string{"llmBaseUrl": bare.URL(), "llmModel": "m"})
+	if _, err := a2.PluginRequest(noRead, "llm.chat", `{"text":"我今天要做什么"}`); err != nil {
+		t.Fatalf("llm.chat: %v", err)
+	}
+	if got := textOf(chatMessages(t, bare)); !strings.Contains(got, turnedOff) {
+		t.Errorf("a plugin WITHOUT todos.read was shown the user's day:\n%s", got)
+	}
+}
+
 // TestLLMChatReplaysHistory pins multi-turn context: the replayed turns arrive in
 // order, before the new message, and the new message is last.
 //
