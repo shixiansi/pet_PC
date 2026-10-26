@@ -9,23 +9,32 @@
 #                             module, so the pet's `go vet ./...` never sees it.
 #                             Without this gate the market's Go would be the only
 #                             code in the repo with no test run at all.
-#   3. frontend builds      - BOTH bundles must compile; catches a JS syntax error
-#                             or an import of a binding the program does not
-#                             export. Two builds, because the market's frontend is
-#                             a different app against a different binding set.
-#   4. static wiring checks - every element id, every binding call and every
+#   3. frontend builds      - ALL the bundles must compile; catches a JS syntax error
+#                             or an import of a binding the program does not export.
+#                             Three builds, because the pet's frontend, the market's old
+#                             frontend and the control center are three different apps
+#                             against two different binding sets. The last step copies the
+#                             control center's output over `frontend/dist`, which is the
+#                             tree the market's Go binary embeds - doing it anywhere else
+#                             would let the gate below ship the PREVIOUS interface.
+#   4. control center checks - svelte-check over the control center (so a payload field the
+#                             host does not send is a compile error rather than a blank
+#                             row) and a jsdom render of all six pages against the dev
+#                             stub (so "it rendered" is never confused with "it rendered
+#                             the host's numbers").
+#   5. static wiring checks - every element id, every binding call and every
 #                             subscribed event has a counterpart, and the new CSS
 #                             breaks none of the window-region rules.
-#   5. plugin front-end tests - the PLUGINS' OWN app.js, in jsdom, against a fake
+#   6. plugin front-end tests - the PLUGINS' OWN app.js, in jsdom, against a fake
 #                             host. This is the only gate that executes plugin
 #                             code: the static checks only read it as text, and the
 #                             harness runs the pet's page against a fake backend.
-#   6. behaviour harness    - the real bundle in a real browser engine against a
+#   7. behaviour harness    - the real bundle in a real browser engine against a
 #                             fake backend: click/double-click, the panel slot, the
 #                             plugin surface's geometry and protocol, settings
 #                             round trips.
-#   7. wails build          - the shipping artifact must link.
-#   8. region pixel checks  - the SHIPPING binary against the real desktop: the
+#   8. wails build          - the shipping artifact must link.
+#   9. region pixel checks  - the SHIPPING binary against the real desktop: the
 #                             panel/bubble/overlay crop, the pet not moving, and
 #                             the thought puffs actually being ellipses. This is
 #                             the only gate that can see the native window region,
@@ -93,6 +102,44 @@ try {
         } finally { Pop-Location }
         Push-Location (Join-Path $root 'tools/plugin-market/frontend')
         try { npm run build } finally { Pop-Location }
+        if ($LASTEXITCODE -ne 0) { return }
+
+        # The control center IS the market's interface (see tools/build-all.ps1), and its
+        # build has to land in `frontend/dist` BEFORE the wails build gate below: that Go
+        # binary embeds `frontend/dist`, so a copy made afterwards would ship the PREVIOUS
+        # interface and look exactly like "the change did nothing". Those four steps are
+        # duplicated from build-all.ps1 on purpose - a gate has to be runnable on its own,
+        # and a gate that depends on someone having run a build script first is not a gate.
+        Push-Location (Join-Path $root 'tools/plugin-market/cc')
+        try {
+            npm run build
+            if ($LASTEXITCODE -ne 0) { return }
+        } finally { Pop-Location }
+        $ccDist = Join-Path $root 'tools/plugin-market/cc/dist'
+        $embedDist = Join-Path $root 'tools/plugin-market/frontend/dist'
+        if (-not (Test-Path (Join-Path $ccDist 'index.html'))) {
+            Write-Host "        the control center's build produced no index.html: $ccDist" -ForegroundColor Red
+            $global:LASTEXITCODE = 1
+            return
+        }
+        if (Test-Path $embedDist) { Remove-Item -Recurse -Force $embedDist }
+        Copy-Item -Recurse -Force $ccDist $embedDist
+        Write-Host "        copied the control center's build into frontend\dist (the tree the embed reads)" -ForegroundColor DarkGray
+    }
+
+    # The control center is a third app, and until this gate existed NOTHING type-checked
+    # it: `wails build` proves it compiles (vite strips types) and build-all.ps1 proves it
+    # packages, so a page reading `cfg.PetScale` when the host sends `petScale` was green
+    # everywhere and wrong on screen. Two halves, because they answer different questions:
+    # svelte-check says "every field exists on the type", and the jsdom render says "the
+    # page printed the host's numbers" - the second one is what the screenshots were for.
+    Gate 'control center checks' {
+        Push-Location (Join-Path $root 'tools/plugin-market/cc')
+        try {
+            npm run check
+            if ($LASTEXITCODE -ne 0) { return }
+            npm run smoke
+        } finally { Pop-Location }
     }
 
     Gate 'static wiring checks' { node (Join-Path $PSScriptRoot 'check-frontend.cjs') }
