@@ -117,6 +117,20 @@ func pluginToolCatalog() map[string]pluginTool {
 					`},"required":["text"]}`,
 				impl: pluginBubbleSay,
 			},
+			"memory_read": {
+				perm:        plugins.PermStorage,
+				description: "读你自己记下的长期记忆（关于这位用户的稳定事实）。对话开始、或需要回忆以前的事时，先读它。",
+				parameters:  `{"type":"object","properties":{},"additionalProperties":false}`,
+				impl:        pluginMemoryRead,
+			},
+			"memory_append": {
+				perm:        plugins.PermStorage,
+				description: "往长期记忆里追加一条关于这位用户的稳定事实（一句话）。只记以后还用得上的事；一次性的对话内容不要记。",
+				parameters: `{"type":"object","properties":{` +
+					`"text":{"type":"string","description":"一条事实，一句话"}` +
+					`},"required":["text"]}`,
+				impl: pluginMemoryAppend,
+			},
 		}
 	})
 	return toolCatalog

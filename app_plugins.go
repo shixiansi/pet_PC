@@ -375,6 +375,15 @@ var pluginMethods = map[string]pluginMethod{
 	"storage.move": {perm: plugins.PermStorage, run: pluginPrivateStore(plugins.StorageMove)},
 	// The cross-plugin tray: writing is always your own name, reading needs the pair in
 	// the manifest (see plugins.PermPluginShare and pluginShareGet).
+	// The long-term memory document: one markdown file the MODEL maintains, inside the
+	// caller's own private directory.
+	//
+	// Gated on `storage` rather than a permission of its own, because "I keep notes in
+	// my own folder" is exactly what that permission already means. A separate switch
+	// would be one the user cannot describe the difference of - they would be choosing
+	// between two rows that both read "save data in your private directory".
+	"memory.read":    {perm: plugins.PermStorage, run: pluginMemoryRead},
+	"memory.append":  {perm: plugins.PermStorage, run: pluginMemoryAppend},
 	"share.set":      {perm: plugins.PermPluginShare, run: pluginShareSet},
 	"share.get":      {perm: plugins.PermPluginShare, run: pluginShareGet},
 	"share.remove":   {perm: plugins.PermPluginShare, run: pluginShareRemove},
@@ -652,6 +661,45 @@ func pluginTimerStop(a *App, _ string, _ []byte) (any, error) {
 		return nil, err
 	}
 	return a.pomodoroView(), nil
+}
+
+// pluginMemoryRead returns the caller's memory document, or "" when it has none.
+//
+// Empty rather than an error: a plugin that holds the permission and has not been
+// taught anything yet is the normal state of a fresh install.
+func pluginMemoryRead(a *App, id string, _ []byte) (any, error) {
+	dir, err := a.pluginManager().PrivateDir(id)
+	if err != nil {
+		return nil, err
+	}
+	text, err := plugins.ReadMemory(dir)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"text": text}, nil
+}
+
+// pluginMemoryAppend adds one entry and returns the WHOLE document.
+//
+// The whole document, not an acknowledgement: it is what the model will see on its
+// next turn, so handing it back saves a round trip that would only be spent reading
+// what this call already had in hand.
+func pluginMemoryAppend(a *App, id string, payload []byte) (any, error) {
+	var in struct {
+		Text string `json:"text"`
+	}
+	if err := decodePayload(payload, &in); err != nil {
+		return nil, err
+	}
+	dir, err := a.pluginManager().PrivateDir(id)
+	if err != nil {
+		return nil, err
+	}
+	text, err := plugins.AppendMemory(dir, in.Text, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"text": text}, nil
 }
 
 // pluginEventsSubscribe records which events the plugin wants.
