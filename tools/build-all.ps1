@@ -57,8 +57,25 @@ function Build-Frontend {
 }
 
 if (-not $SkipFrontend) {
-    Write-Host "=== frontend: plugin market ===" -ForegroundColor Cyan
-    Build-Frontend (Join-Path $root 'tools\plugin-market\frontend')
+    # The market's interface IS the control center (tools/plugin-market/cc). Its build
+    # output is copied over frontend/dist because THAT is the tree the Go binary embeds
+    # (`//go:embed all:frontend/dist`); the Svelte app builds to its own directory, and an
+    # embed of that directory would demand a dist tree that is not committed.
+    #
+    # The ORDER is the whole point: build cc, replace the dist, and only then run
+    # wails build. Copying afterwards would embed the previous interface and look exactly
+    # like "the change did nothing" - which this project has now been bitten by three
+    # times (AGENTS.md §7).
+    Write-Host "=== frontend: control center ===" -ForegroundColor Cyan
+    Build-Frontend (Join-Path $root 'tools\plugin-market\cc')
+    $ccDist = Join-Path $root 'tools\plugin-market\cc\dist'
+    $embedDist = Join-Path $root 'tools\plugin-market\frontend\dist'
+    if (-not (Test-Path (Join-Path $ccDist 'index.html'))) {
+        throw "the control center's build produced no index.html: $ccDist"
+    }
+    if (Test-Path $embedDist) { Remove-Item -Recurse -Force $embedDist }
+    Copy-Item -Recurse -Force $ccDist $embedDist
+    Write-Host "copied the control center's build into frontend\dist (the tree the embed reads)" -ForegroundColor DarkGray
     Write-Host "=== frontend: pet ===" -ForegroundColor Cyan
     Build-Frontend (Join-Path $root 'frontend')
 }
