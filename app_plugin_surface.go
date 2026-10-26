@@ -41,6 +41,13 @@ type PluginSurfaceRect struct {
 	// asked for, not something the host may guess from the numbers. The page draws
 	// border-radius: 50% for these and a rounded rectangle for the rest.
 	Ellipse bool `json:"ellipse"`
+	// TailX is where the PET's centre falls inside this rectangle, in CSS px from the
+	// rectangle's left edge.
+	//
+	// A plugin that draws a tail pointing at the pet must use this instead of 50%: the host
+	// clamps every rectangle into the window, and the pet sits flush against the window's
+	// right edge, so a block wider than the pet is shifted left of the pet's centre.
+	TailX float64 `json:"tailX"`
 }
 
 // PluginSurfaceView is the plugin's floating surface as the frontend sees it.
@@ -189,6 +196,15 @@ func computePluginSurface(petX, petY, petW, petH, totalW, totalH int, s float64,
 		regions = append(regions, desktop.Bounds{X: x, Y: y, Width: w, Height: h})
 		// The view carries the SAME rectangle divided by the scale, so the page
 		// places its iframes on exactly the pixels the region covers.
+		// The pet's centre as a distance from THIS rectangle's left edge, in CSS px.
+		//
+		// The plugin needs it, and cannot derive it: the host CLAMPS rectangles into the
+		// window, and the pet sits flush against the window's right edge, so a block wider
+		// than the pet ends up shifted left of the pet's centre. A tail drawn at 50% of such
+		// a block points ~75px away from the pet's head - which is what it did when this
+		// field did not exist.
+		tailX := (float64(petX) + float64(petW)/2 - float64(x)) / s
+
 		view.Rects = append(view.Rects, PluginSurfaceRect{
 			Index:   i,
 			X:       float64(x) / s,
@@ -197,6 +213,7 @@ func computePluginSurface(petX, petY, petW, petH, totalW, totalH int, s float64,
 			H:       float64(h) / s,
 			R:       float64(radius) / s,
 			Ellipse: r.Ellipse,
+			TailX:   tailX,
 		})
 	}
 

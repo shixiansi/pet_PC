@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-10-25T12:29:08Z",
+  "updatedAt": "2026-10-26T13:19:45Z",
   "plugins": [
     {
       "id": "com.shixiansi.plugin-bilibili",
@@ -16,12 +16,12 @@
     {
       "id": "com.shixiansi.plugin-chat",
       "name": "对话插件",
-      "version": "1.4.1",
+      "version": "1.5.0",
       "author": "shixiansi",
       "description": "在面板里与桌宠旁和大模型对话的官方插件；自己的 AI 配置与密钥由自己保存。",
-      "permissions": ["llm.chat", "pet.bubble", "pet.surface", "plugin.config", "storage"],
-      "download": "dist/com.shixiansi.plugin-chat-1.4.1.zip",
-      "sha256": "c81c8306af47e40d764c3946a6b64cee435ffafbe3d1b73b307b28a27042db93"
+      "permissions": ["llm.chat", "pet.bubble", "pet.surface", "plugin.config", "storage", "todos.read", "todos.write", "timer.control"],
+      "download": "dist/com.shixiansi.plugin-chat-1.5.0.zip",
+      "sha256": "bd69f62ac73ffda57b258ef0945c877c03e89345d1744601d3386f4bfc8f2cdb"
     },
     {
       "id": "com.shixiansi.plugin-qq",

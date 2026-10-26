@@ -137,6 +137,7 @@ export namespace main {
 	    h: number;
 	    r: number;
 	    ellipse: boolean;
+	    tailX: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new PluginSurfaceRect(source);
@@ -151,6 +152,7 @@ export namespace main {
 	        this.h = source["h"];
 	        this.r = source["r"];
 	        this.ellipse = source["ellipse"];
+	        this.tailX = source["tailX"];
 	    }
 	}
 	export class PluginSurfaceView {

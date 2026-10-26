@@ -562,27 +562,34 @@ Check "the input bar is painted" ($barDark -gt 60) `
 # is for.
 #
 # What must hold for ANY sensible manifest is the STRUCTURE the plugin declared:
-# the reply card sits directly ABOVE the pet, the input bar directly BELOW it, and
-# the two share the pet's own column. All three are read from the declaration
-# itself, so a manifest that put either box beside the pet, or in the panel's column
-# on the far side of the window, fails here.
-$barBelow = [int]$bar.dy - $petH
+# BOTH floating blocks hang above the pet, in its own column, and the one nearest the pet
+# (the input pill) touches it with its tail band. That is the shape the plugin draws now -
+# the input used to sit BELOW the pet, which put a text field in the middle of whatever the
+# user was working on.
+#
+# The tail is why the pill's declared height is larger than the visible pill: it lives
+# inside the bottom band of the rectangle, because the host crops the window to exactly
+# these rectangles and anything drawn outside them is cut away.
+$barBottomGap = [int]$bar.dy + [int]$bar.h
 $cardAbove = -([int]$card.dy + [int]$card.h)
 "=== declared structure ==="
 "  card dy=$($card.dy) h=$($card.h)  -> its bottom edge is $cardAbove px above the pet's top edge"
-"  bar  dy=$($bar.dy)  -> its top edge is $barBelow px below the pet's bottom edge (pet height $petH)"
+"  bar  dy=$($bar.dy)  h=$($bar.h)  -> its bottom edge is $barBottomGap px from the pet's top edge (0 = the tail touches it)"
 
-Check "the reply card is declared entirely above the pet" `
+Check "the reply strip is declared entirely above the pet" `
     ($cardAbove -ge 0) `
     "the card's dy is $($card.dy) with height $($card.h), so its bottom edge is $cardAbove px above the pet's top edge (a negative value means it overlaps the pet)"
-Check "the input bar is declared below the pet" `
-    ($barBelow -ge 0) `
-    "the bar's dy is $($bar.dy), which is inside the pet's own 0..$petH band rather than below it"
+Check "the input pill is declared directly above the pet, tail touching it" `
+    ($barBottomGap -eq 0) `
+    "the bar's bottom edge is $barBottomGap px from the pet's top edge; the tail band must end exactly at it"
+Check "the reply strip clears the pill above it" `
+    ($cardAbove -ge [int]$bar.h) `
+    "the card's bottom edge is only $cardAbove px above the pet's top edge, and the pill alone is $($bar.h) tall in that band"
 
 # Both boxes must be CENTRED ON THE PET and share one column. That is what makes
-# the pair read as one panel hanging directly off the pet - the reply on top of it,
-# the input box underneath - rather than as two unrelated boxes somewhere in the
-# window.
+# the pair read as one unit hanging directly off the pet - the reply strip on top, the
+# input pill under it with its tail on the pet's head - rather than as two unrelated
+# boxes somewhere in the window.
 #
 # They are 300 wide and the pet is 150, so a centred block necessarily overhangs
 # the pet's own column by 75px on each side, toward the free side of the window.
