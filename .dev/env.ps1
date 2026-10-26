@@ -7,9 +7,22 @@
 $WorkspaceRoot = Split-Path -Parent $PSScriptRoot
 
 # Go 1.22.12 is installed locally because Wails v2.10+ requires Go >= 1.22 and
-# the machine's own Go is 1.21.
-$LocalGo = Join-Path $WorkspaceRoot '.dev\gotool\go'
-if (Test-Path (Join-Path $LocalGo 'bin\go.exe')) {
+# the machine's own Go is 1.21 - and GOTOOLCHAIN=local (below) forbids switching
+# to a newer one. Without this directory NO gate can run: every go command exits
+# with "go.mod requires go >= 1.22.0 (running go 1.21.0; GOTOOLCHAIN=local)", and
+# that is a toolchain report rather than a compile error, so it reads like the
+# repository is broken when only this path is.
+#
+# Two locations, because this workspace has had the toolchain in both: the
+# primary .dev\gotool\go, and the nested sandbox copy under pet_pc\.dev\gotool\go
+# that an earlier provisioning pass left behind. The primary wins when it exists,
+# so this file means the same thing on a machine that has either one.
+$LocalGoCandidates = @(
+    (Join-Path $WorkspaceRoot '.dev\gotool\go'),
+    (Join-Path $WorkspaceRoot 'pet_pc\.dev\gotool\go')
+)
+$LocalGo = $LocalGoCandidates | Where-Object { Test-Path (Join-Path $_ 'bin\go.exe') } | Select-Object -First 1
+if ($LocalGo) {
     $env:GOROOT = $LocalGo
     $env:PATH   = "$(Join-Path $LocalGo 'bin');$env:PATH"
 }

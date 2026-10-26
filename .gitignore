@@ -4,6 +4,15 @@ frontend/dist/
 
 # Throwaway experiments, probe tests, review screenshots and stray logs. Anything
 # that is not project source goes here instead of the repository root.
+#
+# NO .go FILES HERE. The Go tool skips directories whose name starts with "_" or
+# "." when matching ./..., so scratch/ is INSIDE this module while _archive/ is
+# not: a retired .go probe dropped here joins the build and takes `go vet ./...`
+# and `go test ./...` down with it. That is exactly what happened once - a probe
+# referencing a since-deleted NewApp sat here and every gate failed on a compile
+# error nobody could place ("undefined: NewApp" in a package nobody edited).
+# Archive Go code under _archive/, or rename the file to *.go.txt, which is the
+# convention the retired probes already use.
 scratch/
 
 # Runtime config of the QQ protocol backend (credentials and access tokens),
