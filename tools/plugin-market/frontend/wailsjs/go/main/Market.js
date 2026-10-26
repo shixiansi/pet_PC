@@ -30,6 +30,10 @@ export function MainSettings() {
   return window['go']['main']['Market']['MainSettings']();
 }
 
+export function PermissionLabels() {
+  return window['go']['main']['Market']['PermissionLabels']();
+}
+
 export function PluginMarketPath() {
   return window['go']['main']['Market']['PluginMarketPath']();
 }

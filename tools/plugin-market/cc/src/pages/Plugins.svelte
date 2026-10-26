@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Card from '../components/Card.svelte';
-  import { Installed, Grant, SetEnabled } from '../../../frontend/wailsjs/go/main/Market';
+  import { Installed, Grant, SetEnabled, PermissionLabels } from '../../../frontend/wailsjs/go/main/Market';
 
   type Row = {
     id: string;
@@ -13,6 +13,7 @@
   };
 
   let rows = $state<Row[]>([]);
+  let labels = $state<Record<string, string>>({});
   let loaded = $state(false);
   let error = $state('');
 
@@ -20,7 +21,11 @@
 
   async function refresh() {
     try {
-      rows = (await Installed()) ?? [];
+      // The labels come from the host, not from a map in this file: the install dialog is
+      // the user's consent, and consent described two ways is consent to two things.
+      const [list, names] = await Promise.all([Installed(), PermissionLabels()]);
+      rows = list ?? [];
+      labels = names ?? {};
       error = '';
     } catch (e) {
       error = String(e);
@@ -31,6 +36,10 @@
 
   function name(r: Row): string {
     return r.manifest?.name || r.id;
+  }
+
+  function label(perm: string): string {
+    return labels[perm] || perm;
   }
 
   // The grant list is replaced WHOLE on every toggle: the host's Grant takes the complete
@@ -77,26 +86,22 @@
         {#if (r.manifest?.permissions?.length ?? 0) > 0}
           <div class="perms">
             {#each r.manifest?.permissions ?? [] as perm (perm)}
-              <label class="perm">
+              <label class="perm" title={perm}>
                 <input
                   type="checkbox"
                   checked={(r.granted ?? []).includes(perm)}
                   onchange={(e) => togglePerm(r, perm, (e.currentTarget as HTMLInputElement).checked)}
                 />
-                <code>{perm}</code>
+                <span>{label(perm)}</span>
               </label>
             {/each}
           </div>
-          <p class="warn">勾选即授权。取消勾选会让用到它的工具/方法立刻开始被拒绝。</p>
+          <p class="warn">勾选即授权。取消勾选会让用到它的工具与方法立刻开始被拒绝。</p>
         {:else}
           <p class="hint">这个插件没有声明任何权限。</p>
         {/if}
       </section>
     {/each}
-    <p class="hint">
-      权限名显示的是 id 而不是中文说明 —— 那份文案在宿主的 Go 侧，这一页还没有读到它的
-      通道。加一个只读绑定就能显示，是下一批的事。
-    </p>
   {/if}
   {#if error}<p class="err">{error}</p>{/if}
 </Card>
@@ -107,9 +112,8 @@
   header { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); }
   .name { display: flex; align-items: center; gap: var(--space-2); color: var(--text); }
   .meta { color: var(--text-dim); font: var(--font-mono); font-size: 11px; }
-  .perms { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin-top: var(--space-2); }
-  .perm { display: flex; align-items: center; gap: var(--space-1); color: var(--text-dim); }
-  code { font: var(--font-mono); font-size: 11px; }
+  .perms { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-2); }
+  .perm { display: flex; align-items: center; gap: var(--space-2); color: var(--text-dim); font-size: 12px; }
   .hint { margin: var(--space-2) 0 0; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
   .warn { margin: var(--space-2) 0 0; color: var(--danger); font-size: 11px; }
   .err { margin: var(--space-2) 0 0; color: var(--danger); font-size: 12px; }
