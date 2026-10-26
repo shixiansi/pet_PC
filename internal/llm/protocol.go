@@ -18,6 +18,16 @@ type Message struct {
 	// routing the bytes through this process would cost a round trip and a base64
 	// blow-up for nothing.
 	Images []string `json:"-"`
+	// ToolCalls makes this an ASSISTANT turn that asked to run tools. Set by the
+	// caller replaying what the model said in a previous round.
+	//
+	// It is `json:"-"` because the wire shape differs by role and MarshalJSON is the
+	// one place that decides it (see below); a `tool_calls` key on a tool RESULT
+	// message would be rejected by every gateway.
+	ToolCalls []ToolCall `json:"-"`
+	// ToolCallID makes this a TOOL RESULT: the answer to one specific call, which
+	// the model matches by id. Required whenever Role is "tool".
+	ToolCallID string `json:"-"`
 }
 
 // imagePart is the OpenAI-compatible content part for one picture.
@@ -29,14 +39,34 @@ type imagePart struct {
 	} `json:"image_url,omitempty"`
 }
 
-// MarshalJSON emits `content` as a plain string, or as the content-part array when
-// pictures are attached.
+// MarshalJSON emits the shape the ROLE needs, and nothing else.
 //
-// A custom marshaller rather than a second field: the request body must keep exactly
-// the shape every existing gateway already accepts, and "content as an array" is the
-// one documented way to ask for a vision request. Gateways that do not support vision
-// reject the array - which is why Images is empty unless a plugin explicitly asked.
+// Three shapes, in this order:
+//
+//  1. an assistant turn that asked for tools: role, optional content, tool_calls;
+//  2. a tool result: role, content, tool_call_id;
+//  3. plain text, or the content-part array when pictures are attached.
+//
+// A custom marshaller rather than extra fields: the request body must keep exactly
+// the shape every existing gateway already accepts. In particular branch 3 emits the
+// same two keys it always has, so a request that carries no tools and no images is
+// byte-identical to what this app sent before tools existed - which is what lets the
+// feature ship without asking every plugin's endpoint to re-accept anything.
 func (m Message) MarshalJSON() ([]byte, error) {
+	if len(m.ToolCalls) > 0 {
+		return json.Marshal(struct {
+			Role      string     `json:"role"`
+			Content   string     `json:"content"`
+			ToolCalls []ToolCall `json:"tool_calls"`
+		}{m.Role, m.Content, m.ToolCalls})
+	}
+	if m.ToolCallID != "" {
+		return json.Marshal(struct {
+			Role       string `json:"role"`
+			Content    string `json:"content"`
+			ToolCallID string `json:"tool_call_id"`
+		}{m.Role, m.Content, m.ToolCallID})
+	}
 	if len(m.Images) == 0 {
 		return json.Marshal(struct {
 			Role    string `json:"role"`
@@ -69,6 +99,62 @@ type ChatRequest struct {
 	Stream      bool      `json:"stream"`
 	Temperature float64   `json:"temperature"`
 	MaxTokens   int       `json:"max_tokens,omitempty"`
+	// Tools lists the functions the model may call. omitempty is load-bearing: a
+	// request without tools must not grow a `"tools":null` key, because the whole
+	// point is that this feature is invisible to every endpoint that does not use it.
+	Tools []ToolSpec `json:"tools,omitempty"`
+	// ToolChoice is left nil in every call this app makes, so the server default
+	// ("auto": call a tool if you want) applies. It is declared so a caller that
+	// needs "required" does not have to reach into the raw body.
+	ToolChoice any `json:"tool_choice,omitempty"`
+}
+
+// ToolSpec is one function the model may call.
+type ToolSpec struct {
+	// Type is always "function" today; the field exists because the wire format has
+	// it and a gateway that validates the schema will reject a tool without it.
+	Type     string       `json:"type"`
+	Function ToolFunction `json:"function"`
+}
+
+// ToolFunction describes one callable function.
+type ToolFunction struct {
+	Name string `json:"name"`
+	// Description is the only thing the model has to decide with, so it is written
+	// for the model rather than for the user: what the function does, and when NOT
+	// to call it.
+	Description string `json:"description"`
+	// Parameters is a JSON Schema object. RawMessage rather than a struct because
+	// the schema is data the host builds per tool, and re-encoding it through a
+	// struct would only be a second place for it to be wrong.
+	Parameters json.RawMessage `json:"parameters"`
+}
+
+// ToolCall is one tool invocation, in the shape it travels in BOTH directions: the
+// model emits it, and the caller replays it in the assistant message it sends back.
+type ToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name string `json:"name"`
+		// Arguments is a JSON-encoded STRING, not an object. That is the wire format
+		// (and the reason it is not `json.RawMessage` here): the model may emit it in
+		// pieces, and pieces can only be concatenated as text.
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+// ToolCallDelta is one FRAGMENT of a tool call from a streaming frame.
+//
+// Streaming tool calls arrive in pieces: the first fragment for an index carries the
+// id and the function name, and later fragments carry only more of Arguments. Index
+// is what ties them together - a model may ask for several tools in one reply, and
+// their fragments interleave.
+type ToolCallDelta struct {
+	Index     int
+	ID        string
+	Name      string
+	Arguments string
 }
 
 // Usage is the token accounting a server may report. It is omitted by some
@@ -100,6 +186,18 @@ type chunk struct {
 			ReasoningContent string `json:"reasoning_content"`
 			// Role is set on the first frame of some servers.
 			Role string `json:"role"`
+			// ToolCalls are the tool-call FRAGMENTS this frame carries. They arrive in
+			// pieces keyed by index - see ToolCallDelta - and `arguments` is a string
+			// that grows across frames, not an object.
+			ToolCalls []struct {
+				Index    int    `json:"index"`
+				ID       string `json:"id"`
+				Type     string `json:"type"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
 		} `json:"delta"`
 		Message struct {
 			Content string `json:"content"`
@@ -137,6 +235,10 @@ type Frame struct {
 	Usage *Usage
 	// Model is the model that actually answered.
 	Model string
+	// ToolCalls are the fragments this frame contributed, already flattened out of
+	// the choice. The caller accumulates them by Index; an empty slice means this
+	// frame said nothing about tools.
+	ToolCalls []ToolCallDelta
 }
 
 // ParseFrame decodes one SSE payload.
@@ -174,6 +276,19 @@ func ParseFrame(data string) (Frame, error) {
 			if f.Text == "" && ch.Delta.Content == "" {
 				// Non-streaming shape.
 				f.Text = ch.Message.Content
+			}
+			// Tool-call fragments are passed through as they arrive, in the order the
+			// server sent them. They are NOT merged here: accumulating by index is the
+			// caller's job, because a fragment with no index (some gateways omit it
+			// when there is only one call) has to be resolved against the calls that
+			// already exist - which is state this stateless parser does not have.
+			for _, tc := range ch.Delta.ToolCalls {
+				f.ToolCalls = append(f.ToolCalls, ToolCallDelta{
+					Index:     tc.Index,
+					ID:        tc.ID,
+					Name:      tc.Function.Name,
+					Arguments: tc.Function.Arguments,
+				})
 			}
 		}
 		if ch.FinishReason != nil && *ch.FinishReason != "" {
