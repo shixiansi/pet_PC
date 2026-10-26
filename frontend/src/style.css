@@ -457,39 +457,34 @@ button:disabled {
  * box, so the window-region rules are untouched. */
 .todo-list,
 .record-list,
-.chat-log,
-#tab-settings {
+.chat-log {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
 .todo-list::-webkit-scrollbar,
 .record-list::-webkit-scrollbar,
-.chat-log::-webkit-scrollbar,
-#tab-settings::-webkit-scrollbar {
+.chat-log::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 .todo-list::-webkit-scrollbar-track,
 .record-list::-webkit-scrollbar-track,
-.chat-log::-webkit-scrollbar-track,
-#tab-settings::-webkit-scrollbar-track {
+.chat-log::-webkit-scrollbar-track {
   background: transparent;
 }
 
 .todo-list::-webkit-scrollbar-thumb,
 .record-list::-webkit-scrollbar-thumb,
-.chat-log::-webkit-scrollbar-thumb,
-#tab-settings::-webkit-scrollbar-thumb {
+.chat-log::-webkit-scrollbar-thumb {
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.16);
 }
 
 .todo-list::-webkit-scrollbar-thumb:hover,
 .record-list::-webkit-scrollbar-thumb:hover,
-.chat-log::-webkit-scrollbar-thumb:hover,
-#tab-settings::-webkit-scrollbar-thumb:hover {
+.chat-log::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.30);
 }
 
@@ -498,8 +493,7 @@ button:disabled {
  * `height: 8px` on the horizontal bar. */
 .todo-list::-webkit-scrollbar-corner,
 .record-list::-webkit-scrollbar-corner,
-.chat-log::-webkit-scrollbar-corner,
-#tab-settings::-webkit-scrollbar-corner {
+.chat-log::-webkit-scrollbar-corner {
   background: transparent;
 }
 
@@ -629,225 +623,6 @@ button:disabled {
   font-size: 12px;
   text-align: center;
   margin: 14px 0;
-}
-
-/* --- settings ------------------------------------------------------------ */
-
-/* Settings is the one tab taller than the panel, so it scrolls INSIDE itself.
- * It must never grow the panel: the panel's rectangle comes from the layout and
- * the native window region is cut to exactly it (README 10c / 10d). */
-#tab-settings {
-  /* The form's single source of truth for its layout: a fixed label column plus
-   * everything else. .field and .row both build on it, so every control in the
-   * page starts at the same x BY CONSTRUCTION rather than by two rules happening
-   * to agree. 76px fits 銆岄暱浼戞伅闂撮殧銆?at 12px and still leaves ~172px inside the
-   * 380px panel for the value. */
-  --label-col: 76px;
-  overflow-y: auto;
-  gap: 12px;
-  padding: 10px 10px 14px;
-}
-
-/* One group = one card.
- *
- * The grouping is carried by the card rather than by a 1px rule between rows: a
- * divider only says "something ended", while a card says "these belong together
- * and the next thing does not". The previous layout drew the same thin line
- * between every one of ten groups - including between the picture picker and the
- * size slider, which belong to each other - so nothing was actually grouped. */
-.sgroup {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  flex: 0 0 auto;
-  padding: 10px 11px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 11px;
-  background: rgba(255, 255, 255, 0.028);
-}
-
-.sgroup-head {
-  margin: 0;
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  color: var(--text);
-}
-
-/* The one-line "what this group is for", under its heading. Groups whose name
- * already says it (澶栬涓庡惎鍔? 鏁版嵁涓庨€€鍑? do not carry one. */
-.sgroup-desc {
-  margin: -2px 0 1px;
-  font-size: 11px;
-  color: var(--text-dim);
-}
-
-/* A sub-heading INSIDE a group: 服务 / API Key / 生成参数 / 闃舵鏃堕暱 鈥? *
- * It marks a change of KIND within one feature, so it is deliberately quieter
- * than .sgroup-head - smaller, dimmer, and separated by a rule rather than by a
- * card of its own. In the LLM section these used to be .setting-label inside one
- * flat card, which made "主动说话" read as another generation parameter instead
- * of a separate feature. */
-.ssub {
-  margin: 5px 0 0;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-dim);
-}
-
-/* A labelled row: the label column plus whatever the setting is.
- *
- * A two-column grid, and the SAME grid the switch rows below use, so the two row
- * types cannot drift apart: the label column is one variable and both rules
- * reference it. Flexbox was the earlier attempt and it produced exactly that
- * drift - a checkbox, a gap and its text put the text at 53px while the fields
- * put their controls at 107px, so half the page lined up and half of it nearly
- * did.
- *
- * The label is aligned to the TOP so a row whose value is several lines tall (a
- * hint, a stack of buttons, the prompt box) reads as "this label owns that block"
- * instead of floating in the middle of it. */
-.field {
-  display: grid;
-  grid-template-columns: var(--label-col) 1fr;
-  gap: 8px;
-  align-items: start;
-}
-
-.field-label {
-  /* Matches the height of the controls beside it, so a one-line row's label lines
-   * up with the control's own text rather than with its top border. */
-  padding-top: 4px;
-  font-size: 12px;
-  line-height: 1.35;
-  color: var(--text-dim);
-}
-
-.field-input {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  font-size: 12px;
-  color: var(--text-dim);
-}
-
-/* A row whose "value" is a paragraph, a button plus its explanation, or the
- * prompt box: the block is stacked, but it keeps the same column start. */
-.field-input.stack {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-/* Units and the size read-out: the smallest text in the panel, so a number's
- * meaning never competes with the number. Tabular figures and a fixed width keep
- * 銆?00%銆?from shifting the slider as it is dragged. */
-.unit,
-.scale-value {
-  flex: 0 0 auto;
-  font-size: 11px;
-  color: var(--text-dim);
-}
-
-.scale-value {
-  min-width: 38px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-/* The explainer under a control. Dimmer and smaller than the rows it explains,
- * so it reads as annotation rather than as another setting: one class used to do
- * both jobs, which flattened the whole page into a single weight. */
-.setting-note {
-  margin: 2px 0 0;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--text-dim);
-  word-break: break-word;
-}
-
-/* A one-line status or value the app fills in (the data directory, the reminder
- * schedule, where the key is stored, an error). Same size as a note, but it is
- * never prose the author wrote, so it does not take the note's line height. */
-.setting-hint {
-  margin: 0;
-  color: var(--text-dim);
-  font-size: 11px;
-  word-break: break-all;
-}
-
-/* A row of buttons. The buttons themselves are sized further down, with the rest
- * of the settings tab's compact metrics. */
-.btn-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-/* Settings buttons are smaller than the ones in the todo form: there are
- * twenty-odd of them in one scrolling column, and at the default size they read
- * as the loudest thing on the page. */
-#tab-settings button {
-  padding: 5px 10px;
-  font-size: 12px;
-}
-
-/* The switch rows: a checkbox followed immediately by its own text.
- *
- * Deliberately NOT the two-column grid the .field rows use. A checkbox and its
- * label are one unit - the box IS the control and the text belongs to it - so
- * pushing the text out to the value column leaves the box stranded 76px from the
- * words it governs, and the row reads as a checkbox with an unrelated caption.
- * These rows therefore keep the checkbox and its text adjacent, which is what the
- * original layout did.
- *
- * Only the left edge is shared with the field rows: the checkbox sits on the same
- * gutter as the .field labels, so the page still has one left margin.
- *
- * Nothing is centred vertically: a row whose text wraps to two lines must not
- * drag its checkbox down with it. */
-#tab-settings .row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 1px 0;
-  font-size: 12.5px;
-  line-height: 1.35;
-  cursor: pointer;
-}
-
-#tab-settings .row input[type="checkbox"] {
-  width: 15px;
-  height: 15px;
-  flex: 0 0 auto;
-  /* Centres the 15px box on the first line of the text beside it (16.9px), so it
-   * reads as sitting in the sentence rather than floating above it. */
-  margin: 1px 0 0;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-#tab-settings .row span {
-  min-width: 0;
-}
-
-input[type="range"] {
-  width: 100%;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-/* The slider shares its row with the read-out, so it takes the space that is
- * left rather than the full width (which would push the read-out out of the
- * panel and into the window region's edge). */
-#tab-settings input[type="range"] {
-  flex: 1 1 auto;
-  width: auto;
-  min-width: 0;
 }
 
 /* --- speech bubble ------------------------------------------------------- */
@@ -1269,86 +1044,6 @@ input[type="range"] {
   color: var(--text-dim);
   text-align: center;
   flex: 0 0 auto;
-}
-
-/* --- settings: compact controls ------------------------------------------- */
-
-/* The compact controls the settings form is built from: a number, a time, a
- * select, a one-line text field. All four are the SAME height and the same
- * radius, because they sit in consecutive rows of one form - a dropdown that is
- * 2px taller than the text field above it is the kind of thing that makes a
- * settings page look assembled rather than designed.
- *
- * They are scoped to the settings tab so the same elements in the todo form and
- * the chat composer keep their own, larger metrics. */
-#tab-settings input[type="number"],
-#tab-settings input[type="time"],
-#tab-settings input[type="text"],
-#tab-settings input[type="password"],
-#tab-settings select {
-  padding: 4px 6px;
-  border: 1px solid var(--panel-border);
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 12px;
-  outline: none;
-  min-width: 0;
-}
-
-#tab-settings input[type="number"] {
-  width: 58px;
-  flex: 0 0 auto;
-}
-
-/* Time and the native dropdown are drawn by WebView2, so the dark scheme has to
- * be requested explicitly or they open white-on-white. */
-#tab-settings input[type="time"],
-#tab-settings select {
-  color-scheme: dark;
-}
-
-#tab-settings input[type="time"] {
-  flex: 0 0 auto;
-}
-
-/* The fields that fill their row: the endpoint, the model, the key, the prompt. */
-#tab-settings input[type="text"],
-#tab-settings input[type="password"],
-#tab-settings select {
-  flex: 1 1 auto;
-}
-
-#tab-settings input[type="number"]:focus,
-#tab-settings input[type="time"]:focus,
-#tab-settings input[type="text"]:focus,
-#tab-settings input[type="password"]:focus,
-#tab-settings select:focus {
-  border-color: var(--accent);
-}
-
-#llm-prompt {
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-/* Emphasis inside a hint or a note is the SETTING, not decoration: it is what the
- * user must not miss in a paragraph they are otherwise skimming. */
-.setting-hint strong,
-.setting-note strong {
-  color: var(--text);
-  font-weight: 600;
-}
-
-.setting-hint.ok,
-.setting-note.ok {
-  color: var(--ok);
-}
-
-.setting-hint.error,
-.setting-note.error {
-  color: #ff8b85;
 }
 
 /* --- confirmation dialog -------------------------------------------------- */

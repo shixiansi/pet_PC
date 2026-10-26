@@ -303,7 +303,9 @@ const marketCss = fs.readFileSync(
 // the check would pass while checking nothing.
 const newSections = [
   { marker: '/* --- chat tab', source: css },
-  { marker: '/* --- settings: compact controls', source: css },
+  // '/* --- settings: compact controls' was removed with the settings page itself
+  // (openspec/changes/ui-rebuild 阶段 3): the section is gone from the stylesheet, and a
+  // marker for a section nobody has is a check that can only fail or lie.
   // The voice studio's section is gone with the studio: speech is a plugin now, and
   // its workshop stylesheet belongs to the PLUGIN, not to the pet's page. The plugin's
   // own stylesheet is checked in section 16 instead, where its document and script are
@@ -351,151 +353,55 @@ check(
   'a banner for the deleted plugin tab survived',
 );
 
-// --- 4b. The settings page is grouped, and stays one scrolling column -------
-// The layout change this guards: ten flat rows separated by the same 1px line
-// became five cards, each with a heading, and every control in the form now
-// starts at the same x. Both halves are load-bearing - the cards carry the
-// grouping, the shared column is what makes a long form scannable - and both are
-// easy to undo by accident when editing the markup.
+// --- 4b. The settings page is GONE, and must stay gone ----------------------
 //
-// Five, not seven: the AI configuration card and the proactive-speech card moved
-// to the market program, so the pet's settings describe the pet.
-
-const settingsBody = (() => {
-  const start = html.indexOf('id="tab-settings"');
-  if (start < 0) return '';
-  // The settings body ends where the panel's next top-level child begins.
-  const end = html.indexOf('id="toast"', start);
-  return html.slice(start, end < 0 ? undefined : end);
-})();
-
-const groups = [...settingsBody.matchAll(/<section class="sgroup">([\s\S]*?)<\/section>/g)].map(
-  (m) => m[1],
-);
-check(
-  `the settings page is four named groups (${groups.length} found)`,
-  // Four, not five: the speech group left with the subsystem, so the pet's own
-  // settings are appearance, pomodoro, reminders and the data group that carries the
-  // way into the market.
-  groups.length === 4,
-  `expected 4 .sgroup cards, found ${groups.length}`,
-);
-check(
-  'every group has a heading',
-  groups.length > 0 && groups.every((g) => /<h3 class="sgroup-head">[^<]+<\/h3>/.test(g)),
-  'a group is unlabelled, so the grouping says nothing',
-);
-// The AI configuration is not merely hidden here, it is GONE from the pet: the
-// conversation is a plugin, and the plugin's own settings are edited in the
-// market program. A leftover sub-block or switch would be a control that writes
-// to a config no request reads - the failure mode is silent, which is why it is
-// asserted as an absence rather than left to the id whitelist below.
+// This block used to hold ten checks: four named groups, a heading per group, the set of
+// sub-headings, the absence of any AI configuration, one shared row shape, one label
+// column, the scroll rule, and a 33-id whitelist of every control the page carried.
 //
-// The check is on the sub-headings by NAME rather than on a forbidden string:
-// pinning the exact set is both stronger (a new sub-block is a failure, not just
-// the old one) and free of the words themselves, which the T91 criterion requires
-// this file not to contain at all - a grep that has to match the thing it forbids
-// is a grep that cannot be run.
-const subHeads = [...settingsBody.matchAll(/<h4 class="ssub">([^<]+)<\/h4>/g)].map((m) => m[1]);
+// They are deleted, not loosened, because the page they described no longer exists
+// (openspec/changes/ui-rebuild 阶段 3): 设置 moved to the control center, and the controls
+// that could not move went to the pomodoro strip (放弃) or the tray menu (打开控制中心 /
+// 立刻提醒 / 打开数据目录 / 退出). Keeping them would have meant one of two lies - an empty
+// page that passes, or a whitelist nobody can satisfy.
+//
+// What replaces them is the ABSENCE check, which is the failure mode that still matters:
+// a half-restored tab would be a SECOND writer of settings.json, and "one file, one
+// writer" is the property the settings split exists to hold.
 check(
-  'the settings sub-headings are exactly the pet\'s own',
-  subHeads.length > 0 &&
-    subHeads.every((t) => ['隐藏与显示', '阶段时长', '当前番茄', '节奏'].includes(t)),
-  `a settings sub-block belongs to another program: ${subHeads.join(', ')}`,
-);
-check(
-  'the pet settings carry no AI configuration',
-  // The ids are the second half of the same fact: a re-added generation-parameter
-  // row would have to bring an id with it, and every AI id is out of the
-  // whitelist below - so this catches the case where the markup was restored but
-  // the heading was renamed.
-  !/\bllm-/.test(settingsBody),
-  'the pet still has an AI configuration section',
+  'the pet has no settings tab any more',
+  !html.includes('id="tab-settings"') && !/data-tab="settings"/.test(html),
+  'the settings tab came back: settings.json would have two writers again',
 );
 check(
-  'the flat layout left nothing behind',
-  // The old classes are not merely unused: leaving the rules in place would keep
-  // two competing metric systems in the same file, and the next setting added
-  // would pick whichever one its author copied.
-  !/class="(setting|num-row|setting-label)[" ]/.test(html) &&
-    !/^\.(setting|num-row|setting-label)\s*[{,]/m.test(css),
-  'the previous flat settings classes are still present',
+  'the pet has no records tab any more',
+  !html.includes('id="tab-records"') && !/data-tab="records"/.test(html),
+  'the records tab came back: the archive belongs in the 待办 tab as a folded section',
 );
-
-// The alignment invariant, checked as one thing rather than as a regex on a
-// single declaration: every row in the form must be one of the two shared shapes,
-// and the .field label column must be a fixed width. Miss either half and rows
-// silently drift back to finding their own left edge.
-const settingsRows = [...settingsBody.matchAll(/<div class="(field|pairs|float)[^"]*"/g)].map(
-  (m) => m[1],
-);
+// The archive itself survived that move, and the three ids main.js paints into are what
+// says so. Deleting the tab and deleting the capability are different changes, and only
+// one of them is wanted.
 check(
-  `every settings row uses a shared shape (${settingsRows.length} field rows)`,
-  settingsRows.length > 0 && settingsRows.every((c) => c === 'field'),
-  `a row uses its own layout: ${[...new Set(settingsRows)].join(', ')}`,
+  'the 记录 archive still exists inside the 待办 tab',
+  htmlIds.has('records-list') && htmlIds.has('records-total') && html.includes('id="records-fold"'),
+  'the archive went away with the tab it used to live in',
 );
+// The way into the market program used to be a button on the settings page, and it was the
+// ONLY one - losing it would leave the user with a pet, a market they cannot open from the
+// pet, and no explanation. It is a tray menu item now (launching a program is what that menu
+// does), and this is the check that keeps it there. The vitest file that used to drive the
+// button (settings-market.test.js) is deleted with the page it tested; this is its
+// replacement, one layer lower.
 check(
-  'the field rows build on one shared label column',
-  /--label-col:\s*\d+(\.\d+)?(px|rem|em)\s*;/.test(css) &&
-    (css.match(/grid-template-columns:\s*var\(--label-col\)\s+1fr/g) || []).length >= 1 &&
-    /\.field\s*\{[^}]*grid-template-columns:\s*var\(--label-col\)/.test(css),
-  'the labelled rows do not share one label-column definition',
-);
-// The switch rows are deliberately NOT that grid: a checkbox and its caption are
-// one unit, so the text stays beside the box rather than being pushed out to the
-// value column. Pinning the negative keeps someone from "fixing" the alignment by
-// re-applying the grid and stranding every checkbox from its label.
-check(
-  'switch rows keep the checkbox beside its own text',
-  (() => {
-    const m = /#tab-settings \.row\s*\{([^}]*)\}/.exec(css);
-    if (!m) return false;
-    return !/grid-template-columns/.test(m[1]) && /display:\s*flex/.test(m[1]);
-  })(),
-  'the switch rows were put back on the label grid, so the text leaves its checkbox',
-);
-// Nothing in the settings tab may set its own size: the panel's rectangle comes
-// from the layout and the native window region is cut to exactly it.
-check(
-  'the settings tab still scrolls inside the panel and sizes nothing itself',
-  /#tab-settings\s*\{[^}]*overflow-y:\s*auto/.test(css) &&
-    !/(panel|settingsBody|tabSettings)\.style\.(width|height)\s*=/.test(mainJs),
-  'the settings tab grows the panel or sets a size directly',
-);
-// A setting removed from BOTH the markup and main.js would pass every check
-// above and silently disappear, so the set is pinned. Reordering and regrouping
-// are free; losing a control is not.
-const settingsIds = new Set(
-  [...settingsBody.matchAll(/\bid="([^"]+)"/g)]
-    .map((m) => m[1])
-    // The body's own id is the anchor, not a setting.
-    .filter((id) => id !== 'tab-settings'),
-);
-const expectedSettingsIds = [
-  'image-path', 'choose-image', 'reset-image', 'scale', 'scale-value', 'snap', 'autostart',
-  'hotkey-enabled', 'hotkey-show', 'hotkey-hide', 'hotkey-status',
-  'pomo-on-startup', 'pomo-auto-next', 'pomo-sound', 'pomo-focus', 'pomo-short', 'pomo-long',
-  // 'pomo-reset' is NOT here any more: 放弃 left this page. It is an action on the running
-  // session rather than a preference, and it needs the panel's confirmation dialog, so it
-  // moved next to 停止 / 跳过 in the pomodoro strip (frontend/index.html) - where the
-  // strip's own checks see it.
-  'pomo-every',
-  'rem-enabled', 'rem-on-startup', 'rem-during-break', 'rem-interval', 'rem-jitter', 'rem-from',
-  'rem-to', 'rem-items', 'rem-hide', 'rem-empty', 'rem-now', 'rem-status',
-  // The one AI-shaped control left in the pet: it launches the market program
-  // rather than configuring anything, which is the whole point of the split.
-  'open-plugin-market',
-  // No voice ids: speech is a plugin, configured in the market's own window, so the
-  // pet's settings must carry none of them. The absence has its own check above, and
-  // leaving them here would make this whitelist disagree with the page.
-  'data-dir', 'quit',
-];
-const missingSettings = expectedSettingsIds.filter((id) => !settingsIds.has(id));
-const extraSettings = [...settingsIds].filter((id) => !expectedSettingsIds.includes(id));
-check(
-  `the settings page still carries every control (${expectedSettingsIds.length} ids)`,
-  missingSettings.length === 0 && extraSettings.length === 0,
-  `missing: ${missingSettings.join(', ') || 'none'} / unexpected: ${extraSettings.join(', ') || 'none'}`,
+  'the pet still offers a way into the market, from its tray menu',
+  // Read inline rather than through a shared const: the tray file is used once, and a
+  // shared const declared further down would be a temporal-dead-zone crash, not a check.
+  /TrayCmdOpenMarket\s*=\s*trayCmdOpenMarket/.test(
+    fs.readFileSync(path.join(root, 'internal/desktop/tray_windows.go'), 'utf8'),
+  ) &&
+    /desktop\.TrayCmdOpenMarket,/.test(mainGo) &&
+    /case desktop\.TrayCmdOpenMarket:/.test(mainGo),
+  'the market launcher lost its entry point: the settings button is gone and the tray has none',
 );
 
 // --- 5. The conversation lives in the panel as a tab ------------------------
@@ -509,12 +415,15 @@ check(
   /data-tab="chat"/.test(html),
   'no data-tab="chat" button',
 );
-// Four tabs, not five: the plugin tab is gone. Managing plugins is the market
-// program's job now (a separate .exe with its own window), so the pet's panel
-// kept the four tabs that describe the pet itself.
+// Two tabs, not four: 记录 folded into 待办 as a collapsed archive, and 设置 moved to the
+// control center (openspec/changes/ui-rebuild 阶段 3). The count is pinned rather than
+// derived because the failure this guards is a tab coming BACK - a restored 设置 tab would
+// be a second writer of settings.json.
 check(
-  'the tabs are todos/chat/records/settings',
-  (html.match(/data-tab="/g) || []).length === 4,
+  'the tabs are todos and chat',
+  (html.match(/data-tab="/g) || []).length === 2 &&
+    /data-tab="todos"/.test(html) &&
+    /data-tab="chat"/.test(html),
   'unexpected tab count',
 );
 // The conversation tab is a MOUNT POINT, not a transcript: the plugin's iframe
@@ -1092,30 +1001,40 @@ check(
     !/Hidden\s+bool\s+`json:/.test(fs.readFileSync(path.join(root, 'internal/store/store.go'), 'utf8')),
   'the hidden state is written to the config, so a restart can come back hidden',
 );
+// The shortcut switch lives in the CONTROL CENTER now (开始 → 外观与启动), and the pet is
+// what applies it. Three guarantees, kept but pointed at the new homes:
+//
+//   1. the switch is actually sent somewhere (a checkbox nobody saves is a lie);
+//   2. the labels shown are the ones internal/desktop registers, not a copy in a page;
+//   3. a key the OS REFUSED still reaches the user - which used to be a red row on the
+//      settings page, and is now a toast in the pet (main.js, applyState). "I pressed it
+//      and nothing happened" is the failure all three exist to prevent.
+const ccBridge = fs.readFileSync(path.join(root, 'tools/plugin-market/cc/src/lib/bridge.ts'), 'utf8');
+const ccStart = fs.readFileSync(path.join(root, 'tools/plugin-market/cc/src/pages/Start.svelte'), 'utf8');
+const marketPetAPI = fs.readFileSync(path.join(root, 'tools/plugin-market/settingsapi_pet.go'), 'utf8');
 check(
-  'the settings switch is wired and its keys are shown',
-  htmlIds.has('hotkey-enabled') &&
-    /hotkeyEnabled: \$\('hotkey-enabled'\)/.test(mainJs) &&
-    /App\.SaveHotkeySettings\(\{ enabled: els\.hotkeyEnabled\.checked \}\)/.test(mainJs) &&
-    /function renderHotkeySettings\(\)/.test(mainJs) &&
-    /function wireHotkeySettings\(\)/.test(mainJs) &&
-    /wireHotkeySettings\(\);/.test(mainJs),
-  'the shortcut switch is rendered but never sent, or never wired',
+  'the shortcut switch is wired from the control center',
+  /SetGlobalHotkeys\(/.test(ccStart) &&
+    /host\.SetGlobalHotkeys\(/.test(ccBridge) &&
+    /func \(m \*Market\) SetGlobalHotkeys/.test(marketPetAPI),
+  'the switch is rendered in the control center but never sent, or the binding is gone',
 );
 check(
-  'the key labels come from Go rather than being written in the page',
-  // The advertised keys and the registered keys must be the same value, or the
-  // panel can tell the user to press something that was never registered.
-  /els\.hotkeyShow\.textContent = h\.show/.test(mainJs) &&
-    /els\.hotkeyHide\.textContent = h\.hide/.test(mainJs) &&
+  'the key labels come from Go rather than being written in the control center',
+  // Same value advertised and registered, or the page can tell the user to press something
+  // that was never registered. `ConfiguredHotkeyView` is the only source of those strings.
+  /HotkeyLabels\(\)/.test(ccStart) &&
+    /host\.HotkeyLabels\(\)/.test(ccBridge) &&
+    /desktop\.ConfiguredHotkeyView/.test(marketPetAPI) &&
     /Hotkeys\s+desktop\.HotkeyView/.test(mainGo),
-  'the page hard-codes the shortcuts, so it can disagree with what was registered',
+  'the shortcuts are hard-coded somewhere, so a page can disagree with what was registered',
 );
 check(
-  'a refused registration is surfaced rather than silently swallowed',
-  // "I pressed it and nothing happened" is the failure this exists to prevent.
-  /h\.problems\?\.length/.test(mainJs) &&
-    /未能生效/.test(mainJs) &&
+  'a refused registration still reaches the user',
+  // The settings page used to show a red row. It is gone, so the pet says it once as a
+  // toast the moment Go reports it - which is only honest if the problems field survives.
+  /next\.hotkeys\?\.problems\?\.length/.test(mainJs) &&
+    /快捷键没生效/.test(mainJs) &&
     /Problems \[\]string `json:"problems,omitempty"`/.test(goDesktopHotkey),
   'a hot key the OS refused is reported nowhere the user can see',
 );
@@ -1658,12 +1577,11 @@ check(
 // on a dark 380px panel reads as a different application.
 check(
   'the scrollable surfaces share one scrollbar rule',
-  // Four selectors: #tab-plugins went with the plugin tab, and .voice-scroll went with
-  // the voice studio (speech is a plugin now, and its workshop is a document inside the
-  // MARKET's window - so the pet has no voice surface to scroll). The group is still
-  // ONE rule rather than four copies, which is what the two checks below pin - the list
-  // here is the membership, they are the shape.
-  /\.todo-list,\s*\n\.record-list,\s*\n\.chat-log,\s*\n#tab-settings\s*\{/.test(css),
+  // Three selectors NOW: #tab-settings left with the settings page (阶段 3), the same way
+  // #tab-plugins left with the plugin tab and .voice-scroll with the voice studio. The
+  // group is still ONE rule rather than three copies, which is what the two checks below
+  // pin - the list here is the membership, they are the shape.
+  /\.todo-list,\s*\n\.record-list,\s*\n\.chat-log\s*\{/.test(css),
   'the scrollable surfaces do not share one scrollbar rule',
 );
 check(
@@ -1683,7 +1601,9 @@ check(
     const rules = [...css.matchAll(/([^{}]*?)\{/g)]
       .map((m) => m[1])
       .filter((sel) => sel.includes('-webkit-scrollbar'));
-    return rules.length > 0 && rules.every((sel) => sel.split(',').length >= 4);
+    // Three surfaces share the rule now that #tab-settings is gone. A rule naming only
+    // one is still a private copy, which is what this shape test is for.
+    return rules.length > 0 && rules.every((sel) => sel.split(',').length >= 3);
   })(),
   'a per-element scrollbar copy survived the consolidation',
 );
@@ -1754,10 +1674,10 @@ check(
 
 check(
   'the pet has no voice studio tab and no speech tab',
-  // Four tabs: plugin management is the market program's window, and the pet's own
-  // plugin surfaces are mounted by main.js rather than by a tab. A stray fifth tab
-  // would be a duplicate UI competing with the market.
-  !htmlIds.has('tab-voice') && (html.match(/data-tab="/g) || []).length === 4,
+  // Two tabs, and no more: plugin management is the market program's window, and the pet's
+  // own plugin surfaces are mounted by main.js rather than by a tab. A stray third tab
+  // would be a duplicate UI competing with the control center.
+  !htmlIds.has('tab-voice') && (html.match(/data-tab="/g) || []).length === 2,
   'the pet grew a speech tab, or the tab count changed',
 );
 check(

@@ -42,8 +42,8 @@ const els = {
   // button is hidden while no plugin fills the slot, so the two are separate
   // elements with separate visibility.
   tabChatBtn: $('tab-chat-btn'),
-  tabRecords: $('tab-records'),
-  tabSettings: $('tab-settings'),
+  // Two tabs: 待办 (which now also holds the folded 记录 archive) and 对话 (a plugin slot).
+  // 记录 and 设置 are gone - see index.html's tab-strip comment for where each went.
 
   // The chat plugin's mount point inside the 对话 tab, the floating surface's
   // mount point, and the headless frame's mount point. All three are fill-only
@@ -75,7 +75,7 @@ const els = {
   pomoStop: $('pomo-stop'),
   pomoSkip: $('pomo-skip'),
 
-  // Records tab.
+  // Finished sessions, folded into the 待办 tab as a collapsed archive.
   recordsList: $('records-list'),
   recordsEmpty: $('records-empty'),
   recordsTotal: $('records-total'),
@@ -93,54 +93,21 @@ const els = {
   bubbleSecondary: $('bubble-secondary'),
   bubblePrimary: $('bubble-primary'),
 
-  // Settings.
-  imagePath: $('image-path'),
-  chooseImage: $('choose-image'),
-  resetImage: $('reset-image'),
-  scale: $('scale'),
-  scaleValue: $('scale-value'),
-  snap: $('snap'),
-  autostart: $('autostart'),
-  openPluginMarket: $('open-plugin-market'),
-  dataDir: $('data-dir'),
-  quit: $('quit'),
+  // No settings entries: the settings tab moved to the control center, and the few
+  // controls that could not move are in the pomodoro strip below (放弃) or the tray menu
+  // (打开控制中心 / 退出 / 立刻提醒 / 打开数据目录). An `els` entry for an element the page no
+  // longer has would be a null that fails at the first click.
 
   confirm: $('confirm'),
   confirmText: $('confirm-text'),
   confirmOk: $('confirm-ok'),
   confirmCancel: $('confirm-cancel'),
 
-  pomoOnStartup: $('pomo-on-startup'),
-  pomoAutoNext: $('pomo-auto-next'),
-  pomoSound: $('pomo-sound'),
-  pomoFocus: $('pomo-focus'),
-  pomoShort: $('pomo-short'),
-  pomoLong: $('pomo-long'),
-  pomoEvery: $('pomo-every'),
   pomoReset: $('pomo-reset'),
-
-  remEnabled: $('rem-enabled'),
-  remOnStartup: $('rem-on-startup'),
-  remDuringBreak: $('rem-during-break'),
-  remInterval: $('rem-interval'),
-  remJitter: $('rem-jitter'),
-  remFrom: $('rem-from'),
-  remTo: $('rem-to'),
-  remItems: $('rem-items'),
-  remHide: $('rem-hide'),
-  remEmpty: $('rem-empty'),
-  remNow: $('rem-now'),
-  remStatus: $('rem-status'),
 
   // Speech has NO entries here: the voice plugin owns its switches, and it is
   // configured in the plugin market's own window. See the "speech" section near the
   // bottom of this file for why the pet has nothing to render.
-
-  // Global hide/show shortcuts.
-  hotkeyEnabled: $('hotkey-enabled'),
-  hotkeyShow: $('hotkey-show'),
-  hotkeyHide: $('hotkey-hide'),
-  hotkeyStatus: $('hotkey-status'),
 };
 
 /**
@@ -1206,64 +1173,6 @@ function renderRecordItem(rec) {
   return li;
 }
 
-function renderSettings() {
-  if (!state) return;
-  const cfg = state.config || {};
-
-  els.imagePath.textContent = state.hasCustomImage
-    ? cfg.originalPath || '已使用自定义图片'
-    : '当前使用默认图片';
-  els.resetImage.disabled = !state.hasCustomImage;
-
-  const pct = Math.round((cfg.petScale || 1) * 100);
-  els.scale.value = String(pct);
-  els.scaleValue.textContent = `${pct}%`;
-
-  els.snap.checked = cfg.snapToEdge !== false;
-  els.autostart.checked = !!state.autostart;
-  els.dataDir.textContent = state.dataDir || '';
-
-  // Pomodoro settings.
-  els.pomoOnStartup.checked = !!cfg.pomodoroOnStartup;
-  els.pomoAutoNext.checked = !!cfg.autoStartNextPhase;
-  els.pomoSound.checked = !!cfg.pomodoroSound;
-  els.pomoFocus.value = String(cfg.focusMinutes || 25);
-  els.pomoShort.value = String(cfg.shortBreakMinutes || 5);
-  els.pomoLong.value = String(cfg.longBreakMinutes || 15);
-  els.pomoEvery.value = String(cfg.longBreakEvery || 4);
-
-  // Reminder settings.
-  els.remEnabled.checked = !!cfg.reminderEnabled;
-  els.remOnStartup.checked = !!cfg.reminderOnStartup;
-  els.remDuringBreak.checked = cfg.remindDuringBreak !== false;
-  els.remInterval.value = String(cfg.reminderIntervalMin || 30);
-  els.remJitter.value = String(cfg.reminderJitterMaxMin ?? 0);
-  els.remFrom.value = cfg.reminderFrom || '09:00';
-  els.remTo.value = cfg.reminderTo || '22:00';
-  els.remItems.value = String(cfg.reminderMaxItems || 3);
-  els.remHide.value = String(cfg.reminderAutoHideSec || 12);
-  els.remEmpty.checked = !!cfg.remindWhenEmpty;
-  renderReminderStatus();
-
-  // Global hide/show shortcuts.
-  renderHotkeySettings();
-}
-
-/** Renders why the next reminder will or will not appear. */
-function renderReminderStatus() {
-  const r = state?.reminder;
-  if (!r) return;
-  if (!r.enabled) {
-    els.remStatus.textContent = '提醒已关闭。';
-    return;
-  }
-  const parts = [];
-  if (r.nextInSec > 0) parts.push(`下次约 ${Math.ceil(r.nextInSec / 60)} 分钟后`);
-  if (r.suppressed) parts.push(`当前不打扰（${r.suppressed}）`);
-  if (r.missed) parts.push('有错过的提醒，稍后补上');
-  els.remStatus.textContent = parts.join(' · ') || '已开启。';
-}
-
 /**
  * Renders the 对话 tab's plugin slot.
  *
@@ -1532,7 +1441,6 @@ function applyState(next) {
   renderTodos();
   renderPomodoro();
   renderRecords();
-  renderSettings();
   renderBadge();
   renderChatSlot();
   renderBackgroundPlugins();
@@ -1540,6 +1448,16 @@ function applyState(next) {
   if (next.warnings?.length && !applyState._warned) {
     applyState._warned = true;
     toast(next.warnings[0]);
+  }
+  // A refused hot key has to reach the user SOMEWHERE, and the settings page that used to
+  // say so is gone. Go reports it in State.hotkeys.problems ("Ctrl+Alt+S：已被其它程序占用"),
+  // and a toast at the moment it is discovered is the honest equivalent of a red row on a
+  // page that no longer exists: switched on, doing nothing, and now said out loud once.
+  // Once per session, like the warnings above - a toast on every state refresh would be
+  // worse than the silence it replaces.
+  if (next.hotkeys?.problems?.length && !applyState._hotkeyWarned) {
+    applyState._hotkeyWarned = true;
+    toast(`快捷键没生效：${next.hotkeys.problems[0]}`);
   }
 }
 
@@ -1624,8 +1542,6 @@ function switchTab(name) {
   els.tabs.forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
   els.tabTodos.classList.toggle('hidden', name !== 'todos');
   els.tabChat.classList.toggle('hidden', name !== 'chat');
-  els.tabRecords.classList.toggle('hidden', name !== 'records');
-  els.tabSettings.classList.toggle('hidden', name !== 'settings');
 }
 
 /**
@@ -1808,38 +1724,6 @@ function startWithPlan(plan) {
     .catch(fail);
 }
 
-function savePomodoroSettings() {
-  App.SavePomodoroSettings({
-    onStartup: els.pomoOnStartup.checked,
-    autoStartNextPhase: els.pomoAutoNext.checked,
-    remindDuringBreak: els.remDuringBreak.checked,
-    sound: els.pomoSound.checked,
-    focusMinutes: Number(els.pomoFocus.value),
-    shortBreakMinutes: Number(els.pomoShort.value),
-    longBreakMinutes: Number(els.pomoLong.value),
-    longBreakEvery: Number(els.pomoEvery.value),
-  })
-    .then(applyState)
-    .catch(fail);
-}
-
-function saveReminderSettings() {
-  App.SaveReminderSettings({
-    onStartup: els.remOnStartup.checked,
-    enabled: els.remEnabled.checked,
-    intervalMin: Number(els.remInterval.value),
-    jitterMax: Number(els.remJitter.value),
-    from: els.remFrom.value,
-    to: els.remTo.value,
-    maxItems: Number(els.remItems.value),
-    autoHideSec: Number(els.remHide.value),
-    whenEmpty: els.remEmpty.checked,
-    silentFullscreen: true,
-  })
-    .then(applyState)
-    .catch(fail);
-}
-
 // --- wiring ---------------------------------------------------------------
 
 function wire() {
@@ -1869,14 +1753,10 @@ function wire() {
   // executable that may not be there - and Go reports that failure as the call's
   // error, which fail() turns into the toast. There is nothing else to render:
   // which market source to read is the market program's own setting now.
-  els.openPluginMarket.addEventListener('click', () => {
-    App.OpenPluginMarket()
-      .then((next) => {
-        applyState(next);
-        toast('已打开插件市场');
-      })
-      .catch(fail);
-  });
+  // 打开控制中心 is NOT a button here any more: launching a program is what the tray menu
+  // does (打开控制中心 / 打开数据目录 / 退出), and the settings tab that held it is retired.
+  // App.OpenPluginMarket is still bound - the tray calls it - so the launcher, its failure
+  // messages and its "sibling executable" search are all unchanged.
 
   // --- pet dragging -------------------------------------------------------
   // Coordinates are captured on pointerdown, but the drag is not started with
@@ -2131,87 +2011,10 @@ function wire() {
     App.ResetPomodoro().then(applyState).catch(fail);
   });
 
-  // Settings.
-  els.chooseImage.addEventListener('click', () => {
-    App.ChoosePetImage().then(applyState).catch(fail);
-  });
-
-  els.resetImage.addEventListener('click', () => {
-    App.ResetPetImage().then(applyState).catch(fail);
-  });
-
-  els.scale.addEventListener('input', () => {
-    els.scaleValue.textContent = `${els.scale.value}%`;
-  });
-  els.scale.addEventListener('change', () => {
-    // Only commit on release: each call resizes the native window.
-    App.SetScale(Number(els.scale.value) / 100)
-      .then(applyLayout)
-      .catch(fail);
-  });
-
-  els.snap.addEventListener('change', () => {
-    App.SetSnapToEdge(els.snap.checked).then(applyState).catch(fail);
-  });
-
-  els.autostart.addEventListener('change', () => {
-    const wanted = els.autostart.checked;
-    App.SetAutostart(wanted)
-      .then((next) => {
-        applyState(next);
-        toast(wanted ? '已开启开机自启' : '已关闭开机自启');
-      })
-      .catch((err) => {
-        // Revert the checkbox: the registry write failed.
-        els.autostart.checked = !wanted;
-        fail(err);
-      });
-  });
-
-  // Pomodoro settings: committed on change so there is no separate save button.
-  for (const el of [
-    els.pomoOnStartup,
-    els.pomoAutoNext,
-    els.pomoSound,
-    els.pomoFocus,
-    els.pomoShort,
-    els.pomoLong,
-    els.pomoEvery,
-    els.remDuringBreak,
-  ]) {
-    el.addEventListener('change', savePomodoroSettings);
-  }
-
-  // Reminder settings.
-  for (const el of [
-    els.remEnabled,
-    els.remOnStartup,
-    els.remInterval,
-    els.remJitter,
-    els.remFrom,
-    els.remTo,
-    els.remItems,
-    els.remHide,
-    els.remEmpty,
-  ]) {
-    el.addEventListener('change', saveReminderSettings);
-  }
-
-  els.remNow.addEventListener('click', () => {
-    App.RemindNow()
-      .then((next) => {
-        applyState(next);
-        return App.GetLayout();
-      })
-      .then(applyLayout)
-      .catch(fail);
-  });
-
-  els.quit.addEventListener('click', () => {
-    App.Quit().catch(() => {});
-  });
-
-  wireHotkeySettings();
+  // No settings wiring here any more. Everything this block used to do now belongs to one
+  // of three places: the control center (preferences, the picture), the pomodoro strip
+  // (放弃, wired above with the other strip buttons), or the tray menu (打开控制中心 /
+  // 立刻提醒 / 打开数据目录 / 退出) - each the place that owns the thing being changed.
 }
 
 // --- speech ---------------------------------------------------------------
@@ -2233,65 +2036,14 @@ function wire() {
 // the four bindings they drove: SaveVoiceSettings, TestVoice, StopVoice and
 // OpenVoiceStudio.
 
-// --- global hide/show shortcuts -------------------------------------------
-
-/**
- * Renders the shortcut switch, its key labels and whether they actually took.
- *
- * The labels come from Go rather than being written here: the registered keys and
- * the advertised keys are then the same value, so the panel cannot tell the user
- * to press something that was never registered.
- */
-function renderHotkeySettings() {
-  const h = state?.hotkeys || {};
-  els.hotkeyEnabled.checked = !!h.enabled;
-
-  if (h.show) els.hotkeyShow.textContent = h.show;
-  if (h.hide) els.hotkeyHide.textContent = h.hide;
-
-  const el = els.hotkeyStatus;
-  el.classList.remove('ok', 'error');
-
-  // Three distinct states, and the difference matters to the user: switched off,
-  // switched on but refused by Windows, and working.
-  if (!h.enabled) {
-    el.textContent = h.note || '全局快捷键已关闭。';
-    return;
-  }
-  if (h.problems?.length) {
-    el.textContent = `未能生效：${h.problems.join('；')}`;
-    el.classList.add('error');
-    return;
-  }
-  if (h.active) {
-    el.textContent = `已生效：在任意程序里按 ${h.show} 显示，按 ${h.hide} 隐藏。`;
-    el.classList.add('ok');
-    return;
-  }
-  // Enabled, no reported problem, but not active: the OS has not answered yet.
-  el.textContent = h.note || '正在注册快捷键…';
-}
-
-/** Wires the shortcut switch. */
-function wireHotkeySettings() {
-  // Committed on change, like the other switches: there is no save button, and
-  // turning it off has to give the key combinations back immediately.
-  els.hotkeyEnabled.addEventListener('change', () => {
-    App.SaveHotkeySettings({ enabled: els.hotkeyEnabled.checked })
-      .then((next) => {
-        applyState(next);
-        const h = next?.hotkeys;
-        if (h?.enabled && h.active) toast('快捷键已开启');
-        else if (h?.enabled && h.problems?.length) toast('快捷键被占用，未能注册');
-        else if (!h?.enabled) toast('快捷键已关闭');
-      })
-      .catch((err) => {
-        // Revert the checkbox: the store write failed, so the switch is a lie.
-        els.hotkeyEnabled.checked = !els.hotkeyEnabled.checked;
-        fail(err);
-      });
-  });
-}
+// The global-shortcut switch is in the CONTROL CENTER now (开始 → 外观与启动), and the
+// pet applies it within a second: its settings watcher re-registers the keys when the
+// preference changes (app_settingswatch.go). The state still reaches this page - State
+// carries Hotkeys, and pet:visible refreshes it - but nothing here renders it any more,
+// because there is no switch here to render it next to.
+//
+// What stayed: the keys themselves. Showing and hiding the pet is app_hotkey.go's job and
+// the tray offers the same two actions for the mouse.
 
 // --- boot -----------------------------------------------------------------
 

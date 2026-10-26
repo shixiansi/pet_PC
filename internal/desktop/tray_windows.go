@@ -99,6 +99,7 @@ const (
 	trayCmdTogglePomo  = 1006
 	trayCmdShowPet     = 1007
 	trayCmdHidePet     = 1008
+	trayCmdOpenMarket  = 1009
 )
 
 // Exported command IDs so the app can map a menu choice to an action.
@@ -121,6 +122,13 @@ const (
 	// feature could reach, so the tray offers both directions unconditionally.
 	TrayCmdShowPet = trayCmdShowPet
 	TrayCmdHidePet = trayCmdHidePet
+	// TrayCmdOpenMarket launches the plugin market / control center.
+	//
+	// It is here because the panel's settings tab was the only place that button lived,
+	// and that tab is retired (openspec/changes/ui-rebuild 阶段 3). Launching a PROGRAM is
+	// exactly what the rest of this menu does (see TrayCmdOpenData), whereas the panel is
+	// for what the pet is showing right now.
+	TrayCmdOpenMarket = trayCmdOpenMarket
 )
 
 // notifyIconData mirrors NOTIFYICONDATAW (the Vista+ layout). cbSize is filled in

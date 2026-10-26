@@ -352,6 +352,7 @@ func (a *App) startTray() {
 		desktop.TrayMenuAction(desktop.TrayCmdResetPos, "归位到默认位置"),
 		desktop.TrayMenuSeparator(),
 		desktop.TrayMenuAction(desktop.TrayCmdOpenData, "打开数据目录"),
+		desktop.TrayMenuAction(desktop.TrayCmdOpenMarket, "打开控制中心（插件与设置）"),
 		desktop.TrayMenuAction(desktop.TrayCmdQuit, "退出"),
 	}
 	tray, err := desktop.NewTray(desktop.TrayOptions{
@@ -386,6 +387,12 @@ func (a *App) startTray() {
 			case desktop.TrayCmdOpenData:
 				if err := desktop.ShellOpen(a.store.Dir()); err != nil {
 					log.Printf("pet: open data dir: %v", err)
+				}
+			case desktop.TrayCmdOpenMarket:
+				if _, err := a.OpenPluginMarket(); err != nil {
+					// Not fatal and not silent: the program is a sibling exe, so "not
+					// found" is a real state the user has to be told about.
+					log.Printf("pet: open plugin market: %v", err)
 				}
 			case desktop.TrayCmdQuit:
 				a.Quit()
