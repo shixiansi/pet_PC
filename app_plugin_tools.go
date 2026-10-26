@@ -257,13 +257,20 @@ func (a *App) invokePluginTool(pluginID string, t pluginTool, args json.RawMessa
 
 // pluginToolSpecs turns requested tool NAMES into the list the model sees.
 //
-// An unknown name is an error - the same way events.subscribe refuses an unknown
-// event - because a plugin that asked for something this host cannot do has a bug,
-// and quietly offering less would hide it behind "the model never used that tool".
+// A name this host does not know is SKIPPED, and that is deliberately different from
+// how events.subscribe treats an unknown event. The difference is the direction of the
+// version skew: a plugin ships on its own schedule, so a NEWER plugin talking to an
+// older host is an ordinary state. It happened the day memory_read was added - the
+// whole conversation failed with "未知工具 memory_read", which the user reasonably read
+// as "granting the permission did nothing". An unknown EVENT is not the same thing: the
+// event set is closed and stable, so asking for one means the plugin was written
+// against a host that never existed.
 //
-// A name the user did NOT grant is skipped rather than refused: the plugin cannot
-// know what the user allowed, and the model must not be shown a tool it cannot use.
-// The skip is logged so the confusion is diagnosable from debug.log.
+// A name the user did NOT grant is skipped for the other reason: the plugin cannot know
+// what the user allowed, and the model must not be shown a tool it cannot use. Neither
+// skip is silent - both are logged, because "the model never used that tool" and "the
+// tool was never offered" look identical from the outside, and only one of them is a
+// bug.
 func pluginToolSpecs(a *App, granted, want []string) ([]llm.ToolSpec, error) {
 	specs := make([]llm.ToolSpec, 0, len(want))
 	catalog := pluginToolCatalog()
@@ -274,7 +281,8 @@ func pluginToolSpecs(a *App, granted, want []string) ([]llm.ToolSpec, error) {
 		}
 		t, ok := catalog[name]
 		if !ok {
-			return nil, fmt.Errorf("未知工具 %s", name)
+			a.DebugLog(fmt.Sprintf("plugin llm: 工具 %s 是宿主不认识的工具名，已跳过（插件比宿主新？）", name))
+			continue
 		}
 		if !plugins.HasGranted(granted, t.perm) {
 			a.DebugLog(fmt.Sprintf("plugin llm: 工具 %s 需要 %s，未授予，不提供给模型", name, t.perm))

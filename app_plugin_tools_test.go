@@ -303,6 +303,38 @@ func TestToolFrameCarriesNoArguments(t *testing.T) {
 	}
 }
 
+// TestUnknownToolIsSkippedNotFatal covers the version skew: a plugin newer than the
+// host asks for a tool name the host has never heard of.
+//
+// Not hypothetical - it is what happened the day memory_read was added. The old host
+// failed the WHOLE request with "未知工具 memory_read", which from the user's side was
+// indistinguishable from "granting the permission did nothing".
+func TestUnknownToolIsSkippedNotFatal(t *testing.T) {
+	stub := newToolStub(t, textScript("好"))
+	a := pluginApp(t)
+	id := installToolPlugin(t, a, "llm.chat", "plugin.config", "storage", "pet.bubble")
+	setPluginConfig(t, a, id, map[string]string{"llmBaseUrl": stub.URL(), "llmModel": "m"})
+
+	out, err := a.PluginRequest(id, "llm.chat",
+		`{"text":"随便说点","tools":["tool_from_the_future","pet_say"]}`)
+	if err != nil {
+		t.Fatalf("an unknown tool name must not fail the request: %v", err)
+	}
+	if out == "" {
+		t.Error("the request produced no reply")
+	}
+
+	// The known tool still reaches the model; the unknown one does not.
+	tools, ok := stub.Request(0)["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("the request offers %+v, want exactly pet_say", stub.Request(0)["tools"])
+	}
+	name := tools[0].(map[string]any)["function"].(map[string]any)["name"]
+	if name != "pet_say" {
+		t.Errorf("the offered tool is %v, want pet_say", name)
+	}
+}
+
 // TestToolLoopStopsAtTheRoundLimit covers the cap. The model that keeps asking for
 // tools instead of answering must not be able to keep the request alive forever.
 func TestToolLoopStopsAtTheRoundLimit(t *testing.T) {
