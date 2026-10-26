@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"PetPC/internal/store"
 )
@@ -139,5 +140,66 @@ func TestEdgeEventsAreSubscribable(t *testing.T) {
 	}
 	if len(names) != 2 {
 		t.Fatalf("subscribed to %v, want both edge events", names)
+	}
+}
+
+// TestEveryEventCarriesTheHostsLocalTime covers the envelope's `at`.
+//
+// The field exists so a MODEL can be told when something happened. Delivery order
+// alone cannot answer that: a frame that arrives after a stall still describes the
+// moment the phase ended, and a consumer stamping it with its own clock turns
+// "the focus ended at 14:32" into "I noticed at 14:37".
+//
+// The assertions are about SHAPE and ZONE, not about a particular instant: a test
+// that compared a formatted string would break the day the machine's timezone
+// changes, and would prove nothing about whether the value is local.
+func TestEveryEventCarriesTheHostsLocalTime(t *testing.T) {
+	a := pluginApp(t)
+	collected := collectPluginEvents(a)
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"events"}})
+	if _, err := a.PluginRequest(id, "events.subscribe", `{"names":["timer.phaseEnded"]}`); err != nil {
+		t.Fatalf("events.subscribe: %v", err)
+	}
+
+	before := time.Now()
+	a.notifyPluginPhaseEnded(phaseKind(store.PhaseFocus))
+	events := collected("timer.phaseEnded")
+	if len(events) != 1 {
+		t.Fatalf("want exactly 1 event, got %d", len(events))
+	}
+
+	raw := events[0].At
+	if raw == "" {
+		t.Fatal("the envelope carries no `at`: a consumer cannot tell when the event happened")
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		t.Fatalf("at = %q is not RFC 3339: %v", raw, err)
+	}
+	// LOCAL offset, not UTC: a plugin that prints this string to the user must be
+	// showing them their own clock.
+	_, wantOffset := before.Zone()
+	_, gotOffset := at.Zone()
+	if gotOffset != wantOffset {
+		t.Errorf("at carries offset %ds (%q), want the local %ds", gotOffset, raw, wantOffset)
+	}
+	if d := at.Sub(before); d < -2*time.Second || d > 2*time.Second {
+		t.Errorf("at = %v is %v away from now, want it stamped at emit time", at, d)
+	}
+
+	// Every event, not just the edge ones: the stamp lives in emitPluginEvent, and
+	// this is the assertion that keeps it there rather than in one caller.
+	a.notifyPluginReminderFired(1, 0, 1)
+	if _, err := a.PluginRequest(id, "events.subscribe", `{"names":["reminder.fired"]}`); err != nil {
+		t.Fatalf("events.subscribe: %v", err)
+	}
+	a.notifyPluginReminderFired(1, 0, 1)
+	fired := collected("reminder.fired")
+	if len(fired) == 0 {
+		t.Fatal("no reminder.fired event was collected")
+	}
+	if _, err := time.Parse(time.RFC3339, fired[len(fired)-1].At); err != nil {
+		t.Errorf("reminder.fired carries at = %q, which is not RFC 3339: %v",
+			fired[len(fired)-1].At, err)
 	}
 }

@@ -89,7 +89,22 @@ type PluginView struct {
 type PluginEventView struct {
 	PluginID string `json:"pluginId"`
 	Name     string `json:"name"`
-	Payload  any    `json:"payload"`
+	// At is when the HOST emitted this event, as RFC 3339 carrying the LOCAL
+	// offset ("2026-10-26T14:32:00+08:00").
+	//
+	// It exists because the event stream is what a plugin shows a MODEL, and
+	// delivery order alone cannot answer "when": a frame that reaches a plugin
+	// after a stall still describes the moment it happened, not the moment it
+	// arrived. Without this field the receiving side has to stamp the event with
+	// its own clock, which quietly turns "the focus ended at 14:32" into "the
+	// focus ended when I noticed".
+	//
+	// RFC 3339 WITH an offset rather than epoch milliseconds, deliberately: the
+	// string then says which zone it is in, so nobody has to re-derive the zone
+	// from whichever machine they happen to run on - the same class of bug as
+	// assuming everything is UTC.
+	At      string `json:"at"`
+	Payload any    `json:"payload"`
 }
 
 // The market catalogue types (MarketEntry, PluginsView, MarketView) are gone with
@@ -2373,7 +2388,15 @@ func (a *App) emitPluginEvent(pluginID, name string, payload any) {
 	if a.ctx == nil && a.emitFn == nil {
 		return
 	}
-	a.emitEvent("pet:plugin-event", PluginEventView{PluginID: pluginID, Name: name, Payload: payload})
+	// Stamped HERE rather than by the caller: every event goes through this one
+	// function, so one line covers the whole stream. A caller that had to pass
+	// the time would be a caller that can forget to.
+	a.emitEvent("pet:plugin-event", PluginEventView{
+		PluginID: pluginID,
+		Name:     name,
+		At:       time.Now().Format(time.RFC3339),
+		Payload:  payload,
+	})
 }
 
 // emitPluginStateChange delivers a state-change event to every plugin that
