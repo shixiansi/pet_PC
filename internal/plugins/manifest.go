@@ -220,10 +220,11 @@ const (
 
 // configKeyPattern is the only shape a config key may take.
 //
-// It is the SAME shape the storage capability's keys use (app_plugins.go's
-// storageKeyPattern): a key becomes part of a file name in the plugin's private
-// directory, so a separator or ".." would be a way out of it, and there is no
-// legitimate reason for a key that needs one.
+// It is the SAME shape the storage capability's keys use (StorageKeyPath in
+// privatestore.go, which is the path-aware validator that replaced app_plugins.go's
+// storageKeyPattern when the private store moved here): a key becomes part of a file
+// name in the plugin's private directory, so a separator or ".." would be a way out
+// of it, and there is no legitimate reason for a key that needs one.
 var configKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 // Field patterns. Each is anchored, because a partial match on an id or a

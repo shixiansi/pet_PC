@@ -69,6 +69,11 @@ const capsGo = fs.readFileSync(path.join(root, 'internal/plugins/capability.go')
 const goPluginsDispatch = fs.readFileSync(path.join(root, 'internal/plugins/dispatch.go'), 'utf8');
 const goPluginsAsset = fs.readFileSync(path.join(root, 'internal/plugins/asset.go'), 'utf8');
 const goPluginsVoiceMigrate = fs.readFileSync(path.join(root, 'internal/plugins/voice_migrate.go'), 'utf8');
+// The private store: where a plugin's own keys become paths. Read here because the
+// audio-path check in the plugin section asserts StorageKeyPath there, and that
+// validator MOVED into this file when the private store left package main - the
+// check went on looking for its old name in app_plugins.go and was red for it.
+const goPrivateStore = fs.readFileSync(path.join(root, 'internal/plugins/privatestore.go'), 'utf8');
 const goPluginHostJs = fs.readFileSync(path.join(root, 'frontend/src/plugin-host.js'), 'utf8');
 // The voice plugin's package, and the market's plugin hosting. Read here rather than
 // in section 16 because the shared-dispatcher check in section 11 needs
@@ -1357,9 +1362,23 @@ check(
 );
 check(
   'every audio file name is checked before it becomes a path',
-  // The name becomes a file name in the plugin's private directory, so a separator or
-  // a ".." would be a way out of it.
-  /audioNamePattern/.test(goAppPlugins) && /storageKeyPattern/.test(goAppPlugins),
+  // A name becomes a file name in the plugin's private directory, so a separator or
+  // a ".." would be a way out of it. Two validators cover the two kinds of name, and
+  // each is asserted where it now LIVES rather than where it was first written:
+  //   - audio slots are FLAT, so they are checked by flatNamePattern (and its alias
+  //     audioNamePattern) in app_plugins.go;
+  //   - storage keys may name FOLDERS, so they go through StorageKeyPath in
+  //     internal/plugins/privatestore.go, which is path-aware.
+  //
+  // The storage half used to be the text `storageKeyPattern` in app_plugins.go. That
+  // identifier was consolidated away when the private store moved into
+  // internal/plugins, and this assertion then failed on EVERY run - a stale check
+  // inside the gate whose whole job is catching stale wiring between page and host.
+  // A permanently red check is worse than no check: it hides the next real failure.
+  /var flatNamePattern = regexp\.MustCompile/.test(goAppPlugins) &&
+    /audioNamePattern\.MatchString/.test(goAppPlugins) &&
+    /func StorageKeyPath\(key string\)/.test(goPrivateStore) &&
+    (goPrivateStore.match(/StorageKeyPath\(/g) || []).length >= 2,
   'an audio name reaches the filesystem unchecked',
 );
 check(
