@@ -386,22 +386,26 @@ check(
   htmlIds.has('records-list') && htmlIds.has('records-total') && html.includes('id="records-fold"'),
   'the archive went away with the tab it used to live in',
 );
-// The way into the market program used to be a button on the settings page, and it was the
-// ONLY one - losing it would leave the user with a pet, a market they cannot open from the
-// pet, and no explanation. It is a tray menu item now (launching a program is what that menu
-// does), and this is the check that keeps it there. The vitest file that used to drive the
-// button (settings-market.test.js) is deleted with the page it tested; this is its
-// replacement, one layer lower.
+// The way into the control center used to be a button on the settings page, and it was the
+// ONLY one - losing it would leave the user with a pet and no way to reach settings. It then
+// became a tray-menu item ALONE, which is not an entry point but a rumour: the tray icon can
+// be folded into the overflow area, and nothing on screen says it exists. So there are two
+// now, and both are checked: the gear in the panel header (one click, where the user already
+// is) and the tray item (the way in while the panel is closed).
 check(
-  'the pet still offers a way into the market, from its tray menu',
-  // Read inline rather than through a shared const: the tray file is used once, and a
-  // shared const declared further down would be a temporal-dead-zone crash, not a check.
-  /TrayCmdOpenMarket\s*=\s*trayCmdOpenMarket/.test(
-    fs.readFileSync(path.join(root, 'internal/desktop/tray_windows.go'), 'utf8'),
-  ) &&
+  'the pet offers a way into the control center, in the panel header AND the tray',
+  // Inline reads rather than shared consts: each file is used once, and a const declared
+  // further down would be a temporal-dead-zone crash, not a check.
+  /id="open-settings"/.test(html) &&
+    /openSettings: \$\('open-settings'\)/.test(mainJs) &&
+    /els\.openSettings\.addEventListener\('click'/.test(mainJs) &&
+    /App\.OpenPluginMarket\(\)/.test(mainJs) &&
+    /TrayCmdOpenMarket\s*=\s*trayCmdOpenMarket/.test(
+      fs.readFileSync(path.join(root, 'internal/desktop/tray_windows.go'), 'utf8'),
+    ) &&
     /desktop\.TrayCmdOpenMarket,/.test(mainGo) &&
     /case desktop\.TrayCmdOpenMarket:/.test(mainGo),
-  'the market launcher lost its entry point: the settings button is gone and the tray has none',
+  'a way into the control center went missing: the header gear or the tray item',
 );
 
 // --- 5. The conversation lives in the panel as a tab ------------------------

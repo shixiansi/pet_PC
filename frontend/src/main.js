@@ -33,6 +33,10 @@ const els = {
   timerBadge: $('timer-badge'),
   panel: $('panel'),
   close: $('close-panel'),
+  // Opens the control center - the window that owns settings and plugins now. In the panel
+  // HEADER rather than in a tab: a tab for it would be a page with one button on it, and the
+  // tray menu (its only entry point for a while) is invisible unless you already know it.
+  openSettings: $('open-settings'),
   toast: $('toast'),
 
   tabs: document.querySelectorAll('.tab'),
@@ -1398,7 +1402,7 @@ function slotPlugin() {
  * both tell the user the same two things - the plugin is missing, and where to
  * get it.
  */
-const CHAT_SLOT_HINT = '对话插件还没装好：在托盘菜单里点「打开控制中心」装上并授权它。';
+const CHAT_SLOT_HINT = '对话插件还没装好：点右上角的 ⚙ 打开控制中心，装上并授权它。';
 
 /**
  * True while a bubble is holding the slot with a question the user must answer.
@@ -1753,10 +1757,20 @@ function wire() {
   // executable that may not be there - and Go reports that failure as the call's
   // error, which fail() turns into the toast. There is nothing else to render:
   // which market source to read is the market program's own setting now.
-  // 打开控制中心 is NOT a button here any more: launching a program is what the tray menu
-  // does (打开控制中心 / 打开数据目录 / 退出), and the settings tab that held it is retired.
-  // App.OpenPluginMarket is still bound - the tray calls it - so the launcher, its failure
-  // messages and its "sibling executable" search are all unchanged.
+  // 打开控制中心 from the panel header: one click, one call, no state to read back. The
+  // market is a separate process, so the button's whole observable effect is the launch -
+  // a button that also tried to render something would be the host doing the market's job
+  // again. Failure is visible rather than silent: the program is a sibling exe that may not
+  // be there, and "nothing happened" would look like a dead button.
+  els.openSettings.addEventListener('click', () => {
+    App.OpenPluginMarket()
+      .then((next) => {
+        applyState(next);
+        // The panel is in the way of a window that just opened over it.
+        closePanel();
+      })
+      .catch(fail);
+  });
 
   // --- pet dragging -------------------------------------------------------
   // Coordinates are captured on pointerdown, but the drag is not started with

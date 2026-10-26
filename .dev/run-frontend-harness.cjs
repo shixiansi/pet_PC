@@ -1131,13 +1131,39 @@ const checksJs = `
       window.__methods.includes('OpenTodoPanelFromChat'),
       'OpenTodoPanelFromChat is missing from the export set');
 
-    // --- 5. (deleted) the settings entry point -------------------------------
+    // --- 5. the way into the control center is a BUTTON in the panel ---------
     //
-    // This drove the 设置 tab's 「打开插件市场」 button. The button and the tab are gone
-    // (openspec/changes/ui-rebuild 阶段 3): launching a program is a tray menu item now, and
-    // a page harness cannot click a tray menu. The guarantee moved one layer down and is
-    // checked by .dev/check-frontend.cjs ("the pet still offers a way into the market, from
-    // its tray menu"), which pins the menu item AND the switch case that handles it.
+    // History, because it is the reason this check exists in this shape: the entry point was
+    // a button on the 设置 tab; that tab was retired (ui-rebuild 阶段 3) and the entry became
+    // a tray-menu item only - which is invisible unless you already know the tray icon, and
+    // which a page harness cannot click. So it came back into the page, as a gear in the
+    // panel header, and this is the behavioural half of that: one click, one call, no
+    // arguments, and the panel steps aside so the window it opened is not covered.
+    if (document.getElementById('panel').classList.contains('hidden')) {
+      pressPet(1);
+      await settle();
+    }
+    const settingsBtn = document.getElementById('open-settings');
+    ok('the panel header carries a way into the control center', !!settingsBtn, 'no #open-settings button');
+    window.__calls.length = 0;
+    settingsBtn.dispatchEvent(new Event('click', { bubbles: true }));
+    await waitFor('OpenPluginMarket', () => calls('OpenPluginMarket').length === 1);
+    await sleep(120);
+    ok('clicking it asks the host to open the control center exactly once',
+      calls('OpenPluginMarket').length === 1,
+      'OpenPluginMarket calls: ' + calls('OpenPluginMarket').length);
+    ok('the button passes no arguments',
+      last('OpenPluginMarket')?.args.length === 0,
+      'args: ' + JSON.stringify(last('OpenPluginMarket')?.args));
+    ok('the panel gets out of the way of the window it opened',
+      document.getElementById('panel').classList.contains('hidden'),
+      'the panel stayed open under the new window');
+    // Re-open for the sections below, which measure the panel - only if it is closed, so a
+    // handler that failed to close it does not become "the panel is closed twice".
+    if (document.getElementById('panel').classList.contains('hidden')) {
+      pressPet(1);
+      await settle();
+    }
 
     // --- 6. the panel box comes only from the layout -------------------------
     //

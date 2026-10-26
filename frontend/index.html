@@ -82,6 +82,17 @@
                actions (打开控制中心 / 退出 / 立刻提醒 / 打开数据目录) to the tray menu. Nothing
                is left reachable only from a tab that no longer exists. -->
         </div>
+        <!-- The way into the control center, where the user already is.
+             It used to be a button on the 设置 tab; when that tab retired it briefly became
+             a tray-menu item only, i.e. "right-click an icon that may be folded into the
+             overflow area, then pick an entry". That is not an entry point, it is a rumour:
+             a settings surface needs a visible control in the window the user already has
+             open. The tray item stays as the way in while the panel is closed.
+
+             The variation selector (U+FE0E) keeps the gear a TEXT glyph; without it Windows
+             substitutes the colour emoji, which has a different size and baseline from the
+             × beside it. -->
+        <button id="open-settings" class="icon-btn" title="打开控制中心（设置与插件）" aria-label="打开控制中心">&#9881;&#65038;</button>
         <button id="close-panel" class="icon-btn" title="收起面板">×</button>
       </header>
 
