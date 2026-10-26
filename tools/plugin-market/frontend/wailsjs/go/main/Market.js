@@ -10,12 +10,20 @@ export function DataDir() {
   return window['go']['main']['Market']['DataDir']();
 }
 
+export function Diagnostics() {
+  return window['go']['main']['Market']['Diagnostics']();
+}
+
 export function GetConfig(arg1) {
   return window['go']['main']['Market']['GetConfig'](arg1);
 }
 
 export function Grant(arg1, arg2) {
   return window['go']['main']['Market']['Grant'](arg1, arg2);
+}
+
+export function HostKey() {
+  return window['go']['main']['Market']['HostKey']();
 }
 
 export function Install(arg1) {

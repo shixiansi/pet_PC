@@ -245,3 +245,45 @@ export const Todos = (): Promise<Todo[]> => (DEV ? later(FAKE_TODOS) : host.Todo
 export const PomodoroRecords = (): Promise<PomodoroRecord[]> =>
   DEV ? later(FAKE_RECORDS) : host.PomodoroRecords();
 export const DataDir = (): Promise<string> => (DEV ? later('C:\\fake\\PetPC') : host.DataDir());
+
+// --- 高级页的诊断面 --------------------------------------------------------------
+
+export type HostKeyState = main.HostKey;
+
+// The same text the Go side builds, shortened but not reshaped: a fake that drops the
+// "不存在的文件也要说出来" lines would let the page look right while the real report is empty.
+const FAKE_REPORT = `PetPC 诊断报告
+生成时间: 2026-10-26 18:40:12
+数据目录: C:\\fake\\PetPC
+
+== 文件 ==
+settings.json                 412 B  2026-10-26 18:31:04
+config.json                   188 B  2026-10-26 18:38:51
+plugins.json                  264 B  2026-10-18 09:20:11
+plugin-market.json             64 B  2026-10-02 21:05:44
+todos.json                    398 B  2026-10-26 09:12:00
+pomodoro.json                 120 B  2026-10-26 09:55:00
+pomodoro-records.json         512 B  2026-10-26 09:55:00
+llm-key.bin                   452 B  2026-10-18 09:21:30
+debug.log                    不存在
+
+== 已装插件 ==
+com.shixiansi.plugin-chat  v1.4.1  启用  权限 7（已授 6）  对话插件
+com.example.broken  v0.0.3  停用  权限 0（已授 0）
+    manifest: manifest.json: 第 4 行 permissions 里有一项不在权限表内（"todos.remove"）
+
+== 警告 ==
+（无）
+
+== 密钥 ==
+llm-key.bin 存在（DPAPI 密文，本程序不解密）
+
+== 日志尾 ==
+debug.log 不存在：它只在桌宠以 PETPC_DEBUG=1 启动时才被写，平时是正常的。
+`;
+
+export const HostKey = (): Promise<HostKeyState> =>
+  DEV
+    ? later(main.HostKey.createFrom({ Path: 'C:\\fake\\PetPC\\llm-key.bin', Present: true }))
+    : host.HostKey();
+export const Diagnostics = (): Promise<string> => (DEV ? later(FAKE_REPORT) : host.Diagnostics());

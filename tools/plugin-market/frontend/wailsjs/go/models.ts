@@ -177,6 +177,20 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class HostKey {
+	    Path: string;
+	    Present: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new HostKey(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Path = source["Path"];
+	        this.Present = source["Present"];
+	    }
+	}
 	export class LabelPair {
 	    ID: string;
 	    Label: string;

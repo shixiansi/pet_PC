@@ -124,7 +124,20 @@ check('插件：没有任何一行缺 ID（字段名对得上）', !text().inclu
 
 await open('高级');
 check('高级：模型配置来自 store.Config', text().includes('deepseek') && text().includes('deepseek-chat'));
+check('高级：密钥状态来自 HostKey()', text().includes('已设置（DPAPI 密文）') && text().includes('llm-key.bin'));
 check('高级：数据目录来自 DataDir()', text().includes('C:\\fake\\PetPC'));
+
+// The report is generated on demand, so this also checks that the button is wired and that
+// the text arrives - the two things a "有按钮" screenshot cannot tell you.
+const diagButton = [...w.document.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith('生成诊断报告'));
+check('高级：诊断按钮在', Boolean(diagButton));
+if (diagButton) {
+  diagButton.click();
+  await settle();
+  const after = text();
+  check('高级：诊断报告列出了文件与插件', after.includes('== 文件 ==') && after.includes('== 已装插件 =='));
+  check('高级：诊断报告说明了日志为什么不在', after.includes('PETPC_DEBUG'));
+}
 
 check('六个页面都没有报错行', !/已装列表：|权限文案：|读取中…/.test(text()));
 check('没有未捕获错误横幅', banner() === '');
