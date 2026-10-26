@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Card from '../components/Card.svelte';
-  import { MainSettings } from '../../../frontend/wailsjs/go/main/Market';
-  import { PomodoroRecords } from '../../../frontend/wailsjs/go/main/Market';
+  import { MainSettings } from '../lib/bridge';
+  import { PomodoroRecords } from '../lib/bridge';
 
   type Rec = {
     todoTitle?: string;

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Card from '../components/Card.svelte';
-  import { Todos } from '../../../frontend/wailsjs/go/main/Market';
+  import { Todos } from '../lib/bridge';
 
   type Todo = {
     id: string;

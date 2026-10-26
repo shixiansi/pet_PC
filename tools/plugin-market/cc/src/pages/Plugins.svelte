@@ -1,6 +1,6 @@
 <script lang="ts">
   import Card from '../components/Card.svelte';
-  import { Installed, Grant, SetEnabled, PermissionLabels } from '../../../frontend/wailsjs/go/main/Market';
+  import { Installed, Grant, SetEnabled, PermissionLabels } from '../lib/bridge';
 
   type Row = {
     id: string;

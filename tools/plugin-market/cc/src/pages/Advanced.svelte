@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Card from '../components/Card.svelte';
-  import { MainSettings, DataDir } from '../../../frontend/wailsjs/go/main/Market';
+  import { MainSettings, DataDir } from '../lib/bridge';
 
   type Cfg = {
     llmEnabled: boolean;

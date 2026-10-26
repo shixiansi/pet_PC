@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Card from '../components/Card.svelte';
-  import { MainSettings, SetPetScale } from '../../../frontend/wailsjs/go/main/Market';
+  import { MainSettings, SetPetScale } from '../lib/bridge';
 
   let scale = $state(1);
   let loaded = $state(false);

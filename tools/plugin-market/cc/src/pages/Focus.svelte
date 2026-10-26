@@ -8,7 +8,7 @@
     SetLongBreakMinutes,
     SetLongBreakEvery,
     SetAutoStartNextPhase,
-  } from '../../../frontend/wailsjs/go/main/Market';
+  } from '../lib/bridge';
 
   type Cfg = {
     focusMinutes: number;
