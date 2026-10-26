@@ -38,3 +38,10 @@
 # LF avoids spurious diffs when the toolchain is the Linux side.
 *.ps1 text eol=lf
 *.cjs text eol=lf
+
+# Workflow files. Without this line every commit that touches .github/ makes git
+# print "LF will be replaced by CRLF the next time Git touches it" — harmless for
+# Actions, which parses CRLF fine, but it is noise on a file whose siblings are all
+# pinned, and noise is what makes people stop reading git's warnings.
+*.yml text eol=lf
+*.yaml text eol=lf
