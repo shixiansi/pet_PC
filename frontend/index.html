@@ -103,6 +103,13 @@
             <button id="pomo-resume" type="button" class="hidden">继续</button>
             <button id="pomo-stop" type="button" class="hidden">停止</button>
             <button id="pomo-skip" type="button" class="hidden">跳过</button>
+            <!-- 「放弃」lives here rather than with the other settings: it is an action on
+                 the session that is running right now, and it needs the confirmation dialog
+                 this page already owns. It used to sit in the settings tab, which is being
+                 retired (openspec/changes/ui-rebuild 阶段 3) - and of everything that tab
+                 held, this is the one control that could not simply move to the control
+                 center, because there the pet may not even be running. -->
+            <button id="pomo-reset" type="button" class="link-btn danger hidden">放弃</button>
           </div>
         </div>
 
@@ -264,17 +271,11 @@
             </div>
           </div>
 
-          <!-- Reset is not the same as Stop, and the difference is the thing
-               users get wrong, so the button carries its own explanation rather
-               than sitting loose at the bottom of the section. -->
-          <h4 class="ssub">当前番茄</h4>
-          <div class="field">
-            <span class="field-label">放弃</span>
-            <div class="field-input stack">
-              <button id="pomo-reset" type="button" class="danger">放弃当前番茄钟</button>
-              <p class="setting-hint">「停止」可以随时继续；这里才是彻底放弃。</p>
-            </div>
-          </div>
+          <!-- 放弃 used to sit here. It is an action on the running session, not a
+               preference, and it needs the panel's confirmation dialog - so it now lives
+               with 停止 / 跳过 in the pomodoro strip on the 待办 tab. See the comment
+               beside #pomo-reset there for why it is the one control from this page that
+               could not move to the control center. -->
         </section>
 
         <!-- Reminder: when the pet is allowed to interrupt. -->

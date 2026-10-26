@@ -6,6 +6,10 @@ export function Catalogue() {
   return window['go']['main']['Market']['Catalogue']();
 }
 
+export function ChoosePetImage() {
+  return window['go']['main']['Market']['ChoosePetImage']();
+}
+
 export function DataDir() {
   return window['go']['main']['Market']['DataDir']();
 }
@@ -60,6 +64,10 @@ export function PomodoroRecords() {
 
 export function RememberSelection(arg1) {
   return window['go']['main']['Market']['RememberSelection'](arg1);
+}
+
+export function ResetPetImage() {
+  return window['go']['main']['Market']['ResetPetImage']();
 }
 
 export function SaveConfig(arg1, arg2) {

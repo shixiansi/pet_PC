@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"strings"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"PetPC/internal/desktop"
 	"PetPC/internal/store"
@@ -64,6 +67,57 @@ func (m *Market) HotkeyLabels() (desktop.HotkeyView, error) {
 		return desktop.HotkeyView{}, fmt.Errorf("读取设置失败：%w", err)
 	}
 	return desktop.ConfiguredHotkeyView(s.Config().GlobalHotkeys), nil
+}
+
+// --- 桌宠图片 ---------------------------------------------------------------------
+//
+// The picture moves here rather than to the tray, because choosing it needs a MODAL file
+// dialog and this is the window that has one. The copying itself is store.SetPetImage - the
+// same call the pet makes - so there is still one implementation of "put this picture in the
+// data directory".
+//
+// The pet applies it within a second: its settings watcher compares the configured image and
+// re-reads the state when it changes (app_settingswatch.go), which is what makes this an
+// edit rather than a "restart to see it".
+
+func (m *Market) ChoosePetImage() (store.Config, error) {
+	if m.ctx == nil {
+		return store.Config{}, fmt.Errorf("窗口还没准备好，稍后再试")
+	}
+	path, err := runtime.OpenFileDialog(m.ctx, runtime.OpenDialogOptions{
+		Title: "选择桌宠图片",
+		Filters: []runtime.FileFilter{{
+			DisplayName: "图片 (*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.svg)",
+			Pattern:     "*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.svg",
+		}},
+	})
+	if err != nil {
+		return store.Config{}, fmt.Errorf("打开文件对话框失败：%w", err)
+	}
+	if strings.TrimSpace(path) == "" {
+		// Cancelled: not an error, and the settings must not change.
+		return m.MainSettings()
+	}
+	s, err := store.New(m.dataDir)
+	if err != nil {
+		return store.Config{}, fmt.Errorf("读取设置失败：%w", err)
+	}
+	if _, err := s.SetPetImage(path); err != nil {
+		return store.Config{}, err
+	}
+	return s.Config(), nil
+}
+
+// ResetPetImage goes back to the bundled default picture.
+func (m *Market) ResetPetImage() (store.Config, error) {
+	s, err := store.New(m.dataDir)
+	if err != nil {
+		return store.Config{}, fmt.Errorf("读取设置失败：%w", err)
+	}
+	if err := s.ClearPetImage(); err != nil {
+		return store.Config{}, err
+	}
+	return s.Config(), nil
 }
 
 // --- 番茄钟 -----------------------------------------------------------------------

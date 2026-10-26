@@ -24,6 +24,14 @@ import (
 // are two different things, and only the first one comes for free.
 const settingsWatchInterval = time.Second
 
+// eventPetImage tells the page the pet's picture changed on disk.
+//
+// A constant rather than a literal at the call site, like every other event name in this
+// program: .dev/check-frontend.cjs pairs each EventsOn() in the page with an emit in Go, and
+// it resolves constants named eventXxx - a literal buried in a two-argument call is an emit
+// that scan cannot see, which would report the listener as dangling.
+const eventPetImage = "pet:image"
+
 // applyScale re-places the window for a new pet size, holding the bottom-right corner
 // steady so the pet appears to grow from there.
 //
@@ -61,6 +69,7 @@ func (a *App) startSettingsWatch() {
 		cfg := a.store.Config()
 		appliedScale := cfg.PetScale
 		appliedHotkeys := cfg.GlobalHotkeys
+		appliedImage := a.store.ImagePath()
 		ticker := time.NewTicker(settingsWatchInterval)
 		defer ticker.Stop()
 		for {
@@ -83,6 +92,19 @@ func (a *App) startSettingsWatch() {
 					appliedHotkeys = cfg.GlobalHotkeys
 					a.applyHotkeys()
 					a.DebugLog("settings: 外部改动全局快捷键开关，已重新登记")
+				}
+				// The picture is drawn by the WEBVIEW from a URL, so a new file on disk
+				// changes nothing on its own - unlike the scale, there is no geometry to
+				// re-apply, there is mark-up to repaint. The control center is where it is
+				// now chosen, so the pet has to be told; the event carries the URL so the
+				// page does not have to guess when to ask again.
+				if img := a.store.ImagePath(); img != appliedImage {
+					appliedImage = img
+					a.emitEvent(eventPetImage, map[string]any{
+						"petImageUrl":    a.PetImageURL(),
+						"hasCustomImage": img != "",
+					})
+					a.DebugLog("settings: 外部改动桌宠图片，已通知页面重画")
 				}
 			}
 		}

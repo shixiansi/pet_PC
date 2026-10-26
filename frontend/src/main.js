@@ -962,6 +962,9 @@ function renderPomodoro() {
   els.pomoResume.classList.toggle('hidden', !p.enabled || p.running || idle);
   els.pomoStop.classList.toggle('hidden', !p.running);
   els.pomoSkip.classList.toggle('hidden', !p.enabled || idle);
+  // Same rule as 跳过: there has to be a session to abandon. 停止 is the reversible one and
+  // 放弃 is not, which is why the button carries its own confirmation in the click handler.
+  els.pomoReset.classList.toggle('hidden', !p.enabled || idle);
 }
 
 /**
@@ -2018,6 +2021,17 @@ function wire() {
     // overlay together, and the layout is the only thing that says what is
     // actually being painted now.
     App.GetLayout().then(applyLayout).catch(() => {});
+    App.GetState()
+      .then((next) => applyState(next))
+      .catch(() => {});
+  });
+
+  // The picture was changed outside this program (the control center is where it is
+  // chosen now). Unlike the scale, there is no geometry to re-apply: the image is drawn
+  // by the page, so the page has to re-read the state to get the new URL. The payload
+  // carries it, but a full state read is what keeps the settings rows in step too - and
+  // it is one call on an event that fires when a human changes a picture, not a tick.
+  EventsOn('pet:image', () => {
     App.GetState()
       .then((next) => applyState(next))
       .catch(() => {});

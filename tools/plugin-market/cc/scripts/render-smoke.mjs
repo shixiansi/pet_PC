@@ -106,6 +106,7 @@ check(
   '开始：贴边 / 开机启动 / 快捷键三个开关在，键位来自宿主',
   text().includes('拖动后自动贴边') && text().includes('开机自动启动') && text().includes('Ctrl+Alt+S'),
 );
+check('开始：图片卡在，且说得出当前用的是默认图片', text().includes('更换图片') && text().includes('默认图片'));
 
 await open('待办');
 check('待办：标题来自 store.Todo.title', text().includes('写周报') && text().includes('整理纸箱'));

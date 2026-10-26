@@ -258,6 +258,13 @@ export const HotkeyLabels = (): Promise<HotkeyView> =>
     ? later(desktop.HotkeyView.createFrom({ enabled: true, show: 'Ctrl+Alt+S', hide: 'Ctrl+Alt+H', active: true }))
     : host.HotkeyLabels();
 
+// The picture is the one setting whose dialog lives here rather than in the pet: the pet's
+// settings page is going away, and a MODAL file dialog needs a window - this program has
+// one. The copying is store.SetPetImage, i.e. the same call the pet makes.
+export const ChoosePetImage = (): Promise<Config> => (DEV ? savedConfig({ petImageFile: 'C:\\fake\\pet.png' }) : host.ChoosePetImage());
+export const ResetPetImage = (): Promise<Config> =>
+  DEV ? savedConfig({ petImageFile: undefined, originalPath: undefined }) : host.ResetPetImage();
+
 export const SetPomodoroOnStartup = (on: boolean): Promise<Config> =>
   DEV ? savedConfig({ pomodoroOnStartup: on }) : host.SetPomodoroOnStartup(on);
 export const SetPomodoroSound = (on: boolean): Promise<Config> =>

@@ -1,7 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Card from '../components/Card.svelte';
-  import { MainSettings, SetPetScale, SetSnapToEdge, SetAutostart, SetGlobalHotkeys, HotkeyLabels } from '../lib/bridge';
+  import Button from '../components/Button.svelte';
+  import {
+    MainSettings,
+    SetPetScale,
+    SetSnapToEdge,
+    SetAutostart,
+    SetGlobalHotkeys,
+    HotkeyLabels,
+    ChoosePetImage,
+    ResetPetImage,
+  } from '../lib/bridge';
   import type { Config, HotkeyView } from '../lib/bridge';
 
   // `cfg` is the generated store.Config: this page names the fields the host sends, and a
@@ -62,6 +72,25 @@
   {/if}
 </Card>
 
+<Card title="桌宠图片">
+  {#if !cfg}
+    <p class="hint">读取中…</p>
+  {:else}
+    <dl>
+      <dt>当前</dt>
+      <dd class="mono">{cfg.petImageFile ? cfg.petImageFile : '默认图片'}</dd>
+    </dl>
+    <div class="row">
+      <Button variant="primary" onclick={() => save(ChoosePetImage)}>更换图片…</Button>
+      <Button onclick={() => save(ResetPetImage)}>恢复默认</Button>
+    </div>
+    <p class="hint">
+      图片会**复制**进数据目录（再由宿主换个带时间戳的地址），所以原文件挪走也不影响。
+      桌宠那边一秒内重画 —— 它盯着这个设置项，不是等你重启。
+    </p>
+  {/if}
+</Card>
+
 <Card title="外观与启动">
   {#if !cfg}
     <p class="hint">读取中…</p>
@@ -103,8 +132,12 @@
       开机启动会写 HKCU 的 Run 项。这三项都是即时生效的：桌宠每秒看一次设置文件，快捷键会当场重新登记。
     </p>
   {/if}
-  {#if error}<p class="err">{error}</p>{/if}
 </Card>
+
+<!-- One error line for the whole page: every card here writes the same preference file, so
+     the reason a write failed belongs to the page, not to the card that happened to be
+     clicked first. -->
+{#if error}<p class="err">{error}</p>{/if}
 
 <style>
   .row { display: flex; align-items: center; gap: var(--space-3); }

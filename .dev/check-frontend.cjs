@@ -218,6 +218,8 @@ check(
 // the same reason, one step further: they are new files, and a new file that is
 // not listed is a file whose events look like subscriptions nothing ever sends.
 // app_live.go was in this list and is gone with the host's live overlay.
+// app_settingswatch.go is here because pet:image is emitted from it: the watcher is
+// what notices a picture chosen in the control center.
 const goFiles = [
   'app_llm.go',
   'app.go',
@@ -228,6 +230,7 @@ const goFiles = [
   'app_chat_slot.go',
   'app_plugin_migrate.go',
   'app_plugin_surface.go',
+  'app_settingswatch.go',
 ].map((f) => fs.readFileSync(path.join(root, f), 'utf8'));
 const goSource = goFiles.join('\n');
 const emitted = new Set([...goSource.matchAll(/emitEvent\(\s*([A-Za-z_]\w*)/g)].map((m) => m[1]));
@@ -472,7 +475,11 @@ const expectedSettingsIds = [
   'image-path', 'choose-image', 'reset-image', 'scale', 'scale-value', 'snap', 'autostart',
   'hotkey-enabled', 'hotkey-show', 'hotkey-hide', 'hotkey-status',
   'pomo-on-startup', 'pomo-auto-next', 'pomo-sound', 'pomo-focus', 'pomo-short', 'pomo-long',
-  'pomo-every', 'pomo-reset',
+  // 'pomo-reset' is NOT here any more: 放弃 left this page. It is an action on the running
+  // session rather than a preference, and it needs the panel's confirmation dialog, so it
+  // moved next to 停止 / 跳过 in the pomodoro strip (frontend/index.html) - where the
+  // strip's own checks see it.
+  'pomo-every',
   'rem-enabled', 'rem-on-startup', 'rem-during-break', 'rem-interval', 'rem-jitter', 'rem-from',
   'rem-to', 'rem-items', 'rem-hide', 'rem-empty', 'rem-now', 'rem-status',
   // The one AI-shaped control left in the pet: it launches the market program
