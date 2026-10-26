@@ -3,6 +3,11 @@
   import Card from '../components/Card.svelte';
   import { MainSettings, SetPetScale } from '../lib/bridge';
 
+  // `petScale`, not `PetScale`: store.Config HAS json tags, so the host sends camelCase
+  // here even though the plugin rows next door are PascalCase. This page used to read
+  // `cfg.PetScale`, which was `undefined` forever - and because MainSettings() was declared
+  // Promise<any>, nothing complained. The slider showed 1.0 whatever the real scale was,
+  // and after a drag `scale` became undefined and `scale.toFixed` threw.
   let scale = $state(1);
   let loaded = $state(false);
   let error = $state('');
@@ -10,7 +15,7 @@
   onMount(async () => {
     try {
       const cfg = await MainSettings();
-      scale = cfg.PetScale ?? 1;
+      scale = cfg.petScale ?? 1;
     } catch (e) {
       error = String(e);
     } finally {
@@ -24,8 +29,10 @@
     const value = Number((e.currentTarget as HTMLInputElement).value);
     scale = value;
     try {
+      // The setter answers with the config the store SAVED, so the number on screen is the
+      // clamped one the pet will actually use, not the one the slider was dragging to.
       const cfg = await SetPetScale(value);
-      scale = cfg.PetScale;
+      scale = cfg.petScale;
       error = '';
     } catch (err) {
       error = String(err);

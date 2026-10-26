@@ -1,4 +1,5 @@
-// Renders the plugin page in a headless DOM and asserts what it PRINTS.
+// Renders the six pages in a headless DOM and asserts what they PRINT and what their
+// inputs are set to.
 //
 // WHY THIS EXISTS: the plugin page spent five rounds stuck on 「读取中」 and one round
 // showing four empty rows, and every round was diagnosed from a screenshot of the .exe.
@@ -6,10 +7,16 @@
 // page agreed with each other and disagreed with the host - and a screenshot of "nothing"
 // carries no information about which of the three was wrong.
 //
-// So this builds the app the same way `npm run dev` serves it (NODE_ENV=development, so
-// `import.meta.env.DEV` is true and the stub answers), mounts it in jsdom, clicks 插件, and
-// fails if the rendered text does not contain what the host actually sends: names from
-// `Manifest.Name`, ids from `Installed.ID`, wording from the `[]LabelPair` slice.
+// Then the start page turned out to have the same defect in the other direction: it read
+// `cfg.PetScale` while the host sends `petScale`, so the slider was pinned at 1.0 and a
+// drag made it throw. It was announced as "确认可用" because a slider at 1.0 looks fine.
+// An assertion on the VALUE, against a fake that is 1.2, is the difference between "the
+// page rendered" and "the page rendered the host's number".
+//
+// So: this builds the app the same way `npm run dev` serves it (NODE_ENV=development, so
+// `import.meta.env.DEV` is true and the stub answers), mounts it in jsdom, walks all six
+// rail pages, and fails on any empty field, any error banner, any input holding the wrong
+// number.
 //
 // Run:  npm run smoke
 //
@@ -72,30 +79,56 @@ globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 0);
 
 const entry = readdirSync(join(outDir, 'assets')).find((f) => f.endsWith('.js'));
 await import(pathToFileURL(join(outDir, 'assets', entry)).href);
+
 // The stub answers 120ms late on purpose, so "读取中" is observable; wait past that.
-await new Promise((r) => setTimeout(r, 400));
+const settle = () => new Promise((r) => setTimeout(r, 600));
+await settle();
 
-const rail = [...w.document.querySelectorAll('nav button')].find((b) => b.textContent.trim() === '插件');
-if (!rail) {
-  console.error('smoke: 找不到「插件」导航按钮，rail 上的页面名字变了？');
-  process.exit(1);
+const text = () => w.document.body.textContent.replace(/\s+/g, ' ');
+const banner = () => (w.document.getElementById('boot-error')?.textContent || '').trim();
+
+async function open(label) {
+  const button = [...w.document.querySelectorAll('nav button')].find((b) => b.textContent.trim() === label);
+  if (!button) throw new Error('找不到「' + label + '」导航按钮，rail 上的页面名字变了？');
+  button.click();
+  await settle();
 }
-rail.click();
-await new Promise((r) => setTimeout(r, 600));
 
-const text = w.document.body.textContent.replace(/\s+/g, ' ');
-const banner = (w.document.getElementById('boot-error')?.textContent || '').trim();
-const checks = [
-  ['页面挂上了（v4 标记）', text.includes('已装插件 · v4')],
-  ['加载完了，不是永久的「读取中」', !text.includes('读取中')],
-  ['名字来自 Manifest.Name', text.includes('对话插件') && text.includes('语音插件')],
-  ['id 来自 Installed.ID', text.includes('com.shixiansi.plugin-chat')],
-  ['权限文案来自 []LabelPair', text.includes('读取待办列表') && text.includes('保存并播放音频')],
-  ['manifest 坏掉的那一行说出了原因', text.includes('manifest.json: 第 4 行')],
-  ['没有任何一行缺 ID（字段名对得上）', !text.includes('没有 ID')],
-  ['两次调用都没报错', !text.includes('已装列表：') && !text.includes('权限文案：')],
-  ['没有未捕获错误横幅', banner === ''],
-];
+const checks = [];
+const check = (name, ok) => checks.push([name, ok]);
+
+await open('开始');
+const range = w.document.querySelector('input[type="range"]');
+check('开始：滑块拿到了宿主的 petScale（1.2）', range?.value === '1.2');
+check('开始：读数也是 1.2×', text().includes('1.2×'));
+check('开始：没有停在读取中', !text().includes('读取中'));
+
+await open('待办');
+check('待办：标题来自 store.Todo.title', text().includes('写周报') && text().includes('整理纸箱'));
+check('待办：完成数来自 store.Todo.done', text().includes('1 项未完成 / 共 2 项'));
+
+await open('专注');
+const number = w.document.querySelector('input[type="number"]');
+check('专注：第一个框拿到了 focusMinutes（25）', number?.value === '25');
+check('专注：自动接续读到了 autoStartNextPhase', text().includes('自动接续下一段'));
+
+await open('记录');
+check('记录：来自 store.PomodoroRecord', text().includes('写周报') && text().includes('共 1 个番茄'));
+
+await open('插件');
+check('插件：四/三行的名字来自 plugins.Installed.Manifest.Name', text().includes('对话插件') && text().includes('语音插件'));
+check('插件：id 来自 ID', text().includes('com.shixiansi.plugin-chat'));
+check('插件：文案来自 []LabelPair', text().includes('读取待办列表') && text().includes('保存并播放音频'));
+check('插件：manifest 坏掉的那一行说出了原因', text().includes('manifest.json: 第 4 行'));
+check('插件：没有任何一行缺 ID（字段名对得上）', !text().includes('没有 ID'));
+
+await open('高级');
+check('高级：模型配置来自 store.Config', text().includes('deepseek') && text().includes('deepseek-chat'));
+check('高级：数据目录来自 DataDir()', text().includes('C:\\fake\\PetPC'));
+
+check('六个页面都没有报错行', !/已装列表：|权限文案：|读取中…/.test(text()));
+check('没有未捕获错误横幅', banner() === '');
+
 let bad = 0;
 for (const [name, ok] of checks) {
   console.log((ok ? 'PASS  ' : 'FAIL  ') + name);
@@ -103,7 +136,7 @@ for (const [name, ok] of checks) {
 }
 rmSync(outDir, { recursive: true, force: true });
 if (bad) {
-  console.log('\n--- 页面文本 ---\n' + text + '\n--- 横幅 ---\n' + banner);
+  console.log('\n--- 页面文本 ---\n' + text() + '\n--- 横幅 ---\n' + banner());
   process.exit(1);
 }
 console.log('smoke: ' + checks.length + '/' + checks.length);

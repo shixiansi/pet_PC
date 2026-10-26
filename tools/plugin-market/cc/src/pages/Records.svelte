@@ -1,25 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Card from '../components/Card.svelte';
-  import { MainSettings } from '../lib/bridge';
   import { PomodoroRecords } from '../lib/bridge';
+  import type { PomodoroRecord } from '../lib/bridge';
 
-  type Rec = {
-    todoTitle?: string;
-    startedAt?: string;
-    endedAt?: string;
-    focusMinutes?: number;
-    plan?: string;
-    summary?: string;
-  };
-
-  let records = $state<Rec[]>([]);
+  let records = $state<PomodoroRecord[]>([]);
   let loaded = $state(false);
   let error = $state('');
 
   onMount(async () => {
     try {
-      void MainSettings; // keep the import used: pages share one binding module
       records = (await PomodoroRecords()) ?? [];
     } catch (e) {
       error = String(e);
@@ -30,7 +20,7 @@
 
   // Newest first, and grouped by day the way the pet's own records page does it.
   const days = $derived.by(() => {
-    const by = new Map<string, Rec[]>();
+    const by = new Map<string, PomodoroRecord[]>();
     for (const r of [...records].reverse()) {
       const key = r.endedAt ? new Date(r.endedAt).toLocaleDateString('zh-CN') : '未知日期';
       const list = by.get(key) ?? [];

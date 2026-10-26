@@ -2,16 +2,9 @@
   import { onMount } from 'svelte';
   import Card from '../components/Card.svelte';
   import { MainSettings, DataDir } from '../lib/bridge';
+  import type { Config } from '../lib/bridge';
 
-  type Cfg = {
-    llmEnabled: boolean;
-    llmProvider: string;
-    llmBaseUrl: string;
-    llmModel: string;
-    llmDailyBudget: number;
-  };
-
-  let cfg = $state<Cfg | null>(null);
+  let cfg = $state<Config | null>(null);
   let dir = $state('');
   let error = $state('');
 

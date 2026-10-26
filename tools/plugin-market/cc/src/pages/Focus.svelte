@@ -9,16 +9,11 @@
     SetLongBreakEvery,
     SetAutoStartNextPhase,
   } from '../lib/bridge';
+  import type { Config } from '../lib/bridge';
 
-  type Cfg = {
-    focusMinutes: number;
-    shortBreakMinutes: number;
-    longBreakMinutes: number;
-    longBreakEvery: number;
-    autoStartNextPhase: boolean;
-  };
-
-  let cfg = $state<Cfg | null>(null);
+  // The generated store.Config, not a hand-written subset of it: a page that declares the
+  // four fields it happens to use cannot notice the day the host renames one of them.
+  let cfg = $state<Config | null>(null);
   let error = $state('');
 
   onMount(async () => {
@@ -32,7 +27,7 @@
   // Every setter returns the config the store actually SAVED, which is Normalise'd. So
   // the page shows the clamped value - typing 999 into the focus box leaves 180 on
   // screen, and the user learns the limit instead of silently keeping an impossible one.
-  async function apply(run: () => Promise<Cfg>) {
+  async function apply(run: () => Promise<Config>) {
     try {
       cfg = await run();
       error = '';

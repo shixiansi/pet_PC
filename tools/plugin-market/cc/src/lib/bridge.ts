@@ -12,31 +12,35 @@
  * know which one they are talking to, which is what makes the dev loop honest instead of
  * a parallel universe.
  *
- * The fakes are deliberately shaped like the real payloads (a plugin row, a Config with
- * the fields the pages read) rather than like what the pages find convenient.
+ * WHY EVERY TYPE HERE COMES FROM wailsjs/go/models.ts AND NOT FROM THIS FILE: the types
+ * were hand-written once, in camelCase, because camelCase is what this file uses and what
+ * the fake data was written in.
  *
- * WHY THE TYPES COME FROM wailsjs/go/models.ts AND ARE NOT DECLARED HERE: they were
- * declared here once, in camelCase, because camelCase is what the rest of this file uses
- * and what the fake data was written in. The host sends `plugins.Installed` WITHOUT json
- * tags, so its keys are its Go field names - `ID`, `Enabled`, `Manifest.Name` - and every
- * page that read `row.id` got `undefined` for all four fields on every row. In the browser
- * it looked perfect, because the fake data agreed with the wrong type: the stub was a
- * parallel universe after all, and the only thing that could see the difference was the
- * .exe.
+ *   - `plugins.Installed` has no json tags, so the host sends `ID`, `Enabled`,
+ *     `Manifest.Name`. A page reading `row.id` got `undefined` four times over, and the
+ *     browser showed nothing wrong because the fake data agreed with the wrong type.
+ *   - `store.Config` DOES have json tags, which hid the same mistake in the other
+ *     direction: `MainSettings()` was declared `Promise<any>`, so the start page's
+ *     `cfg.PetScale` (the host sends `petScale`) compiled happily and the slider was
+ *     pinned at 1.0 forever.
  *
- * So the row is the generated class itself. A field name that the host does not send now
- * fails `npm run check`, and the fakes cannot quietly disagree with the host because they
- * are that same type.
+ * Both are the same bug wearing different clothes: a description of the payload that is
+ * not the payload. So the descriptions are gone. Every type below IS the generated class,
+ * the fakes are built through `createFrom` (the same conversion a real call does), and a
+ * field name the host does not send is now a `npm run check` error.
  */
 import * as host from '../../../frontend/wailsjs/go/main/Market';
-import { main, plugins } from '../../../frontend/wailsjs/go/models';
+import { main, plugins, store } from '../../../frontend/wailsjs/go/models';
 
 const DEV = import.meta.env.DEV;
 
-// PluginRow IS the host's row. Re-exported so pages import one name for it instead of
-// restating eight fields that then drift.
+// The pages import these names instead of restating fields, so there is exactly one
+// description of every payload and it is the generated one.
 export type PluginRow = plugins.Installed;
 export type PermissionLabel = main.LabelPair;
+export type Config = store.Config;
+export type Todo = store.Todo;
+export type PomodoroRecord = store.PomodoroRecord;
 
 // Three rows, three shapes the host really produces:
 //
@@ -49,9 +53,6 @@ export type PermissionLabel = main.LabelPair;
 //
 // A nil Manifest is `undefined` here and `null` from Go; both are falsy, and the page must
 // not care which.
-// `createFrom` is how the generated models are meant to be built from a payload - it is
-// the same conversion the bindings would do for a real call, so the fake cannot acquire a
-// shape the real one could not have.
 const FAKE_ROWS: PluginRow[] = [
   plugins.Installed.createFrom({
     ID: 'com.shixiansi.plugin-chat',
@@ -134,22 +135,89 @@ const LABELS: Array<[id: string, label: string]> = [
 
 const FAKE_LABELS: PermissionLabel[] = LABELS.map(([ID, Label]) => main.LabelPair.createFrom({ ID, Label }));
 
-const FAKE_CONFIG = {
+// Every field store.DefaultConfig sets, at its default value, because that is what the host
+// actually sends: a fake with four convenient fields would hide a page reading a fifth.
+// `petScale` is 1.2 rather than 1.0 so a page that renders it CANNOT look right by accident
+// - which is exactly how the start page's `cfg.PetScale` stayed invisible in the browser.
+const FAKE_CONFIG: Config = store.Config.createFrom({
   petScale: 1.2,
+  position: { x: 1180, y: 640 },
+  snapToEdge: true,
+  edgeMargin: 8,
+  autostart: false,
+  marketBaseUrl: 'https://gh-proxy.com/https://raw.githubusercontent.com/shixiansi/pet-pc-plugins/main',
+  globalHotkeys: false,
+  pomodoroOnStartup: false,
+  autoStartNextPhase: true,
+  remindDuringBreak: true,
+  pomodoroSound: true,
   focusMinutes: 25,
   shortBreakMinutes: 5,
   longBreakMinutes: 15,
   longBreakEvery: 4,
-  autoStartNextPhase: true,
-  llmEnabled: true,
+  reminderOnStartup: false,
+  reminderEnabled: false,
+  reminderIntervalMin: 30,
+  reminderJitterMaxMin: 3,
+  reminderFrom: '09:00',
+  reminderTo: '22:00',
+  reminderMaxItems: 3,
+  reminderAutoHideSec: 12,
+  remindWhenEmpty: false,
+  llmEnabled: false,
   llmProvider: 'deepseek',
   llmBaseUrl: 'https://api.deepseek.com/v1',
   llmModel: 'deepseek-chat',
+  llmTemperature: 0.8,
+  llmMaxTokens: 800,
+  llmTimeoutSec: 90,
+  llmSystemPrompt: '你是一只住在用户桌面上的小猫桌宠，名字叫「桌宠」。',
+  llmHistoryTurns: 12,
+  llmContextTodos: true,
+  llmProactive: false,
+  llmProactiveMinGapMin: 60,
   llmDailyBudget: 200,
-};
+});
+
+const FAKE_TODOS: Todo[] = [
+  store.Todo.createFrom({
+    id: 'a',
+    title: '写周报',
+    notes: '第三节讲清楚为什么不做多窗口',
+    due: '2026-10-27T18:00:00+08:00',
+    done: false,
+    createdAt: '2026-10-26T09:12:00+08:00',
+  }),
+  store.Todo.createFrom({
+    id: 'b',
+    title: '整理纸箱',
+    done: true,
+    createdAt: '2026-10-20T20:00:00+08:00',
+    doneAt: '2026-10-21T10:30:00+08:00',
+  }),
+];
+
+const FAKE_RECORDS: PomodoroRecord[] = [
+  store.PomodoroRecord.createFrom({
+    id: 'r1',
+    todoId: 'a',
+    todoTitle: '写周报',
+    startedAt: '2026-10-26T09:30:00+08:00',
+    endedAt: '2026-10-26T09:55:00+08:00',
+    focusMinutes: 25,
+    plan: '写完第三节',
+    summary: '写了两节，第三节开头',
+  }),
+];
 
 // A dev-only delay so a "读取中" state is actually observable instead of flashing past.
 const later = <T>(v: T, ms = 120): Promise<T> => new Promise((r) => setTimeout(() => r(v), ms));
+
+// The setters return the config the store SAVED, normalise included, so the fake has to
+// come back with the change applied - a setter that returned the old config would make the
+// page look like it ignored the click.
+const savedConfig = (patch: Partial<Config>): Promise<Config> =>
+  later(store.Config.createFrom({ ...FAKE_CONFIG, ...patch }));
 
 export const Installed = (): Promise<PluginRow[]> => (DEV ? later(FAKE_ROWS) : host.Installed());
 export const PermissionLabels = (): Promise<PermissionLabel[]> =>
@@ -159,28 +227,21 @@ export const Grant = (id: string, granted: string[]): Promise<void | unknown> =>
 export const SetEnabled = (id: string, on: boolean): Promise<void | unknown> =>
   DEV ? later(undefined) : host.SetEnabled(id, on);
 
-export const MainSettings = (): Promise<any> => (DEV ? later(FAKE_CONFIG) : host.MainSettings());
-export const SetPetScale = (_v: number): Promise<any> => (DEV ? later(FAKE_CONFIG) : host.SetPetScale(_v));
-export const SetFocusMinutes = (_v: number): Promise<any> => (DEV ? later(FAKE_CONFIG) : host.SetFocusMinutes(_v));
-export const SetShortBreakMinutes = (_v: number): Promise<any> =>
-  DEV ? later(FAKE_CONFIG) : host.SetShortBreakMinutes(_v);
-export const SetLongBreakMinutes = (_v: number): Promise<any> =>
-  DEV ? later(FAKE_CONFIG) : host.SetLongBreakMinutes(_v);
-export const SetLongBreakEvery = (_v: number): Promise<any> => (DEV ? later(FAKE_CONFIG) : host.SetLongBreakEvery(_v));
-export const SetAutoStartNextPhase = (_v: boolean): Promise<any> =>
-  DEV ? later(FAKE_CONFIG) : host.SetAutoStartNextPhase(_v);
+export const MainSettings = (): Promise<Config> => (DEV ? later(FAKE_CONFIG) : host.MainSettings());
+export const SetPetScale = (v: number): Promise<Config> =>
+  DEV ? savedConfig({ petScale: v }) : host.SetPetScale(v);
+export const SetFocusMinutes = (v: number): Promise<Config> =>
+  DEV ? savedConfig({ focusMinutes: v }) : host.SetFocusMinutes(v);
+export const SetShortBreakMinutes = (v: number): Promise<Config> =>
+  DEV ? savedConfig({ shortBreakMinutes: v }) : host.SetShortBreakMinutes(v);
+export const SetLongBreakMinutes = (v: number): Promise<Config> =>
+  DEV ? savedConfig({ longBreakMinutes: v }) : host.SetLongBreakMinutes(v);
+export const SetLongBreakEvery = (v: number): Promise<Config> =>
+  DEV ? savedConfig({ longBreakEvery: v }) : host.SetLongBreakEvery(v);
+export const SetAutoStartNextPhase = (on: boolean): Promise<Config> =>
+  DEV ? savedConfig({ autoStartNextPhase: on }) : host.SetAutoStartNextPhase(on);
 
-export const Todos = (): Promise<any[]> =>
-  DEV
-    ? later([
-        { id: 'a', title: '写周报', done: false, createdAt: new Date().toISOString() },
-        { id: 'b', title: '整理纸箱', done: true, createdAt: new Date().toISOString() },
-      ])
-    : host.Todos();
-export const PomodoroRecords = (): Promise<any[]> =>
-  DEV
-    ? later([
-        { todoTitle: '写周报', focusMinutes: 25, endedAt: new Date().toISOString(), plan: '写完第三节', summary: '写了两节' },
-      ])
-    : host.PomodoroRecords();
+export const Todos = (): Promise<Todo[]> => (DEV ? later(FAKE_TODOS) : host.Todos());
+export const PomodoroRecords = (): Promise<PomodoroRecord[]> =>
+  DEV ? later(FAKE_RECORDS) : host.PomodoroRecords();
 export const DataDir = (): Promise<string> => (DEV ? later('C:\\fake\\PetPC') : host.DataDir());

@@ -2,15 +2,7 @@
   import { onMount } from 'svelte';
   import Card from '../components/Card.svelte';
   import { Todos } from '../lib/bridge';
-
-  type Todo = {
-    id: string;
-    title: string;
-    notes?: string;
-    due?: string;
-    done: boolean;
-    createdAt: string;
-  };
+  import type { Todo } from '../lib/bridge';
 
   let todos = $state<Todo[]>([]);
   let query = $state('');
