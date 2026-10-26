@@ -38,6 +38,10 @@ export function PluginRequest(arg1, arg2, arg3) {
   return window['go']['main']['Market']['PluginRequest'](arg1, arg2, arg3);
 }
 
+export function PomodoroRecords() {
+  return window['go']['main']['Market']['PomodoroRecords']();
+}
+
 export function RememberSelection(arg1) {
   return window['go']['main']['Market']['RememberSelection'](arg1);
 }

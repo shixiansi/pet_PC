@@ -23,6 +23,8 @@ export function PluginMarketPath():Promise<string|boolean>;
 
 export function PluginRequest(arg1:string,arg2:string,arg3:string):Promise<string>;
 
+export function PomodoroRecords():Promise<Array<store.PomodoroRecord>>;
+
 export function RememberSelection(arg1:string):Promise<void>;
 
 export function SaveConfig(arg1:string,arg2:Record<string, string>):Promise<void>;

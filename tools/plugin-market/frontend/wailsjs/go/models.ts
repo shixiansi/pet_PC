@@ -759,6 +759,58 @@ export namespace store {
 		    return a;
 		}
 	}
+	export class PomodoroRecord {
+	    id: string;
+	    todoId?: string;
+	    todoTitle?: string;
+	    // Go type: time
+	    startedAt: any;
+	    // Go type: time
+	    endedAt: any;
+	    focusMinutes: number;
+	    summary: string;
+	    // Go type: time
+	    editedAt?: any;
+	    plan?: string;
+	    // Go type: time
+	    planEditedAt?: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new PomodoroRecord(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.todoId = source["todoId"];
+	        this.todoTitle = source["todoTitle"];
+	        this.startedAt = this.convertValues(source["startedAt"], null);
+	        this.endedAt = this.convertValues(source["endedAt"], null);
+	        this.focusMinutes = source["focusMinutes"];
+	        this.summary = source["summary"];
+	        this.editedAt = this.convertValues(source["editedAt"], null);
+	        this.plan = source["plan"];
+	        this.planEditedAt = this.convertValues(source["planEditedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	
 	export class Todo {
 	    id: string;
