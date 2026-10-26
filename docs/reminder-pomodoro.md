@@ -738,7 +738,7 @@ DismissBubble() error
 | `internal/store/pomodoro.go` | 番茄钟运行状态（`pomodoro.json`，含计划门控字段 §4.5.2）、记录档案（`pomodoro-records.json`，含计划字段）、阶段常量与时长 |
 | `internal/store/reminder.go` | 提醒候选选取（§5.4 优先级）、活跃时段判断、`OpenTodos` |
 | `internal/store/store.go` | `Config` 新增 19 项 + `Normalise` 的「零值即缺省」升级 |
-| `pomodoro.go` | 状态机：`startFocus`/`pause`/`resume`/`stop`/`reset`/`finishPhase`/`skipPhase`/`reconcile`/`Remaining`，以及门控判定纯函数 `shouldAskPlan`（§4.5.2） |
+| `internal/pomodoro/machine.go` | 状态机：`StartFocus`/`Pause`/`Resume`/`Stop`/`Reset`/`FinishPhase`/`SkipPhase`/`Reconcile`/`Remaining`，以及门控判定纯函数 `ShouldAskPlan`（§4.5.2）。2026-10 从 `package main` 的 `pomodoro.go` 下沉而来（`openspec/changes/pomodoro-state-machine-extraction`），只有这里和 `internal/store` 是它的依赖 |
 | `app_pomodoro.go` | 绑定方法、气泡内容（含计划气泡）、记录页数据、系统提示音调用、计划在内存中的生命周期 |
 | `app.go` | `App.focusPlan` 与全屏取值注入点 `foregroundFullscreen`；关闭面板时重弹计划气泡 |
 | `app_hotkey.go` | 计划待答时拒绝隐藏桌宠（`errPlanBlocksHiding`） |

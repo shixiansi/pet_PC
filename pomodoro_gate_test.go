@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"PetPC/internal/pomodoro"
 	"PetPC/internal/store"
 )
 
@@ -26,12 +27,12 @@ func parkedAfterFocus(t *testing.T, tune func(*store.Config)) (*App, store.Pomod
 
 	cfg := a.store.Config()
 	start := time.Now()
-	st := startFocus(enabledIdle(), cfg, "t1", "写周报", start).State
+	st := pomodoro.StartFocus(enabledIdle(), cfg, "t1", "写周报", start).State
 	if err := a.store.SavePomodoro(st); err != nil {
 		t.Fatalf("SavePomodoro: %v", err)
 	}
 
-	a.completePhase(finishPhase(st, cfg, start.Add(25*time.Minute), start.Add(25*time.Minute), false), false)
+	a.completePhase(pomodoro.FinishPhase(st, cfg, start.Add(25*time.Minute), start.Add(25*time.Minute), false), false)
 	return a, a.store.Pomodoro()
 }
 
@@ -57,7 +58,7 @@ func TestFocusEndWaitsForItsRecord(t *testing.T) {
 	if st.EndsAt != nil {
 		t.Errorf("a waiting break must have no end time, got %v", st.EndsAt)
 	}
-	if got := Remaining(st, time.Now()); got != 5*time.Minute {
+	if got := pomodoro.Remaining(st, time.Now()); got != 5*time.Minute {
 		t.Errorf("remaining = %v, want the full 5m banked", got)
 	}
 	// The prompt must be up, or the user has no way to release the gate.

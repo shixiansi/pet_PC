@@ -52,8 +52,15 @@ const mainGo = fs.readFileSync(path.join(root, 'app.go'), 'utf8');
 // The pomodoro gate: the app bindings and the pure state machine. Read separately
 // because the "does not auto-start" rule lives in the engine and everything that
 // releases it lives in the app layer.
+//
+// The engine is now a PACKAGE, not a file next to app_pomodoro.go: the extraction
+// (openspec/changes/pomodoro-state-machine-extraction) moved it to
+// internal/pomodoro/machine.go. This line is the second thing that has to move
+// with it - a gate that reads a file by path throws ENOENT the moment the file
+// moves, and a check that throws is a check nobody reads. The assertion below it
+// is unchanged, because the code shape it pins is unchanged.
 const goAppPomodoro = fs.readFileSync(path.join(root, 'app_pomodoro.go'), 'utf8');
-const goPomodoroEngine = fs.readFileSync(path.join(root, 'pomodoro.go'), 'utf8');
+const goPomodoroEngine = fs.readFileSync(path.join(root, 'internal/pomodoro/machine.go'), 'utf8');
 // The chat request path, for the "no reply is read aloud" invariants.
 const goAppLlm = fs.readFileSync(path.join(root, 'app_llm.go'), 'utf8');
 // The plugin capability table and the shared asset/dispatch layer. Speech became a

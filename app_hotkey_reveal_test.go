@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"PetPC/internal/desktop"
+	"PetPC/internal/pomodoro"
 	"PetPC/internal/store"
 )
 
@@ -92,11 +93,11 @@ func parkedSummary(t *testing.T, a *App) store.PomodoroState {
 	t.Helper()
 	cfg := a.store.Config()
 	start := time.Now()
-	st := startFocus(enabledIdle(), cfg, "t1", "写周报", start).State
+	st := pomodoro.StartFocus(enabledIdle(), cfg, "t1", "写周报", start).State
 	if err := a.store.SavePomodoro(st); err != nil {
 		t.Fatalf("SavePomodoro: %v", err)
 	}
-	a.completePhase(finishPhase(st, cfg, start.Add(25*time.Minute), start.Add(25*time.Minute), false), false)
+	a.completePhase(pomodoro.FinishPhase(st, cfg, start.Add(25*time.Minute), start.Add(25*time.Minute), false), false)
 	return a.store.Pomodoro()
 }
 
@@ -143,7 +144,7 @@ func TestBreakEndRevealsAHiddenPet(t *testing.T) {
 		a.pomoMu.Unlock()
 		t.Fatalf("SavePomodoro: %v", err)
 	}
-	a.completePhase(finishPhase(st, cfg, *st.EndsAt, now, false), false)
+	a.completePhase(pomodoro.FinishPhase(st, cfg, *st.EndsAt, now, false), false)
 	a.pomoMu.Unlock()
 
 	if !a.store.Pomodoro().PlanPending {

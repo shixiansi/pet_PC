@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"PetPC/internal/desktop"
+	"PetPC/internal/pomodoro"
 	"PetPC/internal/store"
 )
 
@@ -80,7 +81,7 @@ func runOutBreak(t *testing.T, a *App, st store.PomodoroState) {
 	}
 	cfg := a.store.Config()
 	now := time.Now()
-	a.completePhase(finishPhase(st, cfg, *st.EndsAt, now, false), false)
+	a.completePhase(pomodoro.FinishPhase(st, cfg, *st.EndsAt, now, false), false)
 }
 
 // presetPlanGate parks the timer on the plan question: the state a break that
@@ -129,59 +130,59 @@ func seedFocusPlan(a *App, plan string) {
 func TestShouldAskPlanAsksOnlyForARestThatJustRanOut(t *testing.T) {
 	cases := []struct {
 		name       string
-		out        phaseOutcome
+		out        pomodoro.PhaseOutcome
 		restored   bool
 		fullscreen bool
 		want       bool
 	}{
 		{
 			name: "a short break that ran out, in real time",
-			out:  phaseOutcome{EndedPhase: store.PhaseShortBreak, NextPhase: store.PhaseFocus},
+			out:  pomodoro.PhaseOutcome{EndedPhase: store.PhaseShortBreak, NextPhase: store.PhaseFocus},
 			want: true,
 		},
 		{
 			name: "a long break that ran out, in real time",
-			out:  phaseOutcome{EndedPhase: store.PhaseLongBreak, NextPhase: store.PhaseFocus},
+			out:  pomodoro.PhaseOutcome{EndedPhase: store.PhaseLongBreak, NextPhase: store.PhaseFocus},
 			want: true,
 		},
 		{
 			name:     "the same break, but caught up on launch",
-			out:      phaseOutcome{EndedPhase: store.PhaseShortBreak, NextPhase: store.PhaseFocus},
+			out:      pomodoro.PhaseOutcome{EndedPhase: store.PhaseShortBreak, NextPhase: store.PhaseFocus},
 			restored: true,
 			want:     false,
 		},
 		{
 			name:       "the same break, but under a full-screen window",
-			out:        phaseOutcome{EndedPhase: store.PhaseShortBreak, NextPhase: store.PhaseFocus},
+			out:        pomodoro.PhaseOutcome{EndedPhase: store.PhaseShortBreak, NextPhase: store.PhaseFocus},
 			fullscreen: true,
 			want:       false,
 		},
 		{
 			name: "a focus that ran out",
-			out:  phaseOutcome{EndedPhase: store.PhaseFocus, NextPhase: store.PhaseShortBreak},
+			out:  pomodoro.PhaseOutcome{EndedPhase: store.PhaseFocus, NextPhase: store.PhaseShortBreak},
 			want: false,
 		},
 		{
 			name: "a focus that ran out into another focus",
-			out:  phaseOutcome{EndedPhase: store.PhaseFocus, NextPhase: store.PhaseFocus},
+			out:  pomodoro.PhaseOutcome{EndedPhase: store.PhaseFocus, NextPhase: store.PhaseFocus},
 			want: false,
 		},
 		{
 			name: "a break that did not lead into a focus",
-			out:  phaseOutcome{EndedPhase: store.PhaseShortBreak, NextPhase: store.PhaseShortBreak},
+			out:  pomodoro.PhaseOutcome{EndedPhase: store.PhaseShortBreak, NextPhase: store.PhaseShortBreak},
 			want: false,
 		},
 		{
 			name: "nothing finished at all",
-			out:  phaseOutcome{},
+			out:  pomodoro.PhaseOutcome{},
 			want: false,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := shouldAskPlan(tc.out, tc.restored, tc.fullscreen); got != tc.want {
-				t.Errorf("shouldAskPlan(%+v, restored=%v, fullscreen=%v) = %v, want %v",
+			if got := pomodoro.ShouldAskPlan(tc.out, tc.restored, tc.fullscreen); got != tc.want {
+				t.Errorf("pomodoro.ShouldAskPlan(%+v, restored=%v, fullscreen=%v) = %v, want %v",
 					tc.out, tc.restored, tc.fullscreen, got, tc.want)
 			}
 		})
@@ -671,7 +672,7 @@ func TestAFocusWithNoPlanInFlightStillRecords(t *testing.T) {
 	a := planGateApp(t, nil)
 	now := time.Now()
 	cfg := a.store.Config()
-	st := startFocus(enabledIdle(), cfg, "t1", "写周报", now).State
+	st := pomodoro.StartFocus(enabledIdle(), cfg, "t1", "写周报", now).State
 	if err := a.store.SavePomodoro(st); err != nil {
 		t.Fatalf("SavePomodoro: %v", err)
 	}
@@ -704,7 +705,7 @@ func finishFocusSession(t *testing.T, a *App) {
 		t.Fatalf("there is no running focus to finish: %+v", st)
 	}
 	cfg := a.store.Config()
-	a.completePhase(finishPhase(st, cfg, *st.EndsAt, time.Now(), false), false)
+	a.completePhase(pomodoro.FinishPhase(st, cfg, *st.EndsAt, time.Now(), false), false)
 }
 
 // --- T16: the summary bubble shows the plan -------------------------------

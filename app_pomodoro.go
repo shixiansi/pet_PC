@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"PetPC/internal/desktop"
+	"PetPC/internal/pomodoro"
 	"PetPC/internal/store"
 )
 
@@ -152,7 +153,7 @@ func (a *App) pomodoroView() PomodoroView {
 	st := a.store.Pomodoro()
 	cfg := a.store.Config()
 	now := time.Now()
-	remaining := Remaining(st, now)
+	remaining := pomodoro.Remaining(st, now)
 
 	untilLong := 0
 	if st.Phase == store.PhaseFocus {
@@ -170,7 +171,7 @@ func (a *App) pomodoroView() PomodoroView {
 
 	// Round once and derive both representations from the same value, so the
 	// badge and the panel cannot show different numbers for the same instant.
-	remainingSec := ceilSeconds(remaining)
+	remainingSec := pomodoro.CeilSeconds(remaining)
 	var endsAtMs int64
 	if st.IsRunning() && st.EndsAt != nil {
 		endsAtMs = st.EndsAt.UnixMilli()
@@ -180,9 +181,9 @@ func (a *App) pomodoroView() PomodoroView {
 		Enabled:        st.Enabled,
 		Phase:          st.Phase,
 		RunState:       st.RunState,
-		Label:          phaseLabel(st.Phase),
+		Label:          pomodoro.PhaseLabel(st.Phase),
 		RemainingSec:   remainingSec,
-		Countdown:      formatSeconds(remainingSec),
+		Countdown:      pomodoro.FormatSeconds(remainingSec),
 		EndsAtMs:       endsAtMs,
 		Running:        st.IsRunning(),
 		Focusing:       st.IsFocusing(),
@@ -190,7 +191,7 @@ func (a *App) pomodoroView() PomodoroView {
 		CompletedCount: st.CompletedCount,
 		LongBreakEvery: cfg.LongBreakEvery,
 		UntilLongBreak: untilLong,
-		PendingSummary: hasPendingSummary(st),
+		PendingSummary: pomodoro.HasPendingSummary(st),
 	}
 }
 
@@ -242,7 +243,7 @@ func (a *App) initPomodoro() {
 	// A phase that ran out while the pet was closed is completed now, and its
 	// record written: the time really did pass, so silently restarting it would
 	// both lose the session and misreport the day's work.
-	out := reconcile(st, cfg, time.Now())
+	out := pomodoro.Reconcile(st, cfg, time.Now())
 	if out.ClockJump {
 		a.DebugLog("pomodoro: clock jumped backwards, reset to idle")
 	}
@@ -306,7 +307,7 @@ func (a *App) tickPomodoro() {
 			a.emitPomodoro()
 			return
 		}
-		a.completePhaseLocked(finishPhase(st, cfg, *st.EndsAt, now, false), false)
+		a.completePhaseLocked(pomodoro.FinishPhase(st, cfg, *st.EndsAt, now, false), false)
 		return
 	}
 
@@ -317,9 +318,11 @@ func (a *App) tickPomodoro() {
 
 // completePhase applies an outcome that ended a phase (the locked variant is used
 // by the ticker, which already holds the mutex).
-func (a *App) completePhase(out phaseOutcome, restored bool) { a.completePhaseLocked(out, restored) }
+func (a *App) completePhase(out pomodoro.PhaseOutcome, restored bool) {
+	a.completePhaseLocked(out, restored)
+}
 
-func (a *App) completePhaseLocked(out phaseOutcome, restored bool) {
+func (a *App) completePhaseLocked(out pomodoro.PhaseOutcome, restored bool) {
 	// The plan of the session in flight travels into its record, BEFORE the
 	// record is handed to the store: this is the only moment the plan and the
 	// record exist together, and it is what makes the record's Plan mean "what
@@ -364,7 +367,7 @@ func (a *App) completePhaseLocked(out phaseOutcome, restored bool) {
 	// unconditionally keeps shouldAskPlan the ONLY authority on the decision:
 	// pre-filtering the call here would be a second, silently drifting copy of
 	// its conditions.
-	askPlan := shouldAskPlan(out, restored, a.isForegroundFullscreen())
+	askPlan := pomodoro.ShouldAskPlan(out, restored, a.isForegroundFullscreen())
 	if askPlan {
 		cfg := a.store.Config()
 		out.State.RunState = store.RunStopped
@@ -480,13 +483,13 @@ func (a *App) SetPomodoroEnabled(enabled bool) (State, error) {
 	st := a.store.Pomodoro()
 	st.Enabled = enabled
 	if !enabled && st.IsRunning() {
-		st = pause(st, time.Now()).State
+		st = pomodoro.Pause(st, time.Now()).State
 		st.Enabled = false
 	}
 	if enabled {
 		// Switching back on picks the session up where it was left, and catches
 		// up on any phase that ran out while the feature was off.
-		out := reconcile(st, a.store.Config(), time.Now())
+		out := pomodoro.Reconcile(st, a.store.Config(), time.Now())
 		if out.Finished() {
 			a.completePhaseLocked(out, true)
 			a.pomoMu.Unlock()
@@ -569,8 +572,8 @@ func (a *App) StartPomodoro(in PomodoroStartInput) (State, error) {
 	// length banked, which is EXACTLY the shape this shortcut looks for when the
 	// user picks "no todo" - so without !st.PlanPending the click would start the
 	// clock and the question would never be answered (design.md 4.2).
-	if !st.PlanPending && st.Phase == store.PhaseFocus && !st.IsRunning() && st.CurrentTodoID == in.TodoID && Remaining(st, now) > 0 {
-		out := resume(st, cfg, now)
+	if !st.PlanPending && st.Phase == store.PhaseFocus && !st.IsRunning() && st.CurrentTodoID == in.TodoID && pomodoro.Remaining(st, now) > 0 {
+		out := pomodoro.Resume(st, cfg, now)
 		if err := a.store.SavePomodoro(out.State); err != nil {
 			a.pomoMu.Unlock()
 			return State{}, err
@@ -696,8 +699,8 @@ func (a *App) clearAllBubblesLocked() {
 
 // PausePomodoro halts the countdown, keeping the remainder.
 func (a *App) PausePomodoro() (State, error) {
-	return a.transition(func(st store.PomodoroState, cfg store.Config, now time.Time) phaseOutcome {
-		return pause(st, now)
+	return a.transition(func(st store.PomodoroState, cfg store.Config, now time.Time) pomodoro.PhaseOutcome {
+		return pomodoro.Pause(st, now)
 	})
 }
 
@@ -713,16 +716,16 @@ func (a *App) ResumePomodoro() (State, error) {
 	if a.pendingPlanWaiting() {
 		return a.StartPomodoroWithPlan("")
 	}
-	return a.transition(func(st store.PomodoroState, cfg store.Config, now time.Time) phaseOutcome {
-		return resume(st, cfg, now)
+	return a.transition(func(st store.PomodoroState, cfg store.Config, now time.Time) pomodoro.PhaseOutcome {
+		return pomodoro.Resume(st, cfg, now)
 	})
 }
 
 // StopPomodoro halts the phase like pause does, but is offered to the user as
 // "stop" - the session can still be continued afterwards.
 func (a *App) StopPomodoro() (State, error) {
-	return a.transition(func(st store.PomodoroState, cfg store.Config, now time.Time) phaseOutcome {
-		return stop(st, now)
+	return a.transition(func(st store.PomodoroState, cfg store.Config, now time.Time) pomodoro.PhaseOutcome {
+		return pomodoro.Stop(st, now)
 	})
 }
 
@@ -736,8 +739,8 @@ func (a *App) StopPomodoro() (State, error) {
 // the callback that transition runs under pomoMu - the only place that can touch
 // it without changing either signature (design.md 4 D7; tasks.md T26).
 func (a *App) SkipPhase() (State, error) {
-	return a.transition(func(st store.PomodoroState, cfg store.Config, now time.Time) phaseOutcome {
-		out := skipPhase(st, cfg, now)
+	return a.transition(func(st store.PomodoroState, cfg store.Config, now time.Time) pomodoro.PhaseOutcome {
+		out := pomodoro.SkipPhase(st, cfg, now)
 		a.focusPlan = ""
 		return out
 	})
@@ -748,7 +751,7 @@ func (a *App) SkipPhase() (State, error) {
 // tab so it cannot be hit by accident.
 func (a *App) ResetPomodoro() (State, error) {
 	a.pomoMu.Lock()
-	st := reset(a.store.Pomodoro()).State
+	st := pomodoro.Reset(a.store.Pomodoro()).State
 	// Any pending summary prompt goes with it, and so does the plan question and
 	// the plan of the session in flight: reset is the explicit "give up", which
 	// must leave no gate and no plan behind (design.md 4 D7; tasks.md T26).
@@ -774,7 +777,7 @@ func (a *App) ResetPomodoro() (State, error) {
 }
 
 // transition runs one state-machine step under the pomodoro lock and persists it.
-func (a *App) transition(fn func(store.PomodoroState, store.Config, time.Time) phaseOutcome) (State, error) {
+func (a *App) transition(fn func(store.PomodoroState, store.Config, time.Time) pomodoro.PhaseOutcome) (State, error) {
 	a.pomoMu.Lock()
 	defer a.pomoMu.Unlock()
 
@@ -932,7 +935,7 @@ func (a *App) ShowPomodoroPicker() (Layout, error) {
 // showSummaryBubble asks for the summary of the session that just ended.
 func (a *App) showSummaryBubble() {
 	st := a.store.Pomodoro()
-	if !hasPendingSummary(st) {
+	if !pomodoro.HasPendingSummary(st) {
 		return
 	}
 	// Fill in the associated todo's title from the record, so a todo renamed

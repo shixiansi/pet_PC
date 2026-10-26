@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"PetPC/internal/pomodoro"
 	"PetPC/internal/store"
 )
 
@@ -51,7 +52,7 @@ func TestPomodoroViewCountdownMatchesSeconds(t *testing.T) {
 	if view.RemainingSec != 1 {
 		t.Errorf("remainingSec = %d, want 1 (rounded up, not truncated to 0)", view.RemainingSec)
 	}
-	if view.Countdown != formatSeconds(view.RemainingSec) {
+	if view.Countdown != pomodoro.FormatSeconds(view.RemainingSec) {
 		t.Errorf("countdown %q disagrees with remainingSec %d", view.Countdown, view.RemainingSec)
 	}
 	if view.EndsAtMs != end.UnixMilli() {

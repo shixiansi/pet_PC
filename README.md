@@ -1343,7 +1343,7 @@ app_plugins_asset.go         插件资源路由 `/plugin-asset/<id>/<路径>` + 
 app_plugin_surface.go        插件浮层面几何：矩形夹回窗口、圆角/椭圆、窗口区域的第三态与三态互斥（浮层矩形上限 8）
 app_plugin_market.go         桌宠侧的插件市场入口：定位并启动独立程序，以及门禁用的 PETPC_OPEN_PLUGIN_MARKET 钩子
 app_chat_slot.go             对话槽位解析：按 manifest 的 panelSlot 找到该占「对话」tab 的插件
-pomodoro.go                  番茄钟状态机（纯函数，便于测试）
+internal/pomodoro/machine.go 番茄钟状态机（纯函数，只依赖 internal/store，便于单测）
 internal/store/store.go      JSON 持久化、待办排序、统计、图片副本管理、Config
 internal/store/pomodoro.go   番茄钟运行状态 + 记录档案
 internal/store/reminder.go   提醒候选选取、活跃时段判断
