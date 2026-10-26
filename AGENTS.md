@@ -102,6 +102,14 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 的深色带：一个 `#1d2027` 的三角形压在 `rgba(28,30,36,.94)` 上，肉眼就是"没有尾巴"，为此查了
 五轮。约定是：插件声明矩形并负责画满它，宿主只出位置。
 
+**浮层面留白要透明，还得管住两条别人碰不到的地方。** 插件文档里写着 `:root { color-scheme: dark }`
+（配色需要），而 Chromium 在 `color-scheme: dark` 下会给**画布**铺 `#121212`——根元素的
+`background: transparent` 也压不住它，于是帧里"没画东西"的那一条 10px 带就是黑的。开关是
+`:root { color-scheme: only light }`，并且**必须写在 `:root` 上**：`:root` 是伪类，特异性高于
+`html`，写在 `html` 上的那条规则会被上面的 `:root { color-scheme: dark }` 直接吃掉（这一条也
+白白多花了一轮）。想确认某一层到底透不透明，别猜——在那一层里画一个亮色方块，看得见就说明那层
+可画、黑在它后面。
+
 ### 3.3 插件帧只能这样长
 
 [frontend/src/plugin-host.js](frontend/src/plugin-host.js) 是安全边界：
