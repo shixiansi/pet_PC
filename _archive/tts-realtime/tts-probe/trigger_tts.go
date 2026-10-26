@@ -32,19 +32,19 @@ import (
 )
 
 type appConfig struct {
-	Enabled  bool   `json:"ttsEnabled"`
-	BaseURL  string `json:"ttsBaseUrl"`
-	Backend  string `json:"ttsBackend"`
+	Enabled   bool   `json:"ttsEnabled"`
+	BaseURL   string `json:"ttsBaseUrl"`
+	Backend   string `json:"ttsBackend"`
 	OnlineURL string `json:"ttsOnlineUrl"`
-	Char     string `json:"ttsCharacter"`
-	GPT      string `json:"ttsGptWeights"`
-	Sovits   string `json:"ttsSovitsWeights"`
-	RefAudio string `json:"ttsRefAudioPath"`
-	Prompt   string `json:"ttsPromptText"`
-	Lang     string `json:"ttsLang"`
-	MaxSent  int    `json:"ttsMaxSentences"`
-	Chunk    int    `json:"ttsChunkRunes"`
-	Timeout  int    `json:"ttsTimeoutSec"`
+	Char      string `json:"ttsCharacter"`
+	GPT       string `json:"ttsGptWeights"`
+	Sovits    string `json:"ttsSovitsWeights"`
+	RefAudio  string `json:"ttsRefAudioPath"`
+	Prompt    string `json:"ttsPromptText"`
+	Lang      string `json:"ttsLang"`
+	MaxSent   int    `json:"ttsMaxSentences"`
+	Chunk     int    `json:"ttsChunkRunes"`
+	Timeout   int    `json:"ttsTimeoutSec"`
 }
 
 // activeURL mirrors store.Config.TTSActiveURL: the online backend and the local

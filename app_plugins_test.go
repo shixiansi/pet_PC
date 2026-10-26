@@ -583,18 +583,18 @@ func TestStorageRejectsBadKeys(t *testing.T) {
 	before, _ := os.ReadDir(private)
 
 	bad := []string{
-		"../escape",     // traversal
-		"..",            // the directory itself
-		"a/../../escape", // traversal in the middle
-		"/absolute",     // absolute path
-		"",              // nothing at all
-		"a//b",          // an empty segment is a second spelling of the same path
-		"a/b/",          // trailing separator
-		`a\b`,           // the Windows separator, i.e. two names for one file
-		"with.dot",      // an extension, which the video bridge's cleanup relies on
-		"a/./b",         // a dot segment
-		strings.Repeat("x", 65),                  // one segment over the limit
-		"a/b/c/d/e",                              // deeper than the limit
+		"../escape",             // traversal
+		"..",                    // the directory itself
+		"a/../../escape",        // traversal in the middle
+		"/absolute",             // absolute path
+		"",                      // nothing at all
+		"a//b",                  // an empty segment is a second spelling of the same path
+		"a/b/",                  // trailing separator
+		`a\b`,                   // the Windows separator, i.e. two names for one file
+		"with.dot",              // an extension, which the video bridge's cleanup relies on
+		"a/./b",                 // a dot segment
+		strings.Repeat("x", 65), // one segment over the limit
+		"a/b/c/d/e",             // deeper than the limit
 		strings.Repeat("y", 60) + "/" + strings.Repeat("y", 60) + "/" + strings.Repeat("y", 60) + "/" + strings.Repeat("y", 60), // too long overall
 	}
 	for _, key := range bad {

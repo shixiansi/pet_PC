@@ -55,7 +55,7 @@ func (f *fakeKeeper) Clear(path string) error {
 // host-whitelist item.
 func configManifest() Manifest {
 	return Manifest{
-		ID:      "com.example.plugin",
+		ID: "com.example.plugin",
 		Config: []ConfigItem{
 			{Key: "llmBaseUrl", Label: "接口地址", Type: "text", HostWhitelist: true},
 			{Key: "llmMaxTokens", Label: "回复上限", Type: "number"},

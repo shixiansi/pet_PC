@@ -1,4 +1,5 @@
 //go:build ignore
+
 package main
 
 import (
@@ -16,7 +17,7 @@ import (
 type sp struct{}
 
 func (sp) PlayWAVFile(p string) error { return desktop.PlayWAVFile(p) }
-func (sp) StopAudio()                { desktop.StopAudio() }
+func (sp) StopAudio()                 { desktop.StopAudio() }
 
 // Mirrors what app_tts.go reads out of the config.
 type cfg struct {
@@ -64,7 +65,7 @@ func main() {
 
 	p := tts.NewPipeline(ctx, tts.Options{
 		Settings: settings, Synth: client, Speaker: sp{}, Cache: cache,
-		TempDir: filepath.Join(os.TempDir(), "petpc-tts-demo"),
+		TempDir:      filepath.Join(os.TempDir(), "petpc-tts-demo"),
 		MaxSentences: 3, ChunkRunes: 20,
 		OnError: func(err error) { fmt.Println("  错误:", err) },
 	})

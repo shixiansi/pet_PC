@@ -212,10 +212,10 @@ func seedMigratableVoiceLibrary(t *testing.T, dataDir string) {
 	}
 	// Two takes: the first is 纳西妲, the second 宵宫, and "chosen" points at the second.
 	for i, who := range []struct {
-		file  string
-		fill  byte
-		role  string
-		name  string
+		file string
+		fill byte
+		role string
+		name string
 	}{
 		{"v001.wav", 7, "nahida", "纳西妲"},
 		{"v002.wav", 200, "yoimiya", "宵宫"},

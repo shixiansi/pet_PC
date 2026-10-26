@@ -67,8 +67,8 @@ func TestStorageKeyPathIsARelativePathAndNothingElse(t *testing.T) {
 		"/abs",
 		"a/",
 		"a//b",
-		`a\b`,     // the Windows separator: two names for one file
-		"a b",     // a space is not a name
+		`a\b`, // the Windows separator: two names for one file
+		"a b", // a space is not a name
 		"with.dot",
 		strings.Repeat("y", 65), // one segment over the limit
 		"a/b/c/d/e",             // deeper than the limit

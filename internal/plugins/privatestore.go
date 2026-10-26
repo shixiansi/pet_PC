@@ -1,6 +1,6 @@
 // Package plugins' private store: the files a plugin keeps in its OWN directory.
 //
-// WHY THIS LIVES HERE RATHER THAN IN EACH PROGRAM
+// # WHY THIS LIVES HERE RATHER THAN IN EACH PROGRAM
 //
 // Two programs host plugin documents: the pet (app_plugins.go) and the plugin market
 // (tools/plugin-market/pluginhost.go). Both answer `storage.*`, and before this file
@@ -11,7 +11,7 @@
 // that fills the library runs in the PET, so "the same key works in both" is a
 // requirement, not a nicety.
 //
-// WHY A KEY IS NOW A PATH
+// # WHY A KEY IS NOW A PATH
 //
 // A key used to be a bare file name (`^[A-Za-z0-9_-]{1,64}$`), so everything a
 // plugin saved landed in one flat directory. The QQ plugin made the cost visible:

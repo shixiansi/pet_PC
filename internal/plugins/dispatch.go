@@ -1,7 +1,7 @@
 // Package plugins' dispatcher: the one gate every plugin capability passes
 // through, shared by every program that hosts a plugin.
 //
-// WHY THIS IS SHARED RATHER THAN COPIED
+// # WHY THIS IS SHARED RATHER THAN COPIED
 //
 // Two programs host plugin interfaces: the pet (the 对话 panel slot, the floating
 // surface, and the headless background frame) and the plugin market (the workshop

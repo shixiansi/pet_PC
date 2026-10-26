@@ -62,9 +62,9 @@ const voiceStorageKey = "voice-settings"
 // migration reads are declared; the old file has more, and unknown fields are
 // ignored rather than preserved.
 type legacyVoiceLibrary struct {
-	ActiveRole string                       `json:"activeRole"`
-	Roles      []legacyVoiceRole            `json:"roles"`
-	Lines      map[string]legacyVoiceSlot   `json:"lines"`
+	ActiveRole string                     `json:"activeRole"`
+	Roles      []legacyVoiceRole          `json:"roles"`
+	Lines      map[string]legacyVoiceSlot `json:"lines"`
 }
 
 type legacyVoiceRole struct {
@@ -98,9 +98,9 @@ type legacyVoiceTake struct {
 // against the JSON the plugin parses; a typo here would produce a library that loads
 // and silently ignores everything in it.
 type voicePluginSettings struct {
-	Enabled   bool   `json:"enabled"`
-	Pomodoro  bool   `json:"pomodoro"`
-	Reminder  bool   `json:"reminder"`
+	Enabled    bool   `json:"enabled"`
+	Pomodoro   bool   `json:"pomodoro"`
+	Reminder   bool   `json:"reminder"`
 	ActiveRole string `json:"activeRole"`
 	// Chosen maps a line id to the audio slot name in use.
 	Chosen map[string]string `json:"chosen"`
@@ -172,13 +172,13 @@ func MigrateVoiceData(dataDir string, keeper SecretKeeper) error {
 	cfg := legacyVoiceSwitches(dataDir)
 
 	out := voicePluginSettings{
-		Enabled:   cfg.enabled,
-		Pomodoro:  cfg.pomodoro,
-		Reminder:  cfg.reminder,
+		Enabled:    cfg.enabled,
+		Pomodoro:   cfg.pomodoro,
+		Reminder:   cfg.reminder,
 		ActiveRole: legacy.ActiveRole,
-		Chosen:    map[string]string{},
-		Takes:     map[string][]voicePluginTake{},
-		RoleNames: map[string]string{},
+		Chosen:     map[string]string{},
+		Takes:      map[string][]voicePluginTake{},
+		RoleNames:  map[string]string{},
 	}
 
 	for _, role := range legacy.Roles {

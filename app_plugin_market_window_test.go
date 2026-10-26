@@ -82,11 +82,11 @@ func TestTheLaunchedMarketHasAVisibleWindow(t *testing.T) {
 }
 
 var (
-	u32                   = syscall.NewLazyDLL("user32.dll")
-	pEnumWindows          = u32.NewProc("EnumWindows")
-	pGetWindowTextW       = u32.NewProc("GetWindowTextW")
-	pIsWindowVisible      = u32.NewProc("IsWindowVisible")
-	pGetWindowThreadPid   = u32.NewProc("GetWindowThreadProcessId")
+	u32                 = syscall.NewLazyDLL("user32.dll")
+	pEnumWindows        = u32.NewProc("EnumWindows")
+	pGetWindowTextW     = u32.NewProc("GetWindowTextW")
+	pIsWindowVisible    = u32.NewProc("IsWindowVisible")
+	pGetWindowThreadPid = u32.NewProc("GetWindowThreadProcessId")
 )
 
 func alivePID(pid int) bool {

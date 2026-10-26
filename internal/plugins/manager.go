@@ -122,9 +122,9 @@ func NewManager(dataDir string) (*Manager, error) {
 // DataDir returns the directory the manager is rooted at.
 func (m *Manager) DataDir() string { return m.dataDir }
 
-func (m *Manager) indexPath() string   { return filepath.Join(m.dataDir, indexFileName) }
-func (m *Manager) pluginsDir() string  { return filepath.Join(m.dataDir, "plugins") }
-func (m *Manager) tmpDir() string      { return filepath.Join(m.dataDir, "plugins-tmp") }
+func (m *Manager) indexPath() string           { return filepath.Join(m.dataDir, indexFileName) }
+func (m *Manager) pluginsDir() string          { return filepath.Join(m.dataDir, "plugins") }
+func (m *Manager) tmpDir() string              { return filepath.Join(m.dataDir, "plugins-tmp") }
 func (m *Manager) dataDirFor(id string) string { return filepath.Join(m.dataDir, "plugin-data", id) }
 
 // PluginDir returns the directory an installed plugin's files live in. The id
