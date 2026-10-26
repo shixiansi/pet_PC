@@ -1398,7 +1398,7 @@ function slotPlugin() {
  * both tell the user the same two things - the plugin is missing, and where to
  * get it.
  */
-const CHAT_SLOT_HINT = '对话插件还没装好：在设置里点「打开插件市场」装上并授权它。';
+const CHAT_SLOT_HINT = '对话插件还没装好：在托盘菜单里点「打开控制中心」装上并授权它。';
 
 /**
  * True while a bubble is holding the slot with a question the user must answer.
