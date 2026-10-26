@@ -19,19 +19,40 @@
 
   onMount(refresh);
 
+  // Every binding call is awaited SEPARATELY, behind a timeout, and the reason is the bug
+  // this page shipped with: it sat on "读取中…" forever.
+  //
+  // A Wails binding that never settles (a panic on the Go side settles nothing) leaves an
+  // await pending for the life of the window, and `finally` never runs. A page whose only
+  // two states are "reading" and "ready" then lies: it reports progress it is not making.
+  // So: name what failed, and refuse to be silent for longer than a couple of seconds.
+  function withTimeout<T>(what: string, p: Promise<T>, ms = 4000): Promise<T> {
+    return Promise.race([
+      p,
+      new Promise<T>((_, reject) => setTimeout(() => reject(new Error(what + ' 超过 ' + ms + 'ms 没有回应')), ms)),
+    ]);
+  }
+
   async function refresh() {
+    const problems: string[] = [];
+    try {
+      const list = await withTimeout('读取已装插件', Installed());
+      rows = list ?? [];
+    } catch (e) {
+      problems.push('已装列表：' + String(e));
+    }
     try {
       // The labels come from the host, not from a map in this file: the install dialog is
       // the user's consent, and consent described two ways is consent to two things.
-      const [list, names] = await Promise.all([Installed(), PermissionLabels()]);
-      rows = list ?? [];
+      const names = await withTimeout('读取权限文案', PermissionLabels());
       labels = names ?? {};
-      error = '';
     } catch (e) {
-      error = String(e);
-    } finally {
-      loaded = true;
+      // Not fatal: the page can still show ids, and saying which call failed is worth
+      // more than a blank screen.
+      problems.push('权限文案：' + String(e));
     }
+    error = problems.join('；');
+    loaded = true;
   }
 
   function name(r: Row): string {
