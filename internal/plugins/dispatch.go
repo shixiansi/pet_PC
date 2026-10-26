@@ -154,7 +154,7 @@ func (r *Registry) Dispatch(pluginID, method, payload string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("插件 %s 调用了本程序不支持的方法 %s", pluginID, method)
 	}
-	if !hasGranted(row.Granted, spec.Perm) {
+	if !HasGranted(row.Granted, spec.Perm) {
 		return "", fmt.Errorf("插件 %s 未获权限 %s", pluginID, spec.Perm)
 	}
 	dir, err := r.gate.PrivateDir(pluginID)
@@ -176,8 +176,16 @@ func (r *Registry) Dispatch(pluginID, method, payload string) (string, error) {
 	return string(encoded), nil
 }
 
-// hasGranted reports whether perm is in granted.
-func hasGranted(granted []string, perm string) bool {
+// HasGranted reports whether perm is in granted.
+//
+// It is EXPORTED because the answer is needed outside this package too: the pet
+// asks it for the gates INSIDE a method (pluginMethod.also - permissions the
+// dispatcher must not require), and the tool executor will ask it before running
+// anything a model asked for. One implementation for one security question: this
+// file had a copy of this loop, the pet had two more, and three copies of an access
+// check is three answers waiting to disagree - the same reasoning the header of this
+// file applies to the gate as a whole.
+func HasGranted(granted []string, perm string) bool {
 	for _, g := range granted {
 		if g == perm {
 			return true

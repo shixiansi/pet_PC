@@ -440,14 +440,22 @@ func (a *App) PluginRequest(pluginID, method, payload string) (string, error) {
 	return string(encoded), nil
 }
 
-// hasPermission reports whether perm is in granted.
+// hasPermission reports whether the user granted perm to that plugin.
+//
+// It is the ONE answer to that question in this package, and it forwards to
+// plugins.HasGranted so that there is one answer in the codebase: internal/plugins
+// uses it for the dispatcher's own gate, and this package uses it for two other
+// places - the gate inside a method (the permissions pluginMethod.also lists, which
+// the dispatcher must not require: net.fetch works without net.credentials, but the
+// Cookie header is only filled for a caller that holds the second one), and the
+// slot/surface resolvers, which ask "was this permission granted" before handing a
+// plugin a piece of the pet.
+//
+// The forwarding is the point. There used to be three copies of this loop - one in
+// dispatch.go, and two here (this one and pluginHoldsPermission) - and three copies
+// of an access check is three answers waiting to disagree.
 func hasPermission(granted []string, perm string) bool {
-	for _, g := range granted {
-		if g == perm {
-			return true
-		}
-	}
-	return false
+	return plugins.HasGranted(granted, perm)
 }
 
 // --- capability implementations --------------------------------------------
@@ -846,7 +854,7 @@ func pluginNetFetch(a *App, id string, payload []byte) (any, error) {
 	}
 	// Checked BEFORE the request, like the credential header above: a caller that may not
 	// read cookies should not get to ask the far end for them either.
-	if in.ReadCookies && !pluginHoldsPermission(row.Granted, plugins.PermNetCredentials) {
+	if in.ReadCookies && !hasPermission(row.Granted, plugins.PermNetCredentials) {
 		return nil, fmt.Errorf("net.fetch 读取 Set-Cookie 需要 %s 权限", plugins.PermNetCredentials)
 	}
 
@@ -973,7 +981,7 @@ func applyPluginCredentials(a *App, row plugins.Installed, req *http.Request, cr
 	if credentials == "" && referer == "" {
 		return nil
 	}
-	if !pluginHoldsPermission(row.Granted, plugins.PermNetCredentials) {
+	if !hasPermission(row.Granted, plugins.PermNetCredentials) {
 		// Refusal, not silent dropping: a request that quietly went out without
 		// its cookie would fail at the far end for a reason nothing here knows.
 		return fmt.Errorf("net.fetch 携带凭据或 referer 需要 %s 权限", plugins.PermNetCredentials)
@@ -1016,22 +1024,6 @@ func applyPluginCredentials(a *App, row plugins.Installed, req *http.Request, cr
 		req.Header.Set("Referer", referer)
 	}
 	return nil
-}
-
-// pluginHoldsPermission reports whether the user granted perm to that plugin.
-//
-// The dispatcher checks a method's own permission before the method runs
-// (PluginRequest); this exists for the gates INSIDE a method - permissions the
-// table lists under pluginMethod.also, which the dispatcher must not require
-// (net.fetch works without net.credentials) but which still bound what the method
-// is allowed to do.
-func pluginHoldsPermission(granted []string, perm string) bool {
-	for _, g := range granted {
-		if g == perm {
-			return true
-		}
-	}
-	return false
 }
 
 // flatNamePattern is the only shape a FLAT plugin-chosen name may take: an audio
