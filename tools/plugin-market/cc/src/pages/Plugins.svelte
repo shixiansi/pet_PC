@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import Card from '../components/Card.svelte';
   import { Installed, Grant, SetEnabled, PermissionLabels } from '../../../frontend/wailsjs/go/main/Market';
 
@@ -17,7 +16,11 @@
   let loaded = $state(false);
   let error = $state('');
 
-  onMount(refresh);
+  // Started here rather than in onMount. onMount is one more thing between "the page
+  // rendered" and "the request started", and a page that renders but never starts is
+  // exactly the failure this page had: a permanent 读取中 with no error and no console
+  // message. Assigning $state during init is allowed, so there is nothing to defer.
+  void refresh();
 
   // Every binding call is awaited SEPARATELY, behind a timeout, and the reason is the bug
   // this page shipped with: it sat on "读取中…" forever.
@@ -86,7 +89,7 @@
   }
 </script>
 
-<Card title="已装插件">
+<Card title="已装插件 · v2">
   {#if !loaded}
     <p class="hint">读取中…</p>
   {:else if rows.length === 0}
