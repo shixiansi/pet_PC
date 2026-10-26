@@ -7,6 +7,8 @@ import {http} from '../models';
 
 export function Catalogue():Promise<plugins.MarketView>;
 
+export function DataDir():Promise<string>;
+
 export function GetConfig(arg1:string):Promise<main.PluginConfig>;
 
 export function Grant(arg1:string,arg2:Array<string>):Promise<void>;
@@ -50,6 +52,8 @@ export function SetShortBreakMinutes(arg1:number):Promise<store.Config>;
 export function SetTheme(arg1:string):Promise<void>;
 
 export function Theme():Promise<string>;
+
+export function Todos():Promise<Array<store.Todo>>;
 
 export function Uninstall(arg1:string):Promise<void>;
 

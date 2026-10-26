@@ -6,6 +6,10 @@ export function Catalogue() {
   return window['go']['main']['Market']['Catalogue']();
 }
 
+export function DataDir() {
+  return window['go']['main']['Market']['DataDir']();
+}
+
 export function GetConfig(arg1) {
   return window['go']['main']['Market']['GetConfig'](arg1);
 }
@@ -92,6 +96,10 @@ export function SetTheme(arg1) {
 
 export function Theme() {
   return window['go']['main']['Market']['Theme']();
+}
+
+export function Todos() {
+  return window['go']['main']['Market']['Todos']();
 }
 
 export function Uninstall(arg1) {
