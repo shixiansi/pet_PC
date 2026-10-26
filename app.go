@@ -731,34 +731,36 @@ func (a *App) applyWindowGeometry() (Layout, error) {
 		return Layout{}, err
 	}
 
-	// Crop the window to exactly what the page paints.
+	// Crop the window to the BOUNDING BOXES of what the page paints.
 	//
-	// While nothing is beside the pet that is just the pet. While the panel is
-	// open it is the union of the panel and the pet, and while a bubble is up it
-	// is the union of that bubble and the pet.
+	// While nothing is beside the pet that is just the pet. While the panel is open it is
+	// the union of the panel and the pet, and while a bubble is up it is the union of that
+	// bubble and the pet.
 	//
-	// The distinction matters because the window is a fixed size that is larger
-	// than what is drawn (the pet is shorter than the panel, so there are
-	// unpainted margins above and below it beside the panel). Clearing the region
-	// exposed those margins, and since the DWM frame is extended over the client
-	// area they rendered as a translucent glass strip - the pale blue band along
-	// the top edge of the pet's column. Cropping to the union keeps every visible
-	// pixel one that the page actually drew.
+	// The union matters because the window is a fixed size larger than what is drawn (the
+	// pet is shorter than the panel, so there are unpainted margins above and below it
+	// beside the panel). Clearing the region exposed those margins, and with the DWM frame
+	// extended over the client area they rendered as a translucent glass strip - the pale
+	// band along the top edge of the pet's column. Cropping keeps every visible pixel one
+	// that the page actually drew.
 	//
-	// The panel's corners are rounded to match its CSS border-radius, for the same
-	// reason: a square region would leave a tinted sliver where the panel curves
-	// away from the corner. The bubble gets the same treatment.
+	// Boxes, NOT shapes: the panel's rounded corners and the bubble's radius stay in the CSS,
+	// and the region is deliberately square. Handing the region a radius used to be how the
+	// corners were cut, and it is what made them jagged - a GDI region is a 1-bit mask, so
+	// the OS drew a staircase over the browser's anti-aliased edge (see SetWindowRegion in
+	// internal/desktop). The page's own alpha now defines the shape, and because the window
+	// is translucent the corner pixels composite to the desktop.
 	//
-	// Clicking outside the region falls through to the desktop, so the window
-	// still behaves exactly like the shapes it shows.
-	radius := int(panelRadius*s + 0.5)
-	var regions []desktop.RegionRect
+	// The trade, which the pixel gate records: a click in those corner pixels lands on this
+	// window instead of falling through to the desktop. A few pixels per corner, and the
+	// alternative is per-pixel hit testing.
+	var regions []desktop.Bounds
 	var surfaceView *PluginSurfaceView
 	switch {
 	case open:
-		regions = []desktop.RegionRect{
-			{Bounds: desktop.Bounds{X: panelX, Y: panelY, Width: panelW, Height: panelH}, Radius: radius},
-			{Bounds: desktop.Bounds{X: petX, Y: petY, Width: petW, Height: petH}},
+		regions = []desktop.Bounds{
+			{X: panelX, Y: panelY, Width: panelW, Height: panelH},
+			{X: petX, Y: petY, Width: petW, Height: petH},
 		}
 	case pluginSurface != nil:
 		// A plugin floating surface: the plugin's declared rectangles, clamped
@@ -809,22 +811,20 @@ func (a *App) applyWindowGeometry() (Layout, error) {
 			// takes it from the same source rather than re-deriving it.
 			view.PluginID = pluginSurface.PluginID
 			surfaceView = view
-			regions = append(surfaceRegions, desktop.RegionRect{
-				Bounds: desktop.Bounds{X: petX, Y: petY, Width: petW, Height: petH},
-			})
+			regions = append(surfaceRegions, desktop.Bounds{X: petX, Y: petY, Width: petW, Height: petH})
 		} else {
-			regions = []desktop.RegionRect{
-				{Bounds: desktop.Bounds{X: petX, Y: petY, Width: petW, Height: petH}},
+			regions = []desktop.Bounds{
+				{X: petX, Y: petY, Width: petW, Height: petH},
 			}
 		}
 	case hasBubble:
-		regions = []desktop.RegionRect{
-			{Bounds: bubblePx, Radius: radius},
-			{Bounds: desktop.Bounds{X: petX, Y: petY, Width: petW, Height: petH}},
+		regions = []desktop.Bounds{
+			bubblePx,
+			{X: petX, Y: petY, Width: petW, Height: petH},
 		}
 	default:
-		regions = []desktop.RegionRect{
-			{Bounds: desktop.Bounds{X: petX, Y: petY, Width: petW, Height: petH}},
+		regions = []desktop.Bounds{
+			{X: petX, Y: petY, Width: petW, Height: petH},
 		}
 	}
 	if err := desktop.SetWindowRegion(hwnd, regions...); err != nil {

@@ -353,6 +353,33 @@ check(
   'a banner for the deleted plugin tab survived',
 );
 
+// --- 4a. The window region is RECTANGLES ONLY -------------------------------
+//
+// It used to carry the panel's corner radius and the puffs' ellipse and hand them to
+// CreateRoundRectRgn / CreateEllipticRgn. A GDI region is a 1-bit mask, so the OS drew a
+// staircase over the browser's anti-aliased border-radius - every rounded corner in the app
+// was visibly jagged. The shape belongs to the page now, and the region only says which
+// boxes the window covers.
+//
+// This is checked because it is the kind of thing a well-meaning fix puts back: "the corner
+// shows the desktop, so let us crop it to a round rect". The answer is CSS, not a region.
+const winDesktop = fs.readFileSync(path.join(root, 'internal/desktop/desktop_windows.go'), 'utf8');
+// Comments are stripped first: the file's own doc explains WHICH calls were removed and why,
+// and naming them there is the point. The check is about what the code still does.
+const winDesktopCode = winDesktop
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/^\s*\/\/.*$/gm, '');
+check(
+  'the window region is built from plain rectangles',
+  /procCreateRectRgn\s*=\s*gdi32\.NewProc\("CreateRectRgn"\)/.test(winDesktopCode) &&
+    !/CreateRoundRectRgn/.test(winDesktopCode) &&
+    !/CreateEllipticRgn/.test(winDesktopCode) &&
+    /func SetWindowRegion\(w Window, rects \.\.\.Bounds\) error/.test(winDesktopCode) &&
+    !/desktop\.RegionRect/.test(mainGo) &&
+    !/Radius:\s*radius/.test(mainGo),
+  'the region carries a curve again: rounded/elliptical regions are what made the corners jagged',
+);
+
 // --- 4b. The settings page is GONE, and must stay gone ----------------------
 //
 // This block used to hold ten checks: four named groups, a heading per group, the set of

@@ -83,9 +83,18 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 ### 3.2 窗口只有三个占位，且必须精确裁剪
 
 面板、气泡、插件浮层面**共用同一个位置，同一时刻只能有一个可见**。窗口区域
-（`SetWindowRgn`）必须恰好描述那一个；多一块或少一块，页面未绘制的区域就会
+（`SetWindowRgn`）必须恰好覆盖那一个的**包围盒**；多一块或少一块，页面未绘制的区域就会
 露出桌面，变成一条"玻璃带"。这是本项目历史上反复出现的 bug，
 见 [docs/reminder-pomodoro.md](docs/reminder-pomodoro.md) 8.2。
+
+**区域只给矩形，形状归页面。** 2026-10 之前这里给的是圆角矩形和椭圆
+（`CreateRoundRectRgn` / `CreateEllipticRgn`），结果每个圆角都有锯齿：GDI region 是
+**1-bit 掩码**，没有 alpha，系统会把曲线量化成台阶，再叠在浏览器已经抗锯齿的边上。
+现在 `SetWindowRegion` 只接受 `desktop.Bounds`（普通矩形），圆角、椭圆、以后的气泡尖角
+都由 CSS 的 `border-radius` / 伪元素画；窗口是半透明的（`WindowIsTranslucent`），页面
+留空的像素合成到桌面。
+**代价是明写着的**：圆角外那几像素不再把点击透给桌面，而是落在本窗口上。要拿回它们需要
+逐像素命中测试（`WM_NCHITTEST` + 缓存 alpha 掩码），那是另一个量级的机制。
 
 ### 3.3 插件帧只能这样长
 

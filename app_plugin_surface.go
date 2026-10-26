@@ -13,11 +13,15 @@ import (
 // PluginSurfaceRect is one block of a plugin's floating surface, in CSS pixels
 // relative to the window's top-left corner.
 //
-// It is the CSS-side twin of the desktop.RegionRect the window is cropped to:
-// both come out of ONE call to computePluginSurface, which is what makes "the
-// rectangle the region uses" and "the rectangle the page places the iframe at"
-// the same rectangle rather than two calculations that have to be kept in
-// agreement.
+// It is the CSS-side twin of the desktop.Bounds the window is cropped to: both come
+// out of ONE call to computePluginSurface, which is what makes "the rectangle the
+// region covers" and "the rectangle the page places the iframe at" the same rectangle
+// rather than two calculations that have to be kept in agreement.
+//
+// The SHAPE lives here and not in the region: R and Ellipse tell the page how to draw,
+// and the region only says which pixels of the window exist. A region cannot carry a
+// curve - it is a 1-bit mask - so drawing one there would quantise an edge the renderer
+// had already anti-aliased.
 type PluginSurfaceRect struct {
 	// Index is the block's position in the manifest's declaration order. It is
 	// the declaration index, NOT a renumbering of the surviving blocks: the
@@ -32,12 +36,10 @@ type PluginSurfaceRect struct {
 	// Ellipse reports that the page must draw this block as a true ellipse
 	// (border-radius: 50%) rather than a rounded rectangle.
 	//
-	// It travels with the geometry rather than being re-derived on the page
-	// because the REGION is already elliptical for these blocks: if the page drew
-	// a rounded rectangle where the region is an ellipse, the corners inside the
-	// region and outside the drawn shape would show the window's glass tint - the
-	// same sliver problem Radius exists to solve, just at the four corners
-	// instead of the sides.
+	// It travels with the geometry rather than being re-derived on the page because
+	// the plugin declared it: the shape a block should take is part of what the plugin
+	// asked for, not something the host may guess from the numbers. The page draws
+	// border-radius: 50% for these and a rounded rectangle for the rest.
 	Ellipse bool `json:"ellipse"`
 }
 
@@ -111,7 +113,7 @@ func mirrorDeclaredRects(rects []plugins.Rect, petWLogical float64) []plugins.Re
 // every block is dropped the result is (nil, nil): no region extension, no
 // layout field, and the caller reports that the surface fell outside the
 // window.
-func computePluginSurface(petX, petY, petW, petH, totalW, totalH int, s float64, rects []plugins.Rect) ([]desktop.RegionRect, *PluginSurfaceView) {
+func computePluginSurface(petX, petY, petW, petH, totalW, totalH int, s float64, rects []plugins.Rect) ([]desktop.Bounds, *PluginSurfaceView) {
 	if s <= 0 {
 		s = 1
 	}
@@ -123,7 +125,7 @@ func computePluginSurface(petX, petY, petW, petH, totalW, totalH int, s float64,
 	// to integers - so the rounding has to be symmetric about zero.
 	round := func(v float64) int { return int(math.Round(v)) }
 
-	var regions []desktop.RegionRect
+	var regions []desktop.Bounds
 	view := &PluginSurfaceView{Rects: []PluginSurfaceRect{}}
 
 	for i, r := range rects {
@@ -159,15 +161,19 @@ func computePluginSurface(petX, petY, petW, petH, totalW, totalH int, s float64,
 			y = 0
 		}
 
-		// 3. Round the corners, but never past half the shorter side: a larger
-		//    radius would make the region's rounded-rect degenerates, and the
-		//    visible area would no longer match the box the page draws.
+		// 3. Round the corners of what the PAGE draws, but never past half the
+		//    shorter side: a larger CSS radius degenerates, and the drawn shape
+		//    would stop matching the box the plugin declared.
 		//
-		//    An elliptical block takes no corner radius at all: the region uses
-		//    CreateEllipticRgn, which ignores Radius, and the page uses
-		//    border-radius: 50%, which overrides it. Writing a non-zero radius
-		//    here would be a number that describes neither shape, and the next
-		//    person to read it would reasonably trust it.
+		//    This radius goes into the VIEW only. The window region is the plain
+		//    rectangle: a GDI region is a 1-bit mask, so giving it a radius would
+		//    re-quantise the curve the renderer had already anti-aliased (see
+		//    SetWindowRegion in internal/desktop).
+		//
+		//    An elliptical block takes no corner radius at all: the page draws
+		//    border-radius: 50%, so a non-zero Radius here would be a number that
+		//    describes neither shape, and the next person to read it would
+		//    reasonably trust it.
 		radius := round(r.Radius * s)
 		if r.Ellipse {
 			radius = 0
@@ -178,13 +184,11 @@ func computePluginSurface(petX, petY, petW, petH, totalW, totalH int, s float64,
 			radius = 0
 		}
 
-		regions = append(regions, desktop.RegionRect{
-			Bounds:  desktop.Bounds{X: x, Y: y, Width: w, Height: h},
-			Radius:  radius,
-			Ellipse: r.Ellipse,
-		})
+		// Boxes, not shapes: the region's job is which pixels of the WINDOW exist,
+		// and the shape of each block is the page's business.
+		regions = append(regions, desktop.Bounds{X: x, Y: y, Width: w, Height: h})
 		// The view carries the SAME rectangle divided by the scale, so the page
-		// and the region describe one shape.
+		// places its iframes on exactly the pixels the region covers.
 		view.Rects = append(view.Rects, PluginSurfaceRect{
 			Index:   i,
 			X:       float64(x) / s,
@@ -407,7 +411,7 @@ func (a *App) syncPluginSurface() bool {
 //
 // It is the same computation applyWindowGeometry performs, exposed so the open
 // path can decide before it changes state.
-func (a *App) pluginSurfaceRegions(pluginID string) ([]desktop.RegionRect, bool) {
+func (a *App) pluginSurfaceRegions(pluginID string) ([]desktop.Bounds, bool) {
 	regions, view, ok := a.pluginSurfaceGeometry(pluginID)
 	return regions, ok && view != nil
 }
@@ -417,7 +421,7 @@ func (a *App) pluginSurfaceRegions(pluginID string) ([]desktop.RegionRect, bool)
 //
 // It reports whether the plugin's declaration could be read at all; whether any
 // rectangle survived the clamp is expressed by the returned slices being empty.
-func (a *App) pluginSurfaceGeometry(pluginID string) ([]desktop.RegionRect, *PluginSurfaceView, bool) {
+func (a *App) pluginSurfaceGeometry(pluginID string) ([]desktop.Bounds, *PluginSurfaceView, bool) {
 	declared, ok := a.pluginSurfaceRects(pluginID)
 	if !ok {
 		return nil, nil, false

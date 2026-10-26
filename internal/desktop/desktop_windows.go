@@ -63,8 +63,6 @@ var (
 	procGetStockObject   = gdi32.NewProc("GetStockObject")
 	procCreateSolidBrush = gdi32.NewProc("CreateSolidBrush")
 	procCreateRectRgn    = gdi32.NewProc("CreateRectRgn")
-	procCreateRoundRgn   = gdi32.NewProc("CreateRoundRectRgn")
-	procCreateEllipRgn   = gdi32.NewProc("CreateEllipticRgn")
 	procCombineRgn       = gdi32.NewProc("CombineRgn")
 	procDeleteObject     = gdi32.NewProc("DeleteObject")
 	procSetWindowRgn     = user32.NewProc("SetWindowRgn")
@@ -334,7 +332,26 @@ func MakeTransparent(w Window) error {
 // transparent. With the DWM frame extended over the client area they render as a
 // tinted glass strip rather than as the desktop, which is visible as a pale blue
 // band. Keeping the region to the drawn rectangles removes that area entirely.
-func SetWindowRegion(w Window, rects ...RegionRect) error {
+// SetWindowRegion crops the window to the union of these rectangles.
+//
+// RECTANGLES ONLY, on purpose, and this used to be different: it took a radius and an
+// ellipse flag and called CreateRoundRectRgn / CreateEllipticRgn to match the page's
+// border-radius. A GDI region is a 1-bit mask - SetWindowRgn clips against it with no alpha
+// channel - so every curve came out as a staircase, drawn on top of the browser's own
+// anti-aliased edge. Rounded panel corners and the elliptical thought puffs were visibly
+// jagged.
+//
+// So the split is now: the REGION says which bounding boxes the window covers (a hit-testing
+// and window-manager question, and rectangles are exactly right for it), and the PAGE says
+// what shape each box is. Because the window is translucent, the pixels the page leaves
+// transparent composite to the desktop rather than to a background brush, and the edge is as
+// smooth as the renderer can draw it.
+//
+// The cost is real and deliberate: a click in the corner pixels outside the page's shape now
+// lands on this window instead of falling through to the desktop - a few pixels per corner.
+// Reclaiming them needs per-pixel hit testing (WM_NCHITTEST plus a cached alpha mask), which
+// is a much bigger mechanism than the problem it solves.
+func SetWindowRegion(w Window, rects ...Bounds) error {
 	// A single zero-sized rectangle means "clear the region".
 	if len(rects) == 0 || (len(rects) == 1 && (rects[0].Width <= 0 || rects[0].Height <= 0)) {
 		if ret, _, err := procSetWindowRgn.Call(uintptr(w), 0, 1); ret == 0 {
@@ -350,31 +367,13 @@ func SetWindowRegion(w Window, rects ...RegionRect) error {
 		if r.Width <= 0 || r.Height <= 0 {
 			continue
 		}
-		// CreateEllipticRgn and CreateRoundRectRgn take the same bounding
-		// rectangle, so both get the same +1 on the lower-right corner and the
-		// resulting outline covers the same pixels the page does. CreateRectRgn
-		// is exclusive there and takes the bounds unchanged.
-		var hrgn uintptr
-		var err error
-		switch {
-		case r.Ellipse:
-			hrgn, _, err = procCreateEllipRgn.Call(
-				uintptr(r.X), uintptr(r.Y),
-				uintptr(r.X+r.Width+1), uintptr(r.Y+r.Height+1),
-			)
-		case r.Radius > 0:
-			d := uintptr(r.Radius * 2)
-			hrgn, _, err = procCreateRoundRgn.Call(
-				uintptr(r.X), uintptr(r.Y),
-				uintptr(r.X+r.Width+1), uintptr(r.Y+r.Height+1),
-				d, d,
-			)
-		default:
-			hrgn, _, err = procCreateRectRgn.Call(
-				uintptr(r.X), uintptr(r.Y),
-				uintptr(r.X+r.Width), uintptr(r.Y+r.Height),
-			)
-		}
+		// CreateRectRgn is exclusive on the lower-right corner, so the bounds go in
+		// unchanged - and it is the only shape call here. See the doc comment above
+		// for why the rounded and elliptical variants are gone.
+		hrgn, _, err := procCreateRectRgn.Call(
+			uintptr(r.X), uintptr(r.Y),
+			uintptr(r.X+r.Width), uintptr(r.Y+r.Height),
+		)
 		if hrgn == 0 {
 			if total != 0 {
 				procDeleteObject.Call(total)

@@ -112,7 +112,7 @@ func NewHotkeys([]HotkeySpec, func(HotkeyAction)) (HotkeyManager, HotkeyView, er
 }
 
 // SetWindowRegion is not implemented off Windows.
-func SetWindowRegion(Window, ...RegionRect) error { return errUnsupported }
+func SetWindowRegion(Window, ...Bounds) error { return errUnsupported }
 
 // SuppressBackgroundErasure is not implemented off Windows.
 func SuppressBackgroundErasure(Window) error { return errUnsupported }

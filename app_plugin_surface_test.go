@@ -10,12 +10,17 @@ import (
 // desktopRegion is a test-side projection of a desktop.RegionRect. Comparing the
 // four numbers rather than the struct keeps a failure message readable, which
 // matters for the clamp table below.
+// There is no radius field here, and that absence IS an assertion: the window region is a
+// union of RECTANGLES. It used to carry the corner radius, which is exactly what made the
+// rounded corners jagged - a GDI region is a 1-bit mask, so handing it a curve quantises an
+// edge the renderer had already anti-aliased. The shape lives in the VIEW
+// (PluginSurfaceRect.R / .Ellipse) now, and the page draws it.
 type desktopRegion struct {
-	X, Y, W, H, R int
+	X, Y, W, H int
 }
 
-func regionOf(r desktop.RegionRect) desktopRegion {
-	return desktopRegion{X: r.Bounds.X, Y: r.Bounds.Y, W: r.Bounds.Width, H: r.Bounds.Height, R: r.Radius}
+func regionOf(b desktop.Bounds) desktopRegion {
+	return desktopRegion{X: b.X, Y: b.Y, W: b.Width, H: b.Height}
 }
 
 // window360 is the geometry the root tests use: a 540x520 window with the pet at
@@ -36,7 +41,9 @@ func TestComputePluginSurfaceMapsAndRounds(t *testing.T) {
 	if len(regions) != 1 {
 		t.Fatalf("want 1 region, got %d", len(regions))
 	}
-	want := desktopRegion{X: 160, Y: 170, W: 300, H: 220, R: 14}
+	// The region is the BOX; the radius is a drawing instruction and lives in the view
+	// (asserted two lines down). A radius here would be the jagged-corner mechanism back.
+	want := desktopRegion{X: 160, Y: 170, W: 300, H: 220}
 	if got := regionOf(regions[0]); got != want {
 		t.Fatalf("region = %+v, want %+v", got, want)
 	}
@@ -62,7 +69,8 @@ func TestComputePluginSurfaceAtScaleTwo(t *testing.T) {
 	if len(regions) != 1 {
 		t.Fatalf("want 1 region, got %d", len(regions))
 	}
-	want := desktopRegion{X: 320, Y: 340, W: 600, H: 440, R: 28}
+	// Same split at scale 2: the region scales as a BOX, the radius scales in the view.
+	want := desktopRegion{X: 320, Y: 340, W: 600, H: 440}
 	if got := regionOf(regions[0]); got != want {
 		t.Fatalf("physical region = %+v, want %+v", got, want)
 	}
@@ -143,29 +151,33 @@ func TestComputePluginSurfaceAllDroppedReturnsNil(t *testing.T) {
 	}
 }
 
-// TestComputePluginSurfaceRadiusIsCapped pins that a radius larger than half the
-// shorter side is capped. Beyond that the rounded rectangle degenerates, and the
-// visible area stops matching the box the page draws.
+// TestComputePluginSurfaceRadiusIsCapped pins that a radius larger than half the shorter
+// side is capped. Beyond that the rounded rectangle degenerates, and the shape the page
+// draws stops matching the box the region covers.
+//
+// The cap is applied to the VIEW, which is where the radius lives now: the region is a
+// plain rectangle, so a radius in it would be a number nobody reads (and one that made the
+// corners jagged while it was there).
 func TestComputePluginSurfaceRadiusIsCapped(t *testing.T) {
 	regions, view := computePluginSurface(testPetX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1,
 		[]plugins.Rect{{DX: 10, DY: 10, W: 40, H: 100, Radius: 200}})
 	if len(regions) != 1 {
 		t.Fatalf("want 1 region, got %d", len(regions))
 	}
-	if got := regionOf(regions[0]); got.R != 20 {
-		t.Fatalf("radius = %d, want half the shorter side (20)", got.R)
-	}
 	if view.Rects[0].R != 20 {
-		t.Fatalf("css radius = %g, want 20", view.Rects[0].R)
+		t.Fatalf("css radius = %g, want half the shorter side (20)", view.Rects[0].R)
+	}
+	if got := regionOf(regions[0]); got.W != 40 || got.H != 100 {
+		t.Fatalf("the region must stay the declared box, got %+v", got)
 	}
 }
 
-// TestComputePluginSurfaceEllipseFlag covers T52: the ellipse flag travels from
-// the declaration to BOTH outputs, and the blocks that did not ask for it stay
-// rectangular.
+// TestComputePluginSurfaceEllipseFlag covers T52: the ellipse flag travels from the
+// declaration to the VIEW, which is what the page draws from, and the blocks that did not
+// ask for it stay rectangular.
 //
-// Sorting the flag out per-output is exactly the kind of thing that works until
-// a mixed declaration arrives, so the fixture declares one of each.
+// Sorting the flag out per-block is exactly the kind of thing that works until a mixed
+// declaration arrives, so the fixture declares one of each.
 func TestComputePluginSurfaceEllipseFlag(t *testing.T) {
 	rects := []plugins.Rect{
 		{DX: 160, DY: 10, W: 300, H: 220, Radius: 14},
@@ -175,27 +187,28 @@ func TestComputePluginSurfaceEllipseFlag(t *testing.T) {
 	if len(regions) != 2 || len(view.Rects) != 2 {
 		t.Fatalf("want 2 of each, got %d regions and %d rects", len(regions), len(view.Rects))
 	}
-	if regions[0].Ellipse {
-		t.Error("the first block did not declare an ellipse")
-	}
-	if !regions[1].Ellipse {
-		t.Error("the second block declared an ellipse")
-	}
 	if view.Rects[0].Ellipse {
 		t.Error("the CSS view of the first block must not be elliptical")
 	}
 	if !view.Rects[1].Ellipse {
 		t.Error("the CSS view of the second block must be elliptical")
 	}
+	// The region ignores the flag entirely - both blocks are boxes - and that is the
+	// point of the split: the flag is a DRAWING instruction, not a clipping one.
+	if got := regionOf(regions[0]); got.W != 300 || got.H != 220 {
+		t.Errorf("the first region is not its declared box: %+v", got)
+	}
+	if got := regionOf(regions[1]); got.W != 34 || got.H != 20 {
+		t.Errorf("the second region is not its declared box: %+v", got)
+	}
 }
 
-// TestComputePluginSurfaceEllipseHasNoRadius covers T53: an elliptical block
-// carries Radius 0 into the region.
+// TestComputePluginSurfaceEllipseHasNoRadius covers T53: an elliptical block reports radius
+// 0 to the page.
 //
-// The number is not cosmetic. desktop's CreateEllipticRgn ignores Radius, and the
-// page draws border-radius: 50% - so a non-zero radius here would describe a
-// shape that neither the region nor the page produces, and the next reader would
-// have no way to tell it was meaningless.
+// The number is not cosmetic. The page draws border-radius: 50% for a puff, so a non-zero
+// radius alongside Ellipse would be a number that describes neither shape, and the next
+// reader would have no way to tell it was meaningless.
 func TestComputePluginSurfaceEllipseHasNoRadius(t *testing.T) {
 	// A radius that WOULD be valid for this box, so the assertion cannot pass
 	// merely because the cap zeroed it.
@@ -204,22 +217,18 @@ func TestComputePluginSurfaceEllipseHasNoRadius(t *testing.T) {
 	if len(regions) != 1 {
 		t.Fatalf("want 1 region, got %d", len(regions))
 	}
-	if got := regions[0].Radius; got != 0 {
-		t.Fatalf("an elliptical region must carry radius 0, got %d", got)
-	}
 	if got := view.Rects[0].R; got != 0 {
 		t.Fatalf("an elliptical view rect must carry r 0, got %g", got)
 	}
-	// The rectangle itself is untouched: only the outline changed.
+	// The rectangle itself is untouched: only the outline the page draws changed.
 	if got := regionOf(regions[0]); got.X != 200 || got.Y != 400 || got.W != 34 || got.H != 20 {
 		t.Fatalf("the ellipse bounds moved: %+v", got)
 	}
 }
 
-// TestComputePluginSurfaceEllipseCoexistsWithRoundedBlocks covers the mixed case
-// at scale 2: the elliptical block's region stays an ellipse with radius 0 while
-// its rounded neighbour keeps its (scaled) cap, and the CSS view divides both
-// back.
+// TestComputePluginSurfaceEllipseCoexistsWithRoundedBlocks covers the mixed case at scale 2:
+// the elliptical block's view carries r 0 and its rounded neighbour the scaled cap, while
+// both regions stay plain boxes.
 func TestComputePluginSurfaceEllipseCoexistsWithRoundedBlocks(t *testing.T) {
 	rects := []plugins.Rect{
 		{DX: 160, DY: 10, W: 40, H: 100, Radius: 200, Ellipse: true},
@@ -229,16 +238,15 @@ func TestComputePluginSurfaceEllipseCoexistsWithRoundedBlocks(t *testing.T) {
 	if len(regions) != 2 {
 		t.Fatalf("want 2 regions, got %d", len(regions))
 	}
-	if !regions[0].Ellipse || regions[0].Radius != 0 {
-		t.Errorf("the first block: ellipse=%v radius=%d, want true/0", regions[0].Ellipse, regions[0].Radius)
-	}
-	// The rounded neighbour is capped at half its scaled shorter side
-	// (80/2 = 40), which is the same rule TestComputePluginSurfaceRadiusIsCapped
-	// pins - the ellipse branch must not have changed it.
-	if regions[1].Ellipse || regions[1].Radius != 40 {
-		t.Errorf("the second block: ellipse=%v radius=%d, want false/40", regions[1].Ellipse, regions[1].Radius)
-	}
+	// The rounded neighbour is capped at half its scaled shorter side (80/2 = 40), the
+	// same rule TestComputePluginSurfaceRadiusIsCapped pins - the ellipse branch must not
+	// have changed it.
 	if view.Rects[0].R != 0 || view.Rects[1].R != 20 {
 		t.Errorf("css radii = %g and %g, want 0 and 20", view.Rects[0].R, view.Rects[1].R)
+	}
+	for i, r := range regions {
+		if got := regionOf(r); got.W != 80 || got.H != 200 {
+			t.Errorf("region %d is not its declared box: %+v", i, got)
+		}
 	}
 }

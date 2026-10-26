@@ -454,8 +454,8 @@ func TestPluginSurfaceRegionsUsesTheSameRectanglesAsTheRegion(t *testing.T) {
 		// The view is the region divided by the scale: this is the relation
 		// app.go's bubble path uses, and the one that guarantees the page and
 		// the crop agree at any DPI.
-		if v.X != float64(r.Bounds.X)/s || v.Y != float64(r.Bounds.Y)/s ||
-			v.W != float64(r.Bounds.Width)/s || v.H != float64(r.Bounds.Height)/s {
+		if v.X != float64(r.X)/s || v.Y != float64(r.Y)/s ||
+			v.W != float64(r.Width)/s || v.H != float64(r.Height)/s {
 			t.Fatalf("rect %d is not the region divided by the scale: region=%+v view=%+v scale=%v", i, r, v, s)
 		}
 		if v.Index != i {
