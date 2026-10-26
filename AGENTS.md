@@ -96,6 +96,12 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 **代价是明写着的**：圆角外那几像素不再把点击透给桌面，而是落在本窗口上。要拿回它们需要
 逐像素命中测试（`WM_NCHITTEST` + 缓存 alpha 掩码），那是另一个量级的机制。
 
+**插件浮层面的 iframe 必须透明**（`#plugin-surface .plugin-frame { background: transparent }`）。
+它曾经用 `var(--panel-bg)` 铺底板——那是区域还是圆角形状的时代留下的，那时的底板就是"被裁出来的
+形状"。区域改成包围盒之后，底板变成插件圆角外面的深色方块，以及插件自己留白处（比如气泡尾巴）
+的深色带：一个 `#1d2027` 的三角形压在 `rgba(28,30,36,.94)` 上，肉眼就是"没有尾巴"，为此查了
+五轮。约定是：插件声明矩形并负责画满它，宿主只出位置。
+
 ### 3.3 插件帧只能这样长
 
 [frontend/src/plugin-host.js](frontend/src/plugin-host.js) 是安全边界：

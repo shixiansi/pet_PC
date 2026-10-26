@@ -1244,7 +1244,20 @@ button:disabled {
 #plugin-surface .plugin-frame {
   position: absolute;
   pointer-events: auto;
-  background: var(--panel-bg);
+  /* TRANSPARENT, and this line is the whole fix for "the plugin's tail is invisible".
+   *
+   * It used to be `var(--panel-bg)` (rgba(28, 30, 36, 0.94)) - a near-opaque plate behind
+   * every floating frame. That was right while the window region was shaped to the plugin's
+   * rounded corners: the plate was what showed inside the region. Now the region is a plain
+   * bounding box (AGENTS.md §3.2) and the plugin draws its own shape, so the plate became a
+   * dark square behind the plugin's rounded corners AND behind the 10px tail band the chat
+   * plugin leaves transparent. A #1d2027 triangle on that plate is ten RGB steps apart from
+   * it, i.e. invisible.
+   *
+   * A surface that paints nothing now shows the desktop, which is the contract: a plugin
+   * declares rectangles and fills them. Only one plugin in the market declares a surface
+   * today (the chat plugin), so nothing else changes appearance. */
+  background: transparent;
 }
 
 /* --- toast --------------------------------------------------------------- */
