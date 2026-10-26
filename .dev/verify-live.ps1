@@ -1,4 +1,4 @@
-# Verifies the CONVERSATION PLUGIN'S floating surface against the REAL window.
+﻿# Verifies the CONVERSATION PLUGIN'S floating surface against the REAL window.
 #
 # The surface is the third occupant of the slot beside the pet, and like the panel
 # and the speech bubble it is not one box: the plugin declares two rectangles, and
@@ -28,9 +28,12 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'env.ps1')
 
-$exe  = if ($args.Count -ge 1) { $args[0] } else { 'F:\pet_pc\build\bin\PetPC.exe' }
-$data = 'F:\pet_pc\.dev\verify-live'
+# Derived, not hardcoded: see the same note in verify-region.ps1 - `F:\pet_pc\...` was
+# the workspace before it moved, and a gate that cannot find its binary fails instead of
+# skipping, which reads as "the build is broken".
 $root = Split-Path -Parent $PSScriptRoot
+$exe  = if ($args.Count -ge 1) { $args[0] } else { Join-Path $root 'build\bin\PetPC.exe' }
+$data = Join-Path $PSScriptRoot 'verify-live'
 
 # --- the geometry source: the chat plugin's own manifest --------------------
 #

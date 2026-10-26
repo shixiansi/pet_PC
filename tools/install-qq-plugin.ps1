@@ -1,4 +1,4 @@
-# Installs the QQ chat plugin (and the 1.4.0 conversation plugin it borrows its
+﻿# Installs the QQ chat plugin (and the 1.4.0 conversation plugin it borrows its
 # model settings from) straight into the pet's data directory.
 #
 # WHY THIS EXISTS AT ALL, given the market program installs plugins properly:

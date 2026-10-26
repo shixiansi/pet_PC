@@ -1,4 +1,4 @@
-# Workspace-local Go/Node toolchain environment.
+﻿# Workspace-local Go/Node toolchain environment.
 #
 # The DSH file sandbox allows writes only under F:\pet_pc, so the Go toolchain,
 # module cache and the Wails CLI all live here instead of the user profile.

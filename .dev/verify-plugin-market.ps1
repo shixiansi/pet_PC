@@ -1,4 +1,4 @@
-# Verifies the plugin market's real window: its frame, its size and its layout.
+﻿# Verifies the plugin market's real window: its frame, its size and its layout.
 #
 # The market is a SEPARATE PROGRAM, and it exists because the pet's panel is a
 # fixed 380x520 rectangle the OS crops the window to. Four problems were visible in

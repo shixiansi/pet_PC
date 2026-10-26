@@ -1,4 +1,4 @@
-# Builds every PetPC program.
+﻿# Builds every PetPC program.
 #
 # There are TWO separate Wails applications in one repository now, so building them is
 # two commands in the right order - which is exactly the kind of thing that gets

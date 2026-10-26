@@ -1,4 +1,4 @@
-# Verifies the region-clipping design.
+﻿# Verifies the region-clipping design.
 #
 # Under this design the WINDOW never changes size or position when the panel is
 # toggled; only a native region crop changes. So the invariants to check are:
@@ -11,8 +11,14 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'env.ps1')
 
-$exe  = if ($args.Count -ge 1) { $args[0] } else { 'F:\pet_pc\build\bin\PetPC.exe' }
-$data = 'F:\pet_pc\.dev\verify-region'
+# The repo root is DERIVED, not written down: these scripts used to hardcode
+# `F:\pet_pc\...`, and when the workspace moved the three pet pixel gates died at
+# Start-Process with "cannot find the file specified" - failing, not skipping, so the
+# summary blamed the build. A gate that cannot find its own binary must not be able to
+# report a verdict about it.
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$exe  = if ($args.Count -ge 1) { $args[0] } else { Join-Path $repoRoot 'build\bin\PetPC.exe' }
+$data = Join-Path $PSScriptRoot 'verify-region'
 Remove-Item -Recurse -Force $data -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $data | Out-Null
 

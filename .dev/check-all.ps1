@@ -1,7 +1,16 @@
-# Runs every gate this project has, in one command.
+﻿# Runs every gate this project has, in one command.
 #
 # Usage:  pwsh -File .dev\check-all.ps1        (or  powershell -File ...)
 #
+# BOTH shells work, and that depends on something invisible: every .ps1 in this repo is
+# UTF-8 **with a BOM**. Windows PowerShell 5.1 decodes a BOM-less file as the system ANSI
+# code page, and with GBK that mangles the Chinese text enough to eat a quote or a
+# here-string terminator - the file then fails to PARSE with errors that point at innocent
+# lines ("A 'using' statement must appear before any other statements"). This file had
+# exactly that: 43 parse errors under powershell.exe, 0 under pwsh, entirely because of the
+# missing BOM. So: never strip the BOM from these files, and the check below will notice if
+# someone does.
+
 # The gates, and why each exists:
 #   1. go vet + go test     - the logic, including the SSE decoder, the plugin
 #                             sandbox and the chat state machine.
@@ -74,6 +83,31 @@ function Gate($name, [scriptblock] $body) {
 
 Push-Location $root
 try {
+    # Every .ps1 must be UTF-8 WITH a BOM - see the header for what a stripped BOM does.
+    # It is a gate rather than a comment because a removed BOM is invisible in a diff and
+    # shows up only as a wall of parse errors for whoever runs the script under Windows
+    # PowerShell, blaming lines that are perfectly fine.
+    Gate 'script encodings' {
+        $missingBom = @()
+        Get-ChildItem -Path (Join-Path $root '.dev'), (Join-Path $root 'tools') -Filter *.ps1 -Recurse |
+            Where-Object { $_.FullName -notmatch '\\node_modules\\' } |
+            ForEach-Object {
+                $head = New-Object byte[] 3
+                $fs = [System.IO.File]::OpenRead($_.FullName)
+                try { $null = $fs.Read($head, 0, 3) } finally { $fs.Dispose() }
+                if (-not ($head[0] -eq 0xEF -and $head[1] -eq 0xBB -and $head[2] -eq 0xBF)) {
+                    $missingBom += $_.Name
+                }
+            }
+        if ($missingBom.Count -gt 0) {
+            Write-Host "        no UTF-8 BOM: $($missingBom -join ', ')" -ForegroundColor Red
+            Write-Host "        Windows PowerShell 5.1 misdecodes these and cannot parse them." -ForegroundColor Yellow
+            $global:LASTEXITCODE = 1
+            return
+        }
+        $global:LASTEXITCODE = 0
+    }
+
     Gate 'go vet' { go vet ./... }
     Gate 'go test' { go test ./... -count=1 }
 

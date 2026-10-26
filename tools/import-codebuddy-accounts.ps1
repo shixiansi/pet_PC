@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 <#
 .SYNOPSIS
   把 CodexSwitch「CodeBuddy 多账号」快照库（~/.dsh/codebuddy-accounts/）里的账号，

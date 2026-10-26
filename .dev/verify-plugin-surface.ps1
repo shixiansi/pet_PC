@@ -1,4 +1,4 @@
-# Verifies the plugin floating surface's window region.
+﻿# Verifies the plugin floating surface's window region.
 #
 # The surface is one of the occupants of the slot beside the pet (with the panel
 # and the speech bubble), and it is the only one whose shape comes from a PLUGIN's
@@ -51,12 +51,14 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'env.ps1')
 
-$exe  = if ($args.Count -ge 1) { $args[0] } else { 'F:\pet_pc\build\bin\PetPC.exe' }
+# Derived, not hardcoded: see the same note in verify-region.ps1.
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$exe  = if ($args.Count -ge 1) { $args[0] } else { Join-Path $repoRoot 'build\bin\PetPC.exe' }
 # The market program is a sibling of the pet in build\bin. Only its NAME is needed:
 # this gate asserts the process exists, not what it draws (that is
 # verify-plugin-market.ps1's job).
 $marketName = 'PetPCPluginMarket'
-$data = 'F:\pet_pc\.dev\verify-plugin-surface'
+$data = Join-Path $PSScriptRoot 'verify-plugin-surface'
 Remove-Item -Recurse -Force $data -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $data | Out-Null
 

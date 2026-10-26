@@ -173,6 +173,11 @@ Coopanion 一类项目是 **AGPL-3.0**。可以读设计、可以理解协议格
 
 ## 7. 本机环境已知坑（不是代码问题）
 
+- **`.dev/` 与 `tools/` 下的 `.ps1` 必须带 UTF-8 BOM。** Windows PowerShell 5.1 把无 BOM 的
+  文件按系统 ANSI 代码页（这里 GBK）解码，中文一多就会吃掉一个引号或 here-string 的结束符：
+  同一个文件在 `pwsh` 下 0 个解析错误、在 5.1 下 43 个，而且错误指向的行完全正常
+  （`check-all.ps1` 表现为整段 C# 被当成 PowerShell 解析，报「`using` 语句必须出现在最前面」）。
+  `check-all.ps1` 的 `script encodings` 门禁会抓这件事；**别用会去 BOM 的编辑器保存它们**。
 - 系统 Go 是 **1.21**，而 `go.mod` 要 1.22，`env.ps1` 又设了 `GOTOOLCHAIN=local`。
   本地 1.22.12 工具链在 `pet_pc\.dev\gotool\go`（**不在** `.dev\gotool\go`）；
   `env.ps1` 已做两处回退，别再写死一处。
