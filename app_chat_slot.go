@@ -71,11 +71,12 @@ func (a *App) chatSlotPlugin() (plugins.Installed, bool) {
 // chatSlotMissingMessage is what the slot shows when no plugin claims it.
 //
 // It is a sentence rather than an empty box on purpose: an empty 对话 tab is
-// indistinguishable from a broken one, and the user's next move (open the plugin
-// market, install the chat plugin, tick its permissions) is not guessable from
-// a blank area. It names the button by the id the settings page actually
-// renders, so the instruction can be followed literally.
-const chatSlotMissingMessage = "对话插件还没装好：在设置里点「打开插件市场」装上并授权它。"
+// indistinguishable from a broken one, and the user's next move (open the control
+// center, install the chat plugin, tick its permissions) is not guessable from
+// a blank area. It names the ONE place that entry point lives - the pet's tray menu,
+// since the settings tab that used to hold a button is gone (ui-rebuild 阶段 3) - so
+// the instruction can be followed literally.
+const chatSlotMissingMessage = "对话插件还没装好：在托盘菜单里点「打开控制中心」装上并授权它。"
 
 // chatSlotDiagnosis explains why an INSTALLED plugin was refused the slot, and
 // returns "" when nothing is installed at all.

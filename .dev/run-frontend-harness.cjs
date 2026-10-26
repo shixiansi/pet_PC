@@ -460,7 +460,7 @@ const checksJs = `
         currentSurface = null;
         currentBubble = {
           kind: 'reminder',
-          title: '对话插件还没装好：在设置里点「打开插件市场」装上并授权它。',
+          title: '对话插件还没装好：在托盘菜单里点「打开控制中心」装上并授权它。',
           x: 168, y: 180, w: 300, h: 140, onRight: true,
         };
         return layout(false, currentBubble);

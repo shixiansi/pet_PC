@@ -424,8 +424,12 @@ func TestOpenChatPluginSurfaceWithoutAPluginShowsABubble(t *testing.T) {
 	if layout.Bubble == nil {
 		t.Fatal("the pet must explain itself in a bubble")
 	}
-	if !strings.Contains(layout.Bubble.Title, "插件市场") {
-		t.Fatalf("the bubble must name the plugin market, got %q", layout.Bubble.Title)
+	// It has to name where the installer actually IS. That used to be 「设置 → 打开插件市场」;
+	// the settings tab is gone (ui-rebuild 阶段 3), so the one entry point left is the
+	// pet's tray menu - and a bubble that points at a button nobody can find is the same
+	// failure as a bubble that says nothing.
+	if !strings.Contains(layout.Bubble.Title, "控制中心") {
+		t.Fatalf("the bubble must name the control center, got %q", layout.Bubble.Title)
 	}
 	if !strings.Contains(layout.Bubble.Title, "对话插件") {
 		t.Fatalf("the bubble must name the chat plugin, got %q", layout.Bubble.Title)
