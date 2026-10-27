@@ -33,5 +33,5 @@ import "embed"
 // runtime failure for the user who clicks install on the offline catalogue, so
 // the list is kept in step by hand and checked by a test.
 //
-//go:embed index.json com.shixiansi.plugin-bilibili-1.0.0.zip com.shixiansi.plugin-chat-1.5.14.zip com.shixiansi.plugin-voice-1.0.1.zip com.shixiansi.plugin-qq-1.12.0.zip
+//go:embed index.json com.shixiansi.plugin-bilibili-1.0.0.zip com.shixiansi.plugin-chat-1.6.9.zip com.shixiansi.plugin-pomodoro-2.0.0.zip com.shixiansi.plugin-todo-1.0.2.zip com.shixiansi.plugin-voice-1.0.1.zip com.shixiansi.plugin-qq-1.12.0.zip
 var FS embed.FS

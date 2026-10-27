@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-10-26T14:30:18Z",
+  "updatedAt": "2026-10-27T11:38:06Z",
   "plugins": [
     {
       "id": "com.shixiansi.plugin-bilibili",
@@ -16,12 +16,22 @@
     {
       "id": "com.shixiansi.plugin-chat",
       "name": "对话插件",
-      "version": "1.5.14",
+      "version": "1.6.9",
       "author": "shixiansi",
       "description": "在面板里与桌宠旁和大模型对话的官方插件；自己的 AI 配置与密钥由自己保存。",
-      "permissions": ["llm.chat", "pet.bubble", "pet.surface", "plugin.config", "storage", "todos.read", "todos.write", "timer.control"],
-      "download": "dist/com.shixiansi.plugin-chat-1.5.14.zip",
-      "sha256": "bf0e59319bd42e4afc3da20834d3281649150f1212a4823392180e8c471b20d2"
+      "permissions": ["llm.chat", "pet.bubble", "pet.surface", "plugin.config", "storage", "todos.read", "todos.write"],
+      "download": "dist/com.shixiansi.plugin-chat-1.6.9.zip",
+      "sha256": "16a20ddef903b931f4181bfe1af2d10dc3ebdb9779f657348e9b019706fbc47c"
+    },
+    {
+      "id": "com.shixiansi.plugin-pomodoro",
+      "name": "番茄钟插件",
+      "version": "2.0.0",
+      "author": "shixiansi",
+      "description": "桌宠旁的番茄钟：自己的状态机与记录，开始、暂停、继续、停止，选一件事专注。",
+      "permissions": ["todos.read", "storage", "plugin.config", "events", "pet.surface", "pet.bubble"],
+      "download": "dist/com.shixiansi.plugin-pomodoro-2.0.0.zip",
+      "sha256": "de46ab5c5c51d4ed9e2731ca59b1c4b3ebd245e673dad90d8de700d84de0ae56"
     },
     {
       "id": "com.shixiansi.plugin-qq",
@@ -33,6 +43,16 @@
       "netHosts": ["127.0.0.1:3000", "gchat.qpic.cn", "multimedia.nt.qq.com.cn"],
       "download": "dist/com.shixiansi.plugin-qq-1.12.0.zip",
       "sha256": "52ebe4526b78529fabac7ab2ae8785cfe0c103ef53e6f155cd30559207f17985"
+    },
+    {
+      "id": "com.shixiansi.plugin-todo",
+      "name": "待办插件",
+      "version": "1.0.2",
+      "author": "shixiansi",
+      "description": "桌宠的待办与提醒：列表、勾选、到期提醒都在这里。",
+      "permissions": ["todos.read", "todos.write", "storage", "plugin.config", "pet.surface", "pet.bubble", "events"],
+      "download": "dist/com.shixiansi.plugin-todo-1.0.2.zip",
+      "sha256": "86f1c3380318673af6946786c3f405c5105e005f4537742be79d981fd6615f58"
     },
     {
       "id": "com.shixiansi.plugin-voice",
