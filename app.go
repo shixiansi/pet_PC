@@ -307,7 +307,7 @@ func (a *App) startup(ctx context.Context) {
 // and refusing to start over a missing convenience would be worse.
 func (a *App) startTray() {
 	items := []desktop.TrayMenuItem{
-		desktop.TrayMenuAction(desktop.TrayCmdTogglePanel, "打开待办面板"),
+		desktop.TrayMenuAction(desktop.TrayCmdTogglePanel, "打开待办插件"),
 		desktop.TrayMenuAction(desktop.TrayCmdRemindNow, "立刻提醒一次"),
 		desktop.TrayMenuSeparator(),
 		// The mouse route to the same thing the global shortcuts do. It is here
@@ -1069,7 +1069,7 @@ func clampY(y, h int, work desktop.Bounds) int {
 //     slot occupant, and showBubble / setPluginSurfaceLocked already implement it in both
 //     directions. There is no third occupant left to fold for.
 //   - "opening the panel on a hidden pet shows the pet" was the tray's way back from a hidden
-//     pet. The tray entry that called it (打开待办面板) now opens the todo plugin's SURFACE,
+//     pet. The tray entry that called it (打开待办插件) now opens the plugin's SURFACE,
 //     through OpenPluginSurface - which already shows a hidden pet (surfaceOpensOnAHiddenPet).
 //   - the window is still re-cropped; every remaining path calls applyWindowGeometry.
 
