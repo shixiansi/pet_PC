@@ -20,6 +20,18 @@ scratch/
 # root. PetPC's own config.json lives in its data directory, not here.
 /config.json
 
+# `PETPC_DEBUG=1` makes the app append its drag and slot diagnostics here, relative
+# to the working directory - which is the repo root when it is launched from a
+# terminal. One session's log, not something to review.
+/debug.log
+
+# Explicit pre-change backups of files that were about to be rewritten (the host
+# timer's retirement left one under _backup/host-timer-<stamp>/). They stay on disk
+# on purpose - a backup you can diff against is worth keeping - but they are
+# snapshots of a tree git already has, so committing them would only double the
+# repository.
+/_backup/
+
 # A second copy of the sandboxed toolchain (.dev/, Go module cache, npm cache,
 # test binaries) nested under the repository. Same reasoning as .dev/* below.
 /pet_pc/
