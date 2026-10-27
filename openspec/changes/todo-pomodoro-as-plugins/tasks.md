@@ -2,6 +2,57 @@
 
 > 三个台阶，每阶单独交付、单独回退。阶 3（删面板）做完就回不去，放最后。
 
+## 收尾（2026-10-28，第 14 轮）：三个台阶全部交付
+
+**这个 change 已经做完了。** 下面从 §0 到 §0.1 的内容是**施工期的交接记录**，保留是为了
+"为什么是这个顺序"有据可查；读它的时候请把"没做完的"一律理解成**当时**的待办。
+本节是最终状态。
+
+### 交付了什么
+
+| 台阶 | 结果 | 证据 |
+|---|---|---|
+| 阶 1：待办插件接管数据与提醒 | `plugin-todo` **1.1.0**：列表在它自己的 `storage`（`todos-v1`），定时提醒在它的常驻帧，并把列表发布到 `share` 的 `todo-list` | `market/tests/plugin-todo.test.js` 6 条 |
+| 阶 2：番茄钟插件接管状态机与门控 | `plugin-pomodoro` **2.0.1** → **2.1.0**：自持 `machine.js` + 记录 + 两道门控；2.1.0 把计时循环搬进常驻帧，阶段结束发布到 `share` 的 `phase-ended` | `plugin-pomodoro-machine.test.js` 25 条 + `plugin-pomodoro-frames.test.js` 10 条 |
+| 阶 3：面板退场 | 面板、它的标签、`#chat-slot` 与整套面板绑定删除；**左键解绑**（单击与双击都是空操作）；`panelSlot` 保留但语义收窄成"右键菜单的哪一格找我" | `check-frontend` 117、`run-frontend-harness` 53、`pet-chat-button.test.js` / `pet-menu.test.js` |
+| 遗留一：`timer.phaseEnded` 的发射方 | 宿主**不发**了：`plugin-pomodoro` 2.1.0 通过 `share` 发布，`plugin-voice` **1.0.2** 在常驻帧里每 2 秒轮询 | 见 [pomodoro-headless-timer](../pomodoro-headless-timer/tasks.md) |
+
+### 落地后的数字（这些是会变的东西，改动时一起改）
+
+- `AllowedPermissions`：17 → 15（阶 2，`timer.read`/`timer.control`）→ **13**（`todos.read`/`todos.write`）。
+- Wails 绑定：61 → 47（阶 2）→ **41**（阶 3 删了 `SetPanelOpen` / `TogglePanel` / `OpenChat` /
+  `OpenTodoPanelFromChat`；`OpenTodoPanelFromBubble` 改名成 `OpenTodoFromBubble`，因为它开的是
+  插件的浮层面而不是面板）。
+- `SubscribableEvents`：**`["timer.phaseEnded", "reminder.fired"]`**，没有增减——`timer.changed`
+  与 `todos.changed` 在更早的轮次就删了；`timer.phaseEnded` **刻意保留**（删掉会让 1.0.1 及更早的
+  语音插件 `events.subscribe` 报错）。
+- 门禁：`check-frontend` **117**、`run-frontend-harness` **53**、前端 jsdom **34**、
+  `market npm test` **461**。
+- 气泡种类收敛到两种：`reminder` 与 `menu`。picker / summary / plan 三种随宿主计时器一起退休
+  （门控现在是番茄钟插件自己的提问）。
+
+### 施工期记录里已经过期、但**别再照着做**的几处
+
+- §0 说"`plugin-pomodoro` 2.0.0 未发布"——它发过了（2.0.1），现在是 2.1.0。
+- §0.1 的"下一段的第一件事：删宿主计时器本体"——已完成。
+- §0.1 末尾"`check-frontend.cjs` 里新增的 `RETIRED_GATE_CHECKS`（14 条）……阶 3 时连同它一起删"
+  ——已删。
+- 阶 3 清单里"`panelSlot` 退休"**没有按字面执行**：`panelSlot` 留下了，只是语义从"占哪个 tab"
+  收窄成"用户点菜单这一格时找谁"。理由写在 [design.md](design.md) §6b 的 D2 与
+  `internal/plugins/manifest.go` 的字段注释里——manifest 是从磁盘读的，改字段名会让**所有已装插件**
+  下次启动变成非法 manifest。
+- 阶 3 清单里"`docs/reminder-pomodoro.md` 整体归档"**也没有执行**：那份文档 §8 是窗口区域裁剪的
+  权威说明，AGENTS §3.2 在引用它，归档会把那条引用打断。
+
+### 唯一没有做的验证
+
+**真机（交互桌面 + WebView2）的 `verify-live.ps1` / `verify-region.ps1` 这一轮没跑。**
+所有结论都来自单元测试、真实浏览器引擎（`run-frontend-harness.cjs`）与静态接线检查。
+首次真机使用时优先确认两件事：**关掉番茄钟浮层面后到点是否出声**（这条链路整个是新的），
+以及**窗口区域在气泡 / 浮层面之间切换时有没有淡蓝色带**（区域从三态变两态）。
+
+---
+
 ## 0. 交接状态（2026-10-27，第 10 轮）
 
 **已经落地并且验证过的**
