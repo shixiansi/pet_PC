@@ -18,16 +18,6 @@ func testContext() PromptContext {
 		OpenCount:    2,
 		OverdueCount: 1,
 		DueSoonCount: 1,
-		Pomodoro: PromptPomodoro{
-			Enabled:        true,
-			Phase:          "专注",
-			Remaining:      "12:34",
-			TodoTitle:      "交周报",
-			CompletedToday: 3,
-		},
-		RecentSessions: []PromptSession{
-			{Title: "写文档", Summary: "把接口文档补完了", When: "今天 11:00"},
-		},
 		IncludeTodos: true,
 	}
 }
@@ -46,11 +36,6 @@ func TestBuildSystemPromptIncludesTheWorld(t *testing.T) {
 		"已逾期 2 小时",
 		"买牛奶",
 		"今天 18:00",
-		"专注",
-		"12:34",
-		"今天已完成 3 个番茄",
-		"写文档",
-		"把接口文档补完了",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("prompt is missing %q\n---\n%s", want, got)
@@ -143,129 +128,11 @@ func TestBuildSystemPromptSkipsEmptyTitles(t *testing.T) {
 	}
 }
 
-func TestBuildSystemPromptNoSessionHeaderWhenNothingToShow(t *testing.T) {
-	ctx := testContext()
-	// A summary the user skipped carries no information, so the whole section
-	// (header included) must disappear rather than appear empty.
-	ctx.RecentSessions = []PromptSession{{Title: "写文档", Summary: "  ", When: "今天 11:00"}}
-	got := BuildSystemPrompt(ctx)
+// The three session-summary tests and the pomodoro-state test that used to follow
+// this point described a snapshot the host no longer builds: the recent pomodoro
+// summaries and the timer's phase. Both belong to the pomodoro plugin now, so there
+// is no summary list to cap, no header to back out and no phase to render.
 
-	if strings.Contains(got, "最近的番茄总结") {
-		t.Errorf("an empty summary left a dangling header:\n%s", got)
-	}
-}
-
-func TestBuildSystemPromptCapsSessionSummaries(t *testing.T) {
-	ctx := testContext()
-	ctx.RecentSessions = nil
-	for i := 0; i < maxPromptSessions+3; i++ {
-		ctx.RecentSessions = append(ctx.RecentSessions, PromptSession{
-			Title: "会话", Summary: "总结内容", When: "今天 10:00",
-		})
-	}
-	got := BuildSystemPrompt(ctx)
-	if n := strings.Count(got, "总结内容"); n != maxPromptSessions {
-		t.Errorf("%d summaries in the prompt, want %d", n, maxPromptSessions)
-	}
-}
-
-func TestBuildSystemPromptTruncatesLongSummaries(t *testing.T) {
-	ctx := testContext()
-	long := strings.Repeat("很", 500)
-	ctx.RecentSessions = []PromptSession{{Title: "T", Summary: long, When: "今天"}}
-	got := BuildSystemPrompt(ctx)
-
-	if strings.Contains(got, long) {
-		t.Error("a 500-character summary went into the prompt verbatim")
-	}
-	if !strings.Contains(got, "…") {
-		t.Error("the truncation was not marked")
-	}
-}
-
-func TestBuildSystemPromptPomodoroStates(t *testing.T) {
-	cases := []struct {
-		name string
-		p    PromptPomodoro
-		want string
-	}{
-		{"off", PromptPomodoro{Enabled: false}, "未开启"},
-		{"idle", PromptPomodoro{Enabled: true}, "已开启，当前空闲"},
-		{"running", PromptPomodoro{Enabled: true, Phase: "专注", Remaining: "05:00"}, "还剩 05:00"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			ctx := testContext()
-			ctx.Pomodoro = c.p
-			got := BuildSystemPrompt(ctx)
-			if !strings.Contains(got, c.want) {
-				t.Errorf("prompt missing %q:\n%s", c.want, got)
-			}
-		})
-	}
-}
-
-func TestBuildSystemPromptHandlesZeroTime(t *testing.T) {
-	ctx := testContext()
-	ctx.Now = time.Time{} // an unset clock must not render as year 1
-	got := BuildSystemPrompt(ctx)
-	if strings.Contains(got, "0001-01-01") {
-		t.Errorf("an unset clock reached the prompt:\n%s", got)
-	}
-	if !strings.Contains(got, "现在：") {
-		t.Errorf("the time line is missing entirely:\n%s", got)
-	}
-}
-
-func TestBuildSystemPromptWithoutPersona(t *testing.T) {
-	ctx := testContext()
-	ctx.Persona = "   "
-	got := BuildSystemPrompt(ctx)
-	if strings.HasPrefix(got, "\n") {
-		t.Error("an empty persona left a leading blank line")
-	}
-	if !strings.Contains(got, "现在：") {
-		t.Error("the world snapshot was lost")
-	}
-}
-
-func TestBuildMessagesOrder(t *testing.T) {
-	history := []Message{
-		{Role: "user", Content: "第一问"},
-		{Role: "assistant", Content: "第一答"},
-	}
-	msgs := BuildMessages(testContext(), history)
-
-	if len(msgs) != 3 {
-		t.Fatalf("got %d messages, want 3", len(msgs))
-	}
-	if msgs[0].Role != "system" {
-		t.Errorf("message 0 role = %q, want system", msgs[0].Role)
-	}
-	if !strings.Contains(msgs[0].Content, "2025-03-07") {
-		t.Error("the system message is not the assembled prompt")
-	}
-	if msgs[1].Content != "第一问" || msgs[2].Content != "第一答" {
-		t.Errorf("history order changed: %+v", msgs[1:])
-	}
-}
-
-func TestBuildMessagesOmitsEmptySystem(t *testing.T) {
-	// An empty persona and no context still produces the world snapshot, so the
-	// system message survives; but with nothing at all it must not be sent as an
-	// empty string, which some gateways reject.
-	msgs := BuildMessages(PromptContext{IncludeTodos: false}, nil)
-	if len(msgs) != 1 || msgs[0].Role != "system" {
-		t.Fatalf("expected just a system message, got %+v", msgs)
-	}
-	if strings.TrimSpace(msgs[0].Content) == "" {
-		t.Error("an empty system message was sent")
-	}
-}
-
-func TestBuildMessagesWithNoHistory(t *testing.T) {
-	msgs := BuildMessages(testContext(), nil)
-	if len(msgs) != 1 {
-		t.Fatalf("got %d messages, want just the system one", len(msgs))
-	}
-}
+// TestBuildSystemPromptPomodoroStates used to pin the four ways the timer could
+// appear in the snapshot (off, idle, running, with a completed count). The timer is
+// the pomodoro plugin's now, so the host's prompt has no pomodoro block at all.

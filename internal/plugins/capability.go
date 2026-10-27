@@ -5,11 +5,11 @@ import (
 	"strings"
 )
 
-// The seventeen permissions, fixed. A plugin can ask for nothing else, and the
+// The fifteen permissions, fixed. A plugin can ask for nothing else, and the
 // dispatcher refuses any call whose permission the user has not granted.
 //
 // The count is deliberately NOT asserted by this comment alone: manifest_test.go's
-// TestAllowedPermissionsIsTheSeventeen pins the exact list, and app_plugins_test.go's
+// TestAllowedPermissionsIsTheFifteen pins the exact list, and app_plugins_test.go's
 // TestCapabilityTableIsComplete requires every permission here to be used by at
 // least one method. A permission with no method behind it would be a switch the user
 // is asked about that does nothing - which is why there is no separate `background`
@@ -21,21 +21,16 @@ const (
 	PermTodosWrite = "todos.write"
 	// PermBubble lets a plugin make the pet say a line in a bubble.
 	PermBubble = "pet.bubble"
-	// PermTimerRead lets a plugin read the pomodoro phase and countdown.
-	PermTimerRead = "timer.read"
-	// PermTimerControl lets a plugin START, PAUSE, RESUME and STOP the timer.
+	// There are no timer.* permissions any more. timer.read and timer.control gated
+	// the host's plugin-facing timer surface (timer.state / start / pause / resume /
+	// stop), and the timer those five drove is the pomodoro plugin's now: it keeps its
+	// own state machine, counts its own phases and writes its own records, so it calls
+	// nothing here. A permission whose methods are gone is exactly the "switch the user
+	// is asked about that does nothing" this list exists to prevent, and
+	// TestCapabilityTableIsComplete refuses it. The host's remaining timer is internal
+	// to the pet (its own panel tab and tray entries) and is retired separately in the
+	// same openspec change.
 	//
-	// It is separate from timer.read rather than a widening of it, because the two
-	// are different promises: "you may look at my countdown" says nothing about
-	// "you may start a focus session in my name", and an install dialog that merged
-	// them could not describe what the second one means. A plugin that only renders
-	// the remaining time should never have to ask for the second.
-	//
-	// It does NOT let a plugin finish a phase or write a summary: those are the
-	// record's business (finishPhase is driven by the clock, and SavePomodoroSummary
-	// is the user's own answer to the bubble), and a plugin that could write records
-	// could forge an archive of work that never happened.
-	PermTimerControl = "timer.control"
 	// PermEvents lets a plugin subscribe to todos.changed / timer.changed.
 	PermEvents = "events"
 	// PermNetFetch lets a plugin make HTTP requests, but only to the hosts its
@@ -165,8 +160,6 @@ var AllowedPermissions = []string{
 	PermTodosRead,
 	PermTodosWrite,
 	PermBubble,
-	PermTimerRead,
-	PermTimerControl,
 	PermEvents,
 	PermNetFetch,
 	PermNetCredentials,
@@ -198,8 +191,6 @@ var PermissionLabels = map[string]string{
 	PermTodosRead:      "读取待办列表",
 	PermTodosWrite:     "新增、修改、完成与删除待办",
 	PermBubble:         "让桌宠弹出一句话的气泡",
-	PermTimerRead:      "读取番茄钟阶段与剩余时间",
-	PermTimerControl:   "开始、暂停、继续与停止番茄钟（不能结束阶段或写记录）",
 	PermEvents:         "订阅待办与番茄钟的变化事件（关闭界面后也会送达）",
 	PermNetFetch:       "访问网络（仅限插件声明的域名）",
 	PermNetCredentials: "以你保存的网站登录凭据发请求（凭据本身不会显示给插件）",

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"testing"
 
 	"PetPC/internal/desktop"
@@ -274,54 +273,34 @@ func TestStateReportsVisibility(t *testing.T) {
 	}
 }
 
-// TestHideIsRefusedWhileASummaryIsWaiting is the same gate Escape and dragging
-// get, applied to hiding.
+// TestHidingIsNotRefusedForAPomodoroQuestion is what replaced the two refusals
+// this file used to pin.
 //
-// Hiding the pet would take the summary prompt - the only way to answer it - off
-// screen, and the timer is parked behind that answer. The refusal is what keeps
-// "hide the pet" from turning into "park the pomodoro forever".
-func TestHideIsRefusedWhileASummaryIsWaiting(t *testing.T) {
-	a, st := parkedAfterFocus(t, nil)
-	if st.PendingRecordID == "" {
-		t.Fatal("nothing was pending")
-	}
-
-	err := a.HidePet()
-	if err == nil {
-		t.Fatal("the pet was hidden while a summary was waiting to be written")
-	}
-	if !errors.Is(err, errSummaryBlocksHiding) {
-		t.Errorf("the refusal is not the documented one: %v", err)
-	}
-	// And nothing was disturbed: the prompt is still up and the phase is still
-	// parked, so the user can still answer it.
-	a.mu.Lock()
-	b := a.bubble
-	hidden := a.hidden
-	a.mu.Unlock()
-	if b == nil || b.Kind != BubbleSummary {
-		t.Errorf("the refusal took the prompt with it: %+v", b)
-	}
-	if hidden {
-		t.Error("the pet was marked hidden despite the refusal")
-	}
-	if got := a.store.Pomodoro(); got.PendingRecordID != st.PendingRecordID {
-		t.Errorf("the parked phase was disturbed: %+v", got)
-	}
-}
-
-// TestHideIsAllowedWithNothingPending is the other half: the refusal above must be
-// about the question, not about hiding in general.
-func TestHideIsAllowedWithNothingPending(t *testing.T) {
+// Hiding was refused while a finished session waited for its summary, and while the
+// plan question waited: both gates held the timer, so taking the prompt off screen
+// parked it forever. Those questions belong to the pomodoro plugin now, and the host
+// parks nothing behind them - so nothing the host asks may change what hiding does
+// (openspec/changes/todo-pomodoro-as-plugins, design.md §4.1).
+//
+// The picker is the one question the host still raises. The assertion is structural
+// rather than about an error string: hiding with it up must fail the SAME way as
+// hiding with a clean screen - in this harness that is the missing window, and a
+// surviving gate would have produced its own, different refusal.
+func TestHidingIsNotRefusedForAPomodoroQuestion(t *testing.T) {
 	a := newLLMTestApp(t)
-	if a.bubbleAwaitingAnswer() {
-		t.Fatal("a fresh app claims a question is pending")
+
+	plain := a.HidePet()
+
+	a.mu.Lock()
+	a.setBubbleLocked(&BubbleView{Kind: BubbleReminder, Title: "想专注做哪件事？"})
+	a.mu.Unlock()
+	withQuestion := a.HidePet()
+
+	if plain == nil || withQuestion == nil {
+		t.Fatalf("HidePet claimed to work without a window, so this test proves nothing")
 	}
-	// Without a window the ShowWindow call fails, which is expected here; the
-	// point is that the call got PAST the gate rather than being refused by it.
-	err := a.HidePet()
-	if err != nil && errors.Is(err, errSummaryBlocksHiding) {
-		t.Errorf("hiding was refused with nothing pending: %v", err)
+	if plain.Error() != withQuestion.Error() {
+		t.Errorf("a question changed the outcome of hiding: %q vs %q", plain, withQuestion)
 	}
 }
 

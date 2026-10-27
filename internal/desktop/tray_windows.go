@@ -61,11 +61,12 @@ const (
 	// free because this window is ours alone.
 	wmTrayCallback = 0x8000 + 1
 
-	// wmShowPetMenu asks the tray thread to pop the menu at the cursor, without the
-	// tray icon being involved. It exists because the pet's own right-click needs the
-	// same menu, and TrackPopupMenu only works on a thread with a message loop - the
-	// tray thread is the one this program has.
-	wmShowPetMenu = 0x8000 + 2
+	// WM_APP + 2 (wmShowPetMenu) is deliberately NOT defined any more. It let the
+	// PET's right-click pop this menu on the tray thread, which is why the two
+	// gestures looked identical; the pet now draws its own card in the page
+	// (app_pet_menu.go), and this thread only ever answers the icon.
+	// Keep the number free rather than reusing it: an old binary talking to a new
+	// one is not a state worth reasoning about.
 
 	// Tray callback events (with NOTIFYICON_VERSION_4).
 	ninSelect       = 0x0400
@@ -102,7 +103,9 @@ const (
 	trayCmdOpenData    = 1003
 	trayCmdQuit        = 1004
 	trayCmdRemindNow   = 1005
-	trayCmdTogglePomo  = 1006
+	// 1006 used to be the pomodoro on/off toggle. The number is deliberately NOT
+	// reused: a stale menu id in a running instance would then silently mean a
+	// different command.
 	trayCmdShowPet     = 1007
 	trayCmdHidePet     = 1008
 	trayCmdOpenMarket  = 1009
@@ -117,8 +120,6 @@ const (
 	// TrayCmdRemindNow asks for a reminder immediately, whatever the schedule
 	// says (docs/reminder-pomodoro.md 5.2: manual wins).
 	TrayCmdRemindNow = trayCmdRemindNow
-	// TrayCmdTogglePomodoro switches the timer on or off.
-	TrayCmdTogglePomodoro = trayCmdTogglePomo
 	// TrayCmdShowPet and TrayCmdHidePet are the mouse-only equivalent of the
 	// global hot keys.
 	//
@@ -259,27 +260,12 @@ func (t *Tray) Close() {
 	}
 }
 
-// ShowMenuAtCursor opens the SAME menu the tray icon shows, at the cursor.
-//
-// Same items and same OnCommand switch, because it is literally the same list: a second
-// menu built from a second list would be two definitions of "the actions this program
-// offers", and the one nobody exercised would rot.
-//
-// It does not pop the menu itself. TrackPopupMenu pumps messages, so it has to run on a
-// thread with a message loop, and the tray thread is the one this program has - so this
-// posts and returns, and the menu appears on that thread a moment later.
-func (t *Tray) ShowMenuAtCursor() error {
-	t.mu.Lock()
-	hwnd := t.hwnd
-	t.mu.Unlock()
-	if hwnd == 0 {
-		return fmt.Errorf("托盘窗口没起来，菜单不可用")
-	}
-	if ret, _, err := procPostMessageW.Call(uintptr(hwnd), wmShowPetMenu, 0, 0); ret == 0 {
-		return fmt.Errorf("PostMessage: %v", err)
-	}
-	return nil
-}
+// ShowMenuAtCursor used to live here: it posted wmShowPetMenu so the PET's
+// right-click could reuse this icon's menu. The pet no longer does - it draws the
+// menu as a card in the page (app_pet_menu.go) - so the only caller left is the
+// shell's own right-click on the icon, which arrives through wmTrayCallback above.
+// Deleting it is deliberate: a posted "pop the menu for someone else" message with
+// no sender is a second entry point nobody would ever exercise again.
 
 func (t *Tray) run(opts TrayOptions) {
 	// The window and its message loop must stay on the same OS thread.
@@ -359,13 +345,6 @@ func trayWndProc(hwnd windows.HWND, message uint32, wparam, lparam uintptr) uint
 	trayMu.Lock()
 	rt := trayCurrent
 	trayMu.Unlock()
-
-	// The pet's right-click, forwarded here rather than handled where it arrived: this
-	// thread is the only one with a message loop, which is what TrackPopupMenu pumps.
-	if rt != nil && message == wmShowPetMenu {
-		trayShowMenu(rt)
-		return 0
-	}
 
 	if rt != nil && message == wmTrayCallback {
 		event := uint32(lparam & 0xFFFF)

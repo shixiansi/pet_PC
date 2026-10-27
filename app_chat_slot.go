@@ -7,8 +7,8 @@ import (
 	"PetPC/internal/plugins"
 )
 
-// This file owns the pet's CHAT SLOT: who occupies it, and what the double-click
-// on the pet opens.
+// This file owns the pet's CHAT SLOT: who occupies it, and what the conversation
+// button on the pet opens.
 //
 // The slot is a DECLARATION, not a reserved id. A plugin says `panelSlot: "chat"`
 // in its manifest and the host hands it the panel's 对话 tab; nothing in this
@@ -17,7 +17,7 @@ import (
 // architecture whose whole promise is that the pet is generic and the plugin is
 // the thing that knows about LLMs.
 //
-// The floating surface is NOT re-derived here. Opening the double-click target
+// The floating surface is NOT re-derived here. Opening the conversation surface
 // goes through the existing OpenPluginSurface, so there is exactly one place
 // that computes plugin surface geometry and exactly one guard that refuses to
 // cover an unanswered question. A second geometry path would drift from the
@@ -155,14 +155,14 @@ func viewDisplayName(row PluginView) string {
 	return row.ID
 }
 
-// OpenChatPluginSurface opens the conversation surface that the double-click on
-// the pet leads to.
+// OpenChatPluginSurface opens the conversation surface that the button over the
+// pet leads to.
 //
 // With a usable chat plugin it delegates to OpenPluginSurface, which brings its
 // own refusals (not enabled, no grant, no declared rectangles, a question
 // waiting for an answer) and its own geometry. Without one there is nothing to
 // open, so the reason travels as a bubble - the pet has to say something, since
-// a double-click that silently does nothing reads as a frozen app.
+// a gesture that silently does nothing reads as a frozen app.
 //
 // The bubble is shown through showBubble, so it takes the slot from the panel
 // and the live surfaces exactly as any other bubble does.
@@ -179,7 +179,7 @@ func (a *App) OpenChatPluginSurface() (Layout, error) {
 		// The bubble carries the SPECIFIC reason when a plugin is installed but
 		// was refused - an old package, a missing grant, a broken manifest - and
 		// the generic sentence only when the list is genuinely empty. A
-		// double-click that says "还没装好" while the market shows the plugin as
+		// gesture that says "还没装好" while the market shows the plugin as
 		// installed sends the user to reinstall the wrong thing.
 		message := chatSlotMissingMessage
 		if diagnosis := a.chatSlotDiagnosis(); diagnosis != "" {

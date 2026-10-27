@@ -174,9 +174,13 @@ func TestManifestVersionFormat(t *testing.T) {
 // Sixteen until `timer.control` arrived with timer.start/pause/resume/stop: the
 // timer could already be READ by a plugin, but not driven, and "you may look at my
 // countdown" was never a sensible umbrella for "you may start a session in my name".
-func TestAllowedPermissionsIsTheSeventeen(t *testing.T) {
+//
+// Back down to fifteen when both timer permissions retired: the timer those five
+// methods drove belongs to the pomodoro plugin now, so the host has no plugin-facing
+// timer surface left to gate (openspec/changes/todo-pomodoro-as-plugins).
+func TestAllowedPermissionsIsTheFifteen(t *testing.T) {
 	want := []string{
-		"todos.read", "todos.write", "pet.bubble", "timer.read", "timer.control",
+		"todos.read", "todos.write", "pet.bubble",
 		"events", "net.fetch", "net.credentials", "storage", "pet.surface", "llm.chat",
 		"plugin.config", "audio", "net.ws", "llm.borrow", "process", "plugin.share",
 	}

@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
-
-	"PetPC/internal/store"
 )
 
 // The two EDGE events are what let the voice plugin replace the host's own
@@ -27,12 +25,10 @@ func TestPhaseEndedCarriesTheHostsConclusion(t *testing.T) {
 		t.Fatalf("events.subscribe: %v", err)
 	}
 
-	// Every way a focus phase can be named must reduce to "focus"; every way a
-	// rest can be named must reduce to "break". This is the classification the
-	// host already owns (store.IsFocusPhase), so the test drives the real one.
-	for _, phase := range []string{store.PhaseFocus} {
-		a.notifyPluginPhaseEnded(phaseKind(phase))
-	}
+	// The caller passes the conclusion already reduced ("focus" / "break").
+	// phaseKind and store.IsFocusPhase were the pomodoro state machine's, and the
+	// host has no phases to classify any more.
+	a.notifyPluginPhaseEnded("focus")
 	events := collected("timer.phaseEnded")
 	if len(events) != 1 {
 		t.Fatalf("want exactly 1 timer.phaseEnded, got %d (%+v)", len(events), events)
@@ -53,12 +49,8 @@ func TestPhaseEndedCarriesTheHostsConclusion(t *testing.T) {
 		t.Fatalf("the payload carries %d fields (%v); it must carry only the fact", len(payload), payload)
 	}
 
-	// A rest phase reduces to "break".
-	for _, phase := range []string{store.PhaseShortBreak, store.PhaseLongBreak} {
-		if got := phaseKind(phase); got != "break" {
-			t.Fatalf("phaseKind(%q) = %q, want break", phase, got)
-		}
-	}
+	// There is no break classification to assert any more: it lived in phaseKind,
+	// which went with the timer.
 }
 
 // TestReminderFiredCarriesTheCounts covers reminder.fired.
@@ -162,7 +154,7 @@ func TestEveryEventCarriesTheHostsLocalTime(t *testing.T) {
 	}
 
 	before := time.Now()
-	a.notifyPluginPhaseEnded(phaseKind(store.PhaseFocus))
+	a.notifyPluginPhaseEnded("focus")
 	events := collected("timer.phaseEnded")
 	if len(events) != 1 {
 		t.Fatalf("want exactly 1 event, got %d", len(events))

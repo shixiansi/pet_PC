@@ -42,8 +42,8 @@ func TestSettingsFileHoldsPreferencesAndNotRuntimeKeys(t *testing.T) {
 	}
 
 	settings := readFileMap(t, filepath.Join(dir, settingsFileName))
-	if _, ok := settings["focusMinutes"]; !ok {
-		t.Errorf("settings.json has no focusMinutes: %v", settings)
+	if _, ok := settings["reminderIntervalMin"]; !ok {
+		t.Errorf("settings.json has no reminderIntervalMin: %v", settings)
 	}
 	for _, k := range runtimeKeys {
 		if _, ok := settings[k]; ok {
@@ -57,8 +57,8 @@ func TestSettingsFileHoldsPreferencesAndNotRuntimeKeys(t *testing.T) {
 	}
 	// The other direction matters just as much: a preference in config.json would mean
 	// the pet is writing one.
-	if _, ok := runtime["focusMinutes"]; ok {
-		t.Errorf("config.json carries the preference focusMinutes; the pet would then be its second writer: %v", runtime)
+	if _, ok := runtime["reminderIntervalMin"]; ok {
+		t.Errorf("config.json carries the preference reminderIntervalMin; the pet would then be its second writer: %v", runtime)
 	}
 }
 
@@ -69,12 +69,12 @@ func TestSettingsFileHoldsPreferencesAndNotRuntimeKeys(t *testing.T) {
 func TestSettingsWinOverLegacyConfig(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "config.json"),
-		[]byte(`{"focusMinutes":30,"petScale":1.5}`), 0o644); err != nil {
+		[]byte(`{"reminderIntervalMin":30,"petScale":1.5}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// A settings file that disagrees with it.
 	if err := os.WriteFile(filepath.Join(dir, settingsFileName),
-		[]byte(`{"focusMinutes":25}`), 0o644); err != nil {
+		[]byte(`{"reminderIntervalMin":25}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -83,8 +83,8 @@ func TestSettingsWinOverLegacyConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := s.Config()
-	if cfg.FocusMinutes != 25 {
-		t.Errorf("focusMinutes = %d, want 25 (settings.json must beat the legacy config.json)", cfg.FocusMinutes)
+	if cfg.ReminderIntervalMin != 25 {
+		t.Errorf("reminderIntervalMin = %d, want 25 (settings.json must beat the legacy config.json)", cfg.ReminderIntervalMin)
 	}
 	// A key the settings file does not mention keeps the legacy value: the file is
 	// decoded ON TOP of what config.json produced, exactly like config.json is decoded
@@ -101,7 +101,7 @@ func TestSettingsWinOverLegacyConfig(t *testing.T) {
 // brings the previous behaviour back.
 func TestMigrationCopiesInsteadOfMoving(t *testing.T) {
 	dir := t.TempDir()
-	original := `{"focusMinutes":40,"reminderIntervalMin":45,"position":{"x":10,"y":20}}`
+	original := `{"reminderIntervalMin":40,"reminderAutoHideSec":45,"position":{"x":10,"y":20}}`
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -110,19 +110,19 @@ func TestMigrationCopiesInsteadOfMoving(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := s.Config().FocusMinutes; got != 40 {
-		t.Errorf("focusMinutes = %d, want 40 from the legacy file", got)
+	if got := s.Config().ReminderIntervalMin; got != 40 {
+		t.Errorf("reminderIntervalMin = %d, want 40 from the legacy file", got)
 	}
 
 	// The preferences were written out...
 	settings := readFileMap(t, filepath.Join(dir, settingsFileName))
-	if settings["focusMinutes"] != float64(40) {
-		t.Errorf("settings.json focusMinutes = %v, want 40", settings["focusMinutes"])
+	if settings["reminderIntervalMin"] != float64(40) {
+		t.Errorf("settings.json reminderIntervalMin = %v, want 40", settings["reminderIntervalMin"])
 	}
 	// ...the old file still has them (nothing was moved)...
 	legacy := readFileMap(t, filepath.Join(dir, "config.json"))
-	if legacy["focusMinutes"] != float64(40) {
-		t.Errorf("config.json lost focusMinutes: %v", legacy)
+	if legacy["reminderIntervalMin"] != float64(40) {
+		t.Errorf("config.json lost reminderIntervalMin: %v", legacy)
 	}
 	// ...and the backup exists.
 	if _, err := os.Stat(filepath.Join(dir, settingsBackupName)); err != nil {
@@ -142,17 +142,17 @@ func TestConfigPicksUpSettingsChangedOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := s.Config().FocusMinutes; got == 42 {
+	if got := s.Config().ReminderIntervalMin; got == 42 {
 		t.Fatal("the fixture already has the value under test")
 	}
 
 	// The control center saves through its own entry point, in its own process.
-	if _, err := SaveSettings(dir, func(c *Config) { c.FocusMinutes = 42 }); err != nil {
+	if _, err := SaveSettings(dir, func(c *Config) { c.ReminderIntervalMin = 42 }); err != nil {
 		t.Fatalf("SaveSettings: %v", err)
 	}
 
-	if got := s.Config().FocusMinutes; got != 42 {
-		t.Errorf("after an external save FocusMinutes = %d, want 42 - the pet did not re-read settings.json", got)
+	if got := s.Config().ReminderIntervalMin; got != 42 {
+		t.Errorf("after an external save ReminderIntervalMin = %d, want 42 - the pet did not re-read settings.json", got)
 	}
 }
 
@@ -172,7 +172,7 @@ func TestSaveSettingsLeavesRuntimeStateAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := SaveSettings(dir, func(c *Config) { c.FocusMinutes = 33 }); err != nil {
+	if _, err := SaveSettings(dir, func(c *Config) { c.ReminderIntervalMin = 33 }); err != nil {
 		t.Fatalf("SaveSettings: %v", err)
 	}
 
@@ -186,8 +186,8 @@ func TestSaveSettingsLeavesRuntimeStateAlone(t *testing.T) {
 	}
 
 	// And the pet sees the new preference.
-	if got := s.Config().FocusMinutes; got != 33 {
-		t.Errorf("FocusMinutes = %d, want 33", got)
+	if got := s.Config().ReminderIntervalMin; got != 33 {
+		t.Errorf("ReminderIntervalMin = %d, want 33", got)
 	}
 }
 
@@ -226,15 +226,15 @@ func TestPetSettingsUISurvivesTheTransition(t *testing.T) {
 
 	// A preference write persists, and survives a reopen - the pet's own panel is still
 	// the only settings UI until phase 3.
-	if _, err := s.UpdateConfig(func(c *Config) { c.FocusMinutes = 47 }); err != nil {
+	if _, err := s.UpdateConfig(func(c *Config) { c.ReminderIntervalMin = 47 }); err != nil {
 		t.Fatal(err)
 	}
 	reopened, err := New(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := reopened.Config().FocusMinutes; got != 47 {
-		t.Errorf("FocusMinutes = %d, want 47 after a reopen", got)
+	if got := reopened.Config().ReminderIntervalMin; got != 47 {
+		t.Errorf("ReminderIntervalMin = %d, want 47 after a reopen", got)
 	}
 }
 
@@ -253,11 +253,11 @@ func TestSettingsReloadIsThrottled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := s.Config().FocusMinutes
-	if _, err := SaveSettings(dir, func(c *Config) { c.FocusMinutes = 55 }); err != nil {
+	before := s.Config().ReminderIntervalMin
+	if _, err := SaveSettings(dir, func(c *Config) { c.ReminderIntervalMin = 55 }); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.Config().FocusMinutes; got != before {
+	if got := s.Config().ReminderIntervalMin; got != before {
 		t.Errorf("a change was picked up inside the throttle window: %d -> %d", before, got)
 	}
 }

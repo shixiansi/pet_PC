@@ -29,7 +29,12 @@ import (
 //   - pet_ask (a bubble with options): bubble.say is the only plugin-facing bubble
 //     method; a question bubble belongs to the host's own plan/summary flow.
 //
-// Both are additive later: add the method, then the tool.
+// GONE, and why: `pomodoro_start` let the model start a focus session, gated on
+// timer.control. Both retired together with the host's plugin-facing timer - the
+// pomodoro plugin counts its own phases now, and the host can no longer start one on
+// a plugin's behalf. Removing the permission but keeping the tool would have left a
+// tool whose gate does not exist; removing the tool but keeping the permission would
+// have left a switch that unlocks nothing. They are one deletion.
 
 // maxToolRounds bounds one llm.chat request.
 //
@@ -100,14 +105,6 @@ func pluginToolCatalog() map[string]pluginTool {
 					`"id":{"type":"string","description":"待办的 id，来自 todo_list"}` +
 					`},"required":["id"]}`,
 				runTool: completeTodoTool,
-			},
-			"pomodoro_start": {
-				perm:        plugins.PermTimerControl,
-				description: "开始一个番茄钟专注阶段，可选关联一条待办。用户没有明确说要开始专注时不要调用。",
-				parameters: `{"type":"object","properties":{` +
-					`"todoId":{"type":"string","description":"要关联的待办 id，可选；为空表示不关联"}` +
-					`},"additionalProperties":false}`,
-				impl: pluginTimerStart,
 			},
 			"pet_say": {
 				perm:        plugins.PermBubble,

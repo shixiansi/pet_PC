@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -329,13 +330,12 @@ var pluginMethods = map[string]pluginMethod{
 	"todos.update": {perm: plugins.PermTodosWrite, run: pluginTodosUpdate},
 	"todos.toggle": {perm: plugins.PermTodosWrite, run: pluginTodosToggle},
 	"todos.remove": {perm: plugins.PermTodosWrite, run: pluginTodosRemove},
-	"timer.state":  {perm: plugins.PermTimerRead, run: pluginTimerState},
-	// Driving the timer, as opposed to watching it. The four are one permission
-	// because they are one power: whoever may start a session may also pause it.
-	"timer.start":      {perm: plugins.PermTimerControl, run: pluginTimerStart},
-	"timer.pause":      {perm: plugins.PermTimerControl, run: pluginTimerPause},
-	"timer.resume":     {perm: plugins.PermTimerControl, run: pluginTimerResume},
-	"timer.stop":       {perm: plugins.PermTimerControl, run: pluginTimerStop},
+	// There are no timer.* methods any more: timer.state / start / pause / resume /
+	// stop drove the HOST's timer, and the pomodoro plugin counts its own phases in
+	// its own state machine now (market/plugins/com.shixiansi.plugin-pomodoro, whose
+	// manifest asks for storage + plugin.config + events instead). Keeping the five
+	// would leave a permission gating methods no shipped plugin calls, which is what
+	// TestCapabilityTableIsComplete exists to forbid.
 	"events.subscribe": {perm: plugins.PermEvents, run: pluginEventsSubscribe},
 	"bubble.say":       {perm: plugins.PermBubble, run: pluginBubbleSay},
 	// net.fetch carries a SECOND gate: with `net.credentials` held it will fill
@@ -389,6 +389,7 @@ var pluginMethods = map[string]pluginMethod{
 	"share.remove":   {perm: plugins.PermPluginShare, run: pluginShareRemove},
 	"surface.show":   {perm: plugins.PermPetSurface, run: pluginSurfaceShow},
 	"surface.hide":   {perm: plugins.PermPetSurface, run: pluginSurfaceHide},
+	"surface.blocks": {perm: plugins.PermPetSurface, run: pluginSurfaceBlocks},
 	"llm.chat":       {perm: plugins.PermLLMChat, run: pluginLLMChat},
 	"llm.profile":    {perm: plugins.PermLLMBorrow, run: pluginLLMProfile},
 	"config.get":     {perm: plugins.PermPluginConfig, run: pluginConfigGet},
@@ -605,63 +606,12 @@ func pluginTodosRemove(a *App, _ string, payload []byte) (any, error) {
 	return a.store.Todos(), nil
 }
 
-// pluginTimerState returns the pomodoro snapshot.
-func pluginTimerState(a *App, _ string, _ []byte) (any, error) {
-	return a.pomodoroView(), nil
-}
-
-// pluginTimerStart begins a focus phase, optionally attached to one of the user's
-// todos.
-//
-// Only an ID crosses the bridge: App.StartPomodoro looks the title up in the todo
-// list itself and refuses an unknown id. A caller that could name the session
-// freely could label it with text the user never wrote - and that label is what
-// the record archive shows later, next to the time actually spent.
-//
-// The reply is the same view timer.state returns, so a plugin does not have to
-// poll after acting to find out whether it worked.
-func pluginTimerStart(a *App, _ string, payload []byte) (any, error) {
-	var in struct {
-		TodoID string `json:"todoId"`
-	}
-	if err := decodePayload(payload, &in); err != nil {
-		return nil, err
-	}
-	if _, err := a.StartPomodoro(PomodoroStartInput{TodoID: strings.TrimSpace(in.TodoID)}); err != nil {
-		return nil, err
-	}
-	return a.pomodoroView(), nil
-}
-
-// pluginTimerPause halts the countdown, keeping the remainder.
-func pluginTimerPause(a *App, _ string, _ []byte) (any, error) {
-	if _, err := a.PausePomodoro(); err != nil {
-		return nil, err
-	}
-	return a.pomodoroView(), nil
-}
-
-// pluginTimerResume restarts a paused or stopped phase from where it stopped.
-func pluginTimerResume(a *App, _ string, _ []byte) (any, error) {
-	if _, err := a.ResumePomodoro(); err != nil {
-		return nil, err
-	}
-	return a.pomodoroView(), nil
-}
-
-// pluginTimerStop halts the countdown and records that someone asked for it.
-//
-// Deliberately the recoverable half of the pair the UI labels 停止/继续 rather than
-// 放弃: resume picks the session back up, which is what makes it safe to hand to a
-// plugin at all. Discarding a session is ResetPomodoro, and that stays a user
-// action - a caller that could throw a focus session away could erase work that
-// really happened.
-func pluginTimerStop(a *App, _ string, _ []byte) (any, error) {
-	if _, err := a.StopPomodoro(); err != nil {
-		return nil, err
-	}
-	return a.pomodoroView(), nil
-}
+// pluginTimerState and the four driving methods (timer.start/pause/resume/stop) used
+// to live here. They are gone with the timer.* permissions: the pomodoro plugin owns
+// its own state machine and records, so the host has no timer to hand out. What the
+// host still emits is the CONCLUSION - timer.changed and timer.phaseEnded - because
+// the voice plugin says something when a phase ends, and that stays true whichever
+// side counts the seconds.
 
 // pluginMemoryRead returns the caller's memory document, or "" when it has none.
 //
@@ -1118,6 +1068,165 @@ func pluginSurfaceHide(a *App, id string, _ []byte) (any, error) {
 		return nil, err
 	}
 	return map[string]any{"ok": true}, nil
+}
+
+// pluginSurfaceBlocks shows or hides blocks of the OPEN floating surface.
+//
+// The payload carries DECLARATION INDICES only - never coordinates, never sizes. A plugin
+// that could submit geometry could cover the whole screen and the taskbar, which is not
+// something "the user granted pet.surface" can be stretched to mean: the rectangles stay a
+// manifest decision, and this only picks a subset of them to show.
+//
+// It exists because a surface block cannot appear on demand otherwise. The window region is
+// cropped to the declared rectangles the moment the surface opens, so a block that should
+// only exist after the user sends a message has to be declared up front - and then it is
+// there while idle, transparent but still swallowing every click in its area.
+func pluginSurfaceBlocks(a *App, id string, payload []byte) (any, error) {
+	var req struct {
+		Hidden []int `json:"hidden"`
+		// JSON object keys are strings, so the declaration index arrives as one. Converted below
+		// rather than declared as a map[int]int, which encoding/json refuses to fill.
+		Sizes map[string]int `json:"sizes"`
+	}
+	if len(payload) > 0 {
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return nil, err
+		}
+	}
+	sizes := make(map[int]int, len(req.Sizes))
+	for key, h := range req.Sizes {
+		index, convErr := strconv.Atoi(key)
+		if convErr != nil || index < 0 || h <= 0 {
+			continue // junk keys are ignored, not fatal: the declaration is the authority
+		}
+		sizes[index] = h
+	}
+	if _, err := a.SetPluginSurfaceBlocks(id, req.Hidden, sizes); err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true}, nil
+}
+
+// SetPluginSurfaceBlocks replaces the hidden-block set of the surface open for pluginID and
+// re-applies the window geometry, then pushes the new layout to the page so the frames for
+// the hidden blocks are unmounted (a frame nobody asked for is a frame that eats clicks).
+//
+// Indices outside the declaration are simply never matched by computePluginSurface, so an
+// out-of-range value is a no-op rather than an error: the declaration is the authority.
+func (a *App) SetPluginSurfaceBlocks(pluginID string, hidden []int, sizes map[int]int) (Layout, error) {
+	a.mu.Lock()
+	cur := a.pluginSurface
+	a.mu.Unlock()
+	if cur == nil || cur.PluginID != pluginID {
+		return Layout{}, fmt.Errorf("surface is not open for %s", pluginID)
+	}
+	set := make(map[int]bool, len(hidden))
+	for _, i := range hidden {
+		if i < 0 {
+			continue
+		}
+		set[i] = true
+	}
+	a.surfaceHiddenMu.Lock()
+	if len(set) == 0 {
+		a.surfaceHiddenBlocks = nil
+	} else {
+		a.surfaceHiddenBlocks = set
+	}
+	if len(sizes) == 0 {
+		a.surfaceBlockSizes = nil
+	} else {
+		a.surfaceBlockSizes = sizes
+	}
+	a.surfaceHiddenMu.Unlock()
+	return a.applySurfaceBlocksThrottled()
+}
+
+// applySurfaceBlocksThrottled re-crops the window at most twice a second.
+//
+// The caller is a plugin revealing a reply one character at a time: without a floor on the
+// interval, every character would recompute the region, re-crop the window with SetWindowRgn and
+// push a new layout to the page. The LAST request wins, which is what makes coalescing safe -
+// heights only ever describe the current content.
+func (a *App) applySurfaceBlocksThrottled() (Layout, error) {
+	const minInterval = 500 * time.Millisecond
+	a.surfaceHiddenMu.Lock()
+	since := time.Since(a.surfaceSizesAt)
+	if since >= minInterval {
+		a.surfaceSizesAt = time.Now()
+		a.surfaceHiddenMu.Unlock()
+		return a.applySurfaceBlocksNow()
+	}
+	wait := minInterval - since
+	alreadyQueued := a.surfaceSizesNext != nil
+	a.surfaceHiddenMu.Unlock()
+	if alreadyQueued {
+		return a.currentLayout(), nil
+	}
+	a.surfaceHiddenMu.Lock()
+	a.surfaceSizesNext = time.AfterFunc(wait, func() {
+		a.surfaceHiddenMu.Lock()
+		a.surfaceSizesNext = nil
+		a.surfaceSizesAt = time.Now()
+		a.surfaceHiddenMu.Unlock()
+		if _, err := a.applySurfaceBlocksNow(); err != nil {
+			log.Printf("pet: apply surface blocks: %v", err)
+		}
+	})
+	a.surfaceHiddenMu.Unlock()
+	return a.currentLayout(), nil
+}
+
+func (a *App) applySurfaceBlocksNow() (Layout, error) {
+	layout, err := a.applyWindowGeometry()
+	if err != nil {
+		return layout, err
+	}
+	a.emitLayout()
+	return layout, nil
+}
+
+// requestedSurfaceSizes hands the geometry function a copy of the requested heights.
+func (a *App) requestedSurfaceSizes() map[int]int {
+	a.surfaceHiddenMu.Lock()
+	defer a.surfaceHiddenMu.Unlock()
+	if len(a.surfaceBlockSizes) == 0 {
+		return nil
+	}
+	out := make(map[int]int, len(a.surfaceBlockSizes))
+	for k, v := range a.surfaceBlockSizes {
+		out[k] = v
+	}
+	return out
+}
+
+// hiddenSurfaceBlocks hands computePluginSurface a copy of the hidden set: that function is
+// pure, and reading App state from inside it would make the geometry un-testable.
+func (a *App) hiddenSurfaceBlocks() map[int]bool {
+	a.surfaceHiddenMu.Lock()
+	defer a.surfaceHiddenMu.Unlock()
+	if len(a.surfaceHiddenBlocks) == 0 {
+		return nil
+	}
+	out := make(map[int]bool, len(a.surfaceHiddenBlocks))
+	for k, v := range a.surfaceHiddenBlocks {
+		out[k] = v
+	}
+	return out
+}
+
+// clearHiddenSurfaceBlocks resets the set. Called when a surface OPENS, so a plugin that
+// hid a block last time cannot come back with it missing: "nothing hidden" is the default
+// every plugin that never calls surface.blocks gets.
+func (a *App) clearHiddenSurfaceBlocks() {
+	a.surfaceHiddenMu.Lock()
+	a.surfaceHiddenBlocks = nil
+	a.surfaceBlockSizes = nil
+	if a.surfaceSizesNext != nil {
+		a.surfaceSizesNext.Stop()
+		a.surfaceSizesNext = nil
+	}
+	a.surfaceHiddenMu.Unlock()
 }
 
 // --- audio ------------------------------------------------------------------
@@ -2604,36 +2713,27 @@ func (a *App) notifyPluginTimerChanged() {
 
 // notifyPluginPhaseEnded tells subscribers a pomodoro phase just FINISHED.
 //
-// It is an EDGE event, deliberately separate from timer.changed. That one is a
-// state broadcast - it fires whenever the countdown moves - so a plugin that
-// wanted "the focus just ended" would have to remember the previous phase and
-// detect the transition itself, i.e. re-derive a conclusion the host has already
-// reached. This carries the conclusion, so every plugin does not have to.
+// NOTHING IN THE HOST CALLS IT ANY MORE, and that is a known gap rather than an
+// oversight. The only emitter was the host's own timer, which is gone: the pomodoro
+// plugin counts its own phases, and a plugin cannot raise a host event. So a plugin
+// that subscribes to timer.phaseEnded today will never hear it - the voice plugin's
+// "番茄钟结束" line is silent, and the pomodoro plugin says the same thing in a text
+// bubble instead (it holds pet.bubble for exactly that).
+//
+// It is kept, with its event still in SubscribableEvents, because the fix is a
+// plugin-to-plugin notification path (plugin.share polling, or a narrow
+// "announce a fact" method) and that is a design decision, not a deletion. Deleting
+// the pair now would also break every installed voice plugin's subscribe call, which
+// validates the name. See tasks.md §0.1.
 //
 // The payload is a bare fact and no wording: which line to say, in which voice,
-// is the plugin's business. That separation is the entire point of the voice
-// plugin change - the host knows a phase ended, and nothing more.
+// is the plugin's business.
 //
-// Both call sites write the event name as a double-quoted LITERAL because
-// .dev/check-frontend.cjs scans Go source for the literal to prove every
-// subscription has a matching emitter; a constant would read as an identifier and
-// the subscription would be reported as dangling.
-func (a *App) notifyPluginPhaseEnded(phase string) {
-	a.emitPluginStateChange("timer.phaseEnded", map[string]any{"phase": phase})
-}
-
-// phaseKind reduces a phase name to the two facts a plugin needs.
-//
-// The host has several phase names (focus, short break, long break, idle) and a
-// plugin that only wants to pick a line needs to know one thing: did work end, or
-// did rest end. Sending the raw name would make every plugin re-implement that
-// classification - and it is a classification the host already owns, because
-// store.IsFocusPhase is what the rest of the app already decides it with.
-func phaseKind(endedPhase string) string {
-	if store.IsFocusPhase(endedPhase) {
-		return "focus"
-	}
-	return "break"
+// The event name is a double-quoted LITERAL because .dev/check-frontend.cjs scans Go
+// source for it to prove every subscription has a matching emitter; a constant would
+// read as an identifier and the subscription would be reported as dangling.
+func (a *App) notifyPluginPhaseEnded(kind string) {
+	a.emitPluginStateChange("timer.phaseEnded", map[string]any{"phase": kind})
 }
 
 // notifyPluginReminderFired tells subscribers a reminder just came due.

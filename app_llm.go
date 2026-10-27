@@ -158,51 +158,14 @@ func (a *App) promptContext(cfg store.Config, includeTodos bool) llm.PromptConte
 		})
 	}
 
-	if pv := a.pomodoroView(); pv.Enabled {
-		ctx.Pomodoro = llm.PromptPomodoro{
-			Enabled:        true,
-			Phase:          promptPhase(pv),
-			Remaining:      pv.Countdown,
-			TodoTitle:      pv.TodoTitle,
-			CompletedToday: a.todayFocusCount(now),
-		}
-	}
-
-	// Collected newest first; the prompt builder caps what it renders, and the
-	// two extra entries here cover the case where the newest summaries are ones
-	// the user skipped (they carry no information and are dropped).
-	for _, r := range a.store.PomodoroRecords() {
-		if len(ctx.RecentSessions) >= llm.MaxPromptSessions()+2 {
-			break
-		}
-		ctx.RecentSessions = append(ctx.RecentSessions, llm.PromptSession{
-			Title:   r.TodoTitle,
-			Summary: r.Summary,
-			When:    promptStamp(r.EndedAt, now),
-		})
-	}
+	// The timer is deliberately absent from this snapshot.
+	//
+	// It used to carry the phase, the countdown, the attached todo and the day's
+	// finished-session count. All four belong to the pomodoro plugin now, which
+	// keeps its own state machine and its own archive - the host has no timer to
+	// describe, and inventing an empty one would tell the model "nothing is running"
+	// with the authority of a fact it cannot check.
 	return ctx
-}
-
-// promptPhase renders the timer's state for the model, or "" when there is no
-// phase to report.
-func promptPhase(v PomodoroView) string {
-	if !v.Enabled || (!v.Running && !v.Focusing) {
-		return ""
-	}
-	return v.Label
-}
-
-// todayFocusCount counts the focus sessions that ended today.
-func (a *App) todayFocusCount(now time.Time) int {
-	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	n := 0
-	for _, r := range a.store.PomodoroRecords() {
-		if !r.EndedAt.Before(startOfDay) {
-			n++
-		}
-	}
-	return n
 }
 
 // promptDueLabel renders a deadline the way a person would say it.
@@ -245,8 +208,8 @@ func promptStamp(at, now time.Time) string {
 // already verified (docs/llm-chat.md 8). Only which tab is showing changes, and
 // that is a frontend concern announced by eventChatOpen.
 //
-// The event is emitted even when the geometry call fails. Double-clicking the pet
-// must land on the conversation either way: the tab is the user's request, and
+// The event is emitted even when the geometry call fails. Landing on the
+// conversation must not depend on the window: the tab is the user's request, and
 // the window position is an implementation detail that can fail without
 // invalidating it.
 func (a *App) OpenChat() (Layout, error) {

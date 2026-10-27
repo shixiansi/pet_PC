@@ -222,57 +222,14 @@ func TestPromptContextIncludesTodosAndPomodoro(t *testing.T) {
 	}
 }
 
-func TestPromptContextIncludesPomodoroState(t *testing.T) {
-	a := newLLMTestApp(t)
-	end := time.Now().Add(10 * time.Minute)
-	if err := a.store.SavePomodoro(store.PomodoroState{
-		Enabled: true, Phase: store.PhaseFocus, RunState: store.RunRunning,
-		EndsAt: &end, CurrentTodoTitle: "写周报",
-	}); err != nil {
-		t.Fatalf("SavePomodoro: %v", err)
-	}
+// TestPromptContextIncludesPomodoroState used to prove the prompt snapshot carried the
+// timer's phase, its countdown, the attached todo and the day's finished-session count.
+// The snapshot has no pomodoro member any more: the timer and its archive belong to the
+// pomodoro plugin, which the host cannot read into.
 
-	promptCfg := a.store.Config()
-	ctx := a.promptContext(promptCfg, promptCfg.LLMContextTodos)
-	if !ctx.Pomodoro.Enabled {
-		t.Fatal("the pomodoro did not reach the prompt context")
-	}
-	if ctx.Pomodoro.Phase == "" {
-		t.Error("the phase is empty for a running focus session")
-	}
-	if ctx.Pomodoro.Remaining == "" {
-		t.Error("the countdown is empty for a running focus session")
-	}
-	if ctx.Pomodoro.TodoTitle != "写周报" {
-		t.Errorf("todo title = %q", ctx.Pomodoro.TodoTitle)
-	}
-	prompt := promptFor(t, ctx)
-	if !strings.Contains(prompt, "写周报") {
-		t.Errorf("prompt is missing the running session:\n%s", prompt)
-	}
-}
-
-// TestPromptContextReplaysRecentSummaries covers the "what did I do today"
-// question, which is unanswerable without the summaries.
-func TestPromptContextReplaysRecentSummaries(t *testing.T) {
-	a := newLLMTestApp(t)
-	if _, err := a.store.AddPomodoroRecord(store.PomodoroRecord{
-		TodoTitle: "写文档", Summary: "把接口文档补完了",
-		EndedAt: time.Now().Add(-3 * time.Hour), FocusMinutes: 25,
-	}); err != nil {
-		t.Fatalf("AddPomodoroRecord: %v", err)
-	}
-
-	promptCfg := a.store.Config()
-	ctx := a.promptContext(promptCfg, promptCfg.LLMContextTodos)
-	if len(ctx.RecentSessions) == 0 {
-		t.Fatal("no sessions reached the context")
-	}
-	prompt := promptFor(t, ctx)
-	if !strings.Contains(prompt, "把接口文档补完了") {
-		t.Errorf("the summary is missing from the prompt:\n%s", prompt)
-	}
-}
+// TestPromptContextReplaysRecentSummaries used to prove the "what did I do today"
+// question could be answered from the session archive. The archive is the pomodoro
+// plugin's now, so the host's snapshot carries no summaries to replay.
 
 // TestPromptContextRespectsContextSwitch is about a config the plugin now owns:
 // the switch is read from whatever config the caller hands in, so the plugin's
@@ -393,13 +350,13 @@ func TestOpenTodoPanelFromChatReportsTheOtherTab(t *testing.T) {
 
 // TestShutdownIsIdempotentWithoutAChatRequest: the conversation no longer runs
 // inside the pet, so there is no in-flight request for shutdown to cancel - but
-// shutdown still closes channels, and closing a closed channel panics. The
-// double call is what pins that down.
+// shutdown still releases the global shortcuts and the plugin websockets, and doing
+// that twice would double-close. The double call is what pins that down.
+//
+// The pomodoro ticker's stop channel used to be set up here too; it went with the
+// timer, so shutdown now has two things to release instead of three.
 func TestShutdownIsIdempotentWithoutAChatRequest(t *testing.T) {
 	a := newLLMTestApp(t)
-	// The loops are not running in this test, so the channels still need closing.
-	a.pomoStop = make(chan struct{})
-	a.remStop = make(chan struct{})
 
 	a.shutdown()
 	a.shutdown()

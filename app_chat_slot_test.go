@@ -15,7 +15,7 @@ import (
 )
 
 // The tests in this file pin the CHAT SLOT: which installed plugin owns the
-// pet's 对话 tab, and what a double-click on the pet opens.
+// pet's 对话 tab, and what the conversation button on the pet opens.
 //
 // The slot is resolved from declarations rather than from a built-in id, so the
 // fixtures deliberately use ids that are NOT the shipped plugin's. A test that
@@ -346,10 +346,10 @@ func TestChatSlotPluginOrderFollowsTheIndex(t *testing.T) {
 	}
 }
 
-// --- T55: the double-click entry -------------------------------------------
+// --- T55: the conversation entry --------------------------------------------
 
 // surfaceRectsManifest is the override that gives a slot plugin a floating
-// surface, so the double-click path has something to open.
+// surface, so the conversation path has something to open.
 func surfaceRectsManifest() map[string]any {
 	return map[string]any{
 		"permissions": []string{"pet.surface"},
@@ -361,13 +361,13 @@ func surfaceRectsManifest() map[string]any {
 }
 
 // TestOpenChatPluginSurfaceOpensTheClaimantsSurface covers T55's positive half:
-// the double-click entry opens the claiming plugin's own declared rectangles,
+// the conversation entry opens the claiming plugin's own declared rectangles,
 // through the existing OpenPluginSurface.
 //
 // The layout's PluginID is the load-bearing assertion. A path that opened "a"
 // surface - any surface - would still crop the window and still draw something;
-// only the id proves it opened the CHAT plugin's, which is what the double click
-// promises.
+// only the id proves it opened the CHAT plugin's, which is what the conversation
+// button promises.
 func TestOpenChatPluginSurfaceOpensTheClaimantsSurface(t *testing.T) {
 	a := pluginApp(t)
 	id := installSlotPlugin(t, a, "com.example.chat", true, []string{"pet.surface"}, surfaceRectsManifest())
@@ -405,8 +405,8 @@ func TestOpenChatPluginSurfaceOpensTheClaimantsSurface(t *testing.T) {
 // half: with nobody claiming the slot, nothing is opened and the pet explains
 // why in a bubble.
 //
-// The bubble must be non-nil and must say where to go. A double-click that
-// silently did nothing is indistinguishable from a frozen app, which is the
+// The bubble must be non-nil and must say where to go. A gesture that silently
+// did nothing is indistinguishable from a frozen app, which is the
 // failure this bubble exists to prevent.
 func TestOpenChatPluginSurfaceWithoutAPluginShowsABubble(t *testing.T) {
 	a := pluginApp(t)
@@ -439,39 +439,36 @@ func TestOpenChatPluginSurfaceWithoutAPluginShowsABubble(t *testing.T) {
 	}
 }
 
-// TestOpenChatPluginSurfaceDoesNotDisplaceAQuestion pins that the double-click
-// entry inherits OpenPluginSurface's guard rather than bypassing it.
+// TestOpenChatPluginSurfaceFoldsTheReminderAway pins that the conversation entry
+// goes through OpenPluginSurface and therefore inherits the slot's folding rule.
 //
-// A question the user has not answered owns the slot. Opening the surface over
-// it would not cover the question, it would DELETE it - and the timer would stay
-// parked with nothing on screen explaining why. The refusal has to change
-// nothing: no surface, and the bubble still the one that was there.
-func TestOpenChatPluginSurfaceDoesNotDisplaceAQuestion(t *testing.T) {
+// The surface TAKES the slot rather than sharing it, so a bubble cannot stay on
+// screen with it. It used to be the other way round - a question the user had not
+// answered was REFUSED the displacement - but the host raises no questions any more:
+// the picker went with its timer and both pomodoro prompts belong to the pomodoro
+// plugin. A reminder is a notification, so the surface replaces it.
+func TestOpenChatPluginSurfaceFoldsTheReminderAway(t *testing.T) {
 	a := pluginApp(t)
 	installSlotPlugin(t, a, "com.example.chat", true, []string{"pet.surface"}, surfaceRectsManifest())
 
-	if _, err := a.showBubble(&BubbleView{Kind: BubblePlan, Title: "下一次专注做什么？"}); err != nil {
+	if _, err := a.showBubble(&BubbleView{Kind: BubbleReminder, Title: "今天要做的事"}); err != nil {
 		// A window error is expected and harmless: there is no window, so the
-		// crop cannot run, but the STATE the guard reads is already recorded.
+		// crop cannot run, but the STATE the folding rule reads is already recorded.
 		t.Logf("showBubble (no window): %v", err)
 	}
 
-	layout, err := a.OpenChatPluginSurface()
-	if err == nil {
-		t.Fatal("opening over an unanswered question must be refused")
-	}
-	if layout.PluginSurface != nil {
-		t.Fatalf("a refused open must not advertise a surface: %+v", layout.PluginSurface)
+	if _, err := a.OpenChatPluginSurface(); err != nil {
+		t.Fatalf("the surface was refused: %v", err)
 	}
 	a.mu.Lock()
 	bubble := a.bubble
 	surface := a.pluginSurface
 	a.mu.Unlock()
-	if bubble == nil || bubble.Kind != BubblePlan {
-		t.Fatalf("the question was displaced: %+v", bubble)
+	if bubble != nil {
+		t.Fatalf("the reminder survived the surface: %+v", bubble)
 	}
-	if surface != nil {
-		t.Fatalf("a surface was opened anyway: %+v", surface)
+	if surface == nil {
+		t.Fatal("no surface was recorded, so the slot is empty")
 	}
 }
 

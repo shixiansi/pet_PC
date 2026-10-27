@@ -65,6 +65,35 @@ type App struct {
 	// area the page does not paint visible as a glass band.
 	pluginSurface *PluginSurfaceView
 
+	// surfaceHiddenBlocks is the set of DECLARATION INDICES the running surface's
+	// plugin asked the host to hide (`surface.blocks`). A hidden block contributes
+	// neither a region rectangle nor a view entry, so the page does not mount a
+	// frame for it - which is the point: a declared-but-idle block would keep
+	// swallowing clicks, because pointer-events lives on the parent document's
+	// frame element and a plugin cannot reach that.
+	//
+	// It carries its own mutex rather than using App.mu: applying the geometry
+	// happens with App.mu held, and the reader is called from inside that, so
+	// sharing the mutex would deadlock.
+	//
+	// Empty means "show everything the manifest declared", which is the behaviour
+	// of every plugin that never calls the method.
+	surfaceHiddenBlocks map[int]bool
+	surfaceHiddenMu     sync.Mutex
+
+	// surfaceBlockSizes is the height each declaration index asked for (`surface.blocks` with
+	// `sizes`). Empty means "as declared", which is what every plugin but the chat one gets, and
+	// what the chat one gets until its content actually needs more room.
+	//
+	// Shares surfaceHiddenMu: the two travel in the same request and are always applied together,
+	// and one lock for one request is one fewer ordering to reason about.
+	surfaceBlockSizes map[int]int
+
+	// Throttle for re-cropping the window. A reply being revealed 20 times a second would
+	// otherwise recompute the region and push a layout on every character.
+	surfaceSizesAt   time.Time
+	surfaceSizesNext *time.Timer
+
 	// pluginHost holds the plugin subsystem's non-geometry state: the installed
 	// plugins on disk and the per-plugin event subscriptions. It carries its own
 	// mutex because a plugin call can block on the network, and App.mu guards
@@ -82,46 +111,11 @@ type App struct {
 	audioMu  sync.Mutex
 	audioOut AudioSink
 
-	// pomoMu serialises the pomodoro state machine. The scheduler and the
-	// frontend can both drive it, and every transition is read-modify-write on
-	// the persisted state.
-	pomoMu sync.Mutex
-	// focusPlan is the plan text of the focus session in flight. Guarded by pomoMu;
-	// it only lives from StartPomodoroWithPlan until the record is written.
-	//
-	// It is deliberately memory-only rather than a persisted field: the plan is
-	// answered and consumed inside one session, and the permanent copy is the
-	// record's Plan. A restart mid-focus therefore loses it, which degrades to
-	// an empty Plan on that session's record rather than to a failed write
-	// (design.md 1.4).
-	focusPlan string
-
-	// foregroundFullscreen is the single place the app reads "is the foreground
-	// window full screen?" from. initApp/NewApp set it to
-	// desktop.IsForegroundFullscreen; tests swap in a stub. Nil falls back to
-	// the production function.
-	//
-	// It exists because the plan question is deliberately silent under a
-	// full-screen window (docs/reminder-pomodoro.md 4.7), and that branch has to
-	// be driveable in a windowless unit test - the same shape as the jitter
-	// generator and the fullscreen argument the reminder decision already take.
-	foregroundFullscreen func(desktop.Window) bool
-
-	// pomoStop ends the timer goroutine at shutdown, remStop the reminder
-	// scheduler's. Both are closed exactly once, via shutdownOnce.
-	pomoStop chan struct{}
-	remStop  chan struct{}
 	// shutdownOnce makes stopping the loops idempotent: closing a channel twice
 	// panics, and Quit can be reached from both the tray menu and the panel.
 	shutdownOnce sync.Once
-	// remMu guards the reminder scheduler's own fields.
+	// remMu guards the reminder bubble's own fields.
 	remMu sync.Mutex
-	// remNextAt is when the next automatic reminder is due, already including
-	// the random jitter for that interval. Zero means "not scheduled".
-	remNextAt time.Time
-	// remMissed records that a reminder came due while it was suppressed by a
-	// focus phase, so the pet can make it up once the phase ends.
-	remMissed bool
 	// remHovered is true while the pointer is over a reminder bubble, which
 	// pauses its auto-hide countdown.
 	remHovered bool
@@ -155,36 +149,15 @@ type App struct {
 	// Guarded by mu, like the rest of the window state.
 	hidden bool
 
-	// revealedForQuestion records that the window is visible ONLY because a
-	// question arrived while the user had the pet hidden.
+	// There is no question-reveal state here any more.
 	//
-	// The two gates are the reason it exists. The summary prompt ends a focus
-	// phase and the rest does not start until it is answered; the plan prompt
-	// ends a rest and the focus does not start until it is answered. Both park
-	// the timer, so raising one into a hidden window is not "a notification
-	// nobody can see" - it is a dead end, because nothing on screen says the
-	// timer is waiting. The pet therefore comes back for as long as the question
-	// is up, and hideAfterQuestion puts it away again the moment it is answered.
-	//
-	// It is a second flag rather than a third value of `hidden` because the two
-	// answer different questions: `hidden` is read everywhere as "is the window
-	// hidden right now" (the reminder and proactive gates, the panel's show-on-
-	// open path), while this one is the memory of what the USER asked for. A
-	// show they performed themselves - the shortcut, the tray, opening the panel
-	// - clears it, because answering a question must never undo an explicit
-	// "bring it back".
-	//
-	// Guarded by mu, like the rest of the window state.
-	revealedForQuestion bool
-
-	// questionVisibility, when set, replaces the whole native step the question
-	// reveal makes: making the pet's window visible WITHOUT activating it, or
-	// hiding it again (desktop.ShowNoActivate / desktop.Hide). It exists for the
-	// same reason foregroundFullscreen does: the reveal-and-hide-again cycle is a
-	// state machine with real gates on it, and this harness has no window, so
-	// without a seam the whole cycle would be unreachable in a unit test and only
-	// ever exercised by hand. Nil means the production calls.
-	questionVisibility func(desktop.Window, bool) error
+	// `revealedForQuestion` and the `questionVisibility` seam belonged to the cycle
+	// that brought the pet back when a pomodoro question arrived while it was
+	// hidden. Both questions belong to the pomodoro plugin now, which reveals its
+	// own floating surface, and the host's timer is gone with them - so nothing in
+	// the host can raise a question, and the whole cycle (plus the seam that made it
+	// testable) was deleted rather than left as a flag nothing sets
+	// (openspec/changes/todo-pomodoro-as-plugins, design.md §4.1).
 
 	// emitFn, when set, replaces runtime.EventsEmit. It exists because the chat
 	// path emits from a request goroutine, and Wails refuses any context other
@@ -214,30 +187,9 @@ func NewApp() (*App, error) {
 		return nil, err
 	}
 	return &App{
-		store:    st,
-		scale:    1,
-		pomoStop: make(chan struct{}),
-		remStop:  make(chan struct{}),
-		// The production answer for "is something full screen in front of us?".
-		// It is set here rather than read inline so the silent full-screen path
-		// can be driven from a test.
-		foregroundFullscreen: desktop.IsForegroundFullscreen,
+		store: st,
+		scale: 1,
 	}, nil
-}
-
-// isForegroundFullscreen reports whether the foreground window covers the screen,
-// which is what silences the pet during a video or a game.
-//
-// Every caller goes through this wrapper rather than the desktop helper, so the
-// injected probe is the ONLY answer the app can get: a branch that read
-// desktop.IsForegroundFullscreen directly would be unreachable in a windowless
-// test. The nil fallback covers an App built without NewApp.
-func (a *App) isForegroundFullscreen() bool {
-	probe := a.foregroundFullscreen
-	if probe == nil {
-		probe = desktop.IsForegroundFullscreen
-	}
-	return probe(a.windowHandle())
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -295,12 +247,13 @@ func (a *App) startup(ctx context.Context) {
 			// next launch retries because no marker was written.
 			log.Printf("pet: 迁移语音数据失败: %v", err)
 		}
-		// Both background loops start only once the window exists, so their
-		// first emit has somewhere to go.
-		a.initPomodoro()
-		a.startPomodoroLoop()
-		a.initReminders()
-		a.startReminderLoop()
+		// There is no timer loop to start: the pomodoro plugin counts its own phases
+		// (market/plugins/com.shixiansi.plugin-pomodoro), so the host has neither a
+		// state machine to tick nor a startup preference to apply.
+		//
+		// The reminder SCHEDULE belongs to the todo plugin now (see the retired block in
+		// app_reminder.go): the host keeps only the manual RemindNow action, so there is no loop to
+		// start here either.
 		// The chat runtime is set up last: it touches no window state, and a
 		// failure to open the key file must never delay the pet appearing.
 		a.initLLM()
@@ -328,21 +281,9 @@ func (a *App) startup(ctx context.Context) {
 	}()
 }
 
-// OpenPetMenu shows the pet's own menu: the same entries as the tray icon.
-//
-// It is one binding rather than a page-drawn menu because a menu inside the page would have
-// to fit inside the window's region, and the region is the panel/bubble/surface slot - a
-// menu there would be a fourth occupant of a slot that holds one thing at a time
-// (AGENTS.md §3.2). A native popup is its own window: no region, no occupancy, no layout.
-//
-// The actions are NOT re-listed here. The tray thread pops the menu it already builds and
-// routes the choice through the switch in startTray, so there is one list and one handler.
-func (a *App) OpenPetMenu() error {
-	if a.tray == nil {
-		return fmt.Errorf("托盘没起来，菜单不可用")
-	}
-	return a.tray.ShowMenuAtCursor()
-}
+// The pet's own menu lives in app_pet_menu.go (OpenPetMenu). It is a page-drawn
+// bubble card there, and it used to be this tray menu popped on the tray thread -
+// see that file for why the pet stopped borrowing the tray's list.
 
 // startTray installs the notification-area icon.
 //
@@ -364,7 +305,6 @@ func (a *App) startTray() {
 		desktop.TrayMenuAction(desktop.TrayCmdShowPet, "显示桌宠"),
 		desktop.TrayMenuAction(desktop.TrayCmdHidePet, "隐藏桌宠"),
 		desktop.TrayMenuSeparator(),
-		desktop.TrayMenuAction(desktop.TrayCmdTogglePomodoro, "开启/关闭番茄钟"),
 		desktop.TrayMenuAction(desktop.TrayCmdResetPos, "归位到默认位置"),
 		desktop.TrayMenuSeparator(),
 		desktop.TrayMenuAction(desktop.TrayCmdOpenData, "打开数据目录"),
@@ -382,13 +322,6 @@ func (a *App) startTray() {
 			case desktop.TrayCmdRemindNow:
 				if _, err := a.RemindNow(); err != nil {
 					log.Printf("pet: remind now: %v", err)
-				}
-			case desktop.TrayCmdTogglePomodoro:
-				// The tray has no checkable menu, so the click flips the state
-				// and the new state is announced by the pet itself (badge, panel).
-				enabled := a.store.Pomodoro().Enabled
-				if _, err := a.SetPomodoroEnabled(!enabled); err != nil {
-					log.Printf("pet: toggle pomodoro: %v", err)
 				}
 			case desktop.TrayCmdShowPet:
 				if err := a.ShowPet(); err != nil {
@@ -805,7 +738,7 @@ func (a *App) applyWindowGeometry() (Layout, error) {
 		if !panelOnRight {
 			declared = mirrorDeclaredRects(declared, float64(petW)/s)
 		}
-		surfaceRegions, view := computePluginSurface(petX, petY, petW, petH, totalW, totalH, s, declared)
+		surfaceRegions, view := computePluginSurfaceSized(petX, petY, petW, petH, totalW, totalH, s, declared, a.hiddenSurfaceBlocks(), a.requestedSurfaceSizes())
 		if ok && len(surfaceRegions) > 0 {
 			// The plugin's identity is stamped on HERE, and this line is what makes
 			// the surface usable at all.
@@ -1138,12 +1071,7 @@ func (a *App) SetPanelOpen(open bool) (Layout, error) {
 		// visible panel, so the tray's "打开待办面板" on a hidden pet would
 		// otherwise do nothing at all - and the menu entry is one of the ways back,
 		// so it must not be a dead end.
-		//
-		// It is also a show the USER asked for, so it settles any debt a question
-		// reveal left behind: answering that question later must not put away a
-		// pet the user deliberately brought back (see forgetQuestionReveal).
 		a.hidden = false
-		a.revealedForQuestion = false
 	}
 	a.panelOpen = open
 	a.mu.Unlock()
@@ -1159,25 +1087,9 @@ func (a *App) SetPanelOpen(open bool) (Layout, error) {
 			}
 		}
 	}
-	// Closing the panel brings back a question that the fold took away, and the
-	// plan question needs it most: unlike the summary, which the records tab can
-	// edit, NOTHING inside the panel can answer "what is the next focus about" -
-	// so losing it leaves the timer parked with nothing on screen explaining why
-	// (design.md 2.1; tasks.md T23).
-	//
-	// The hook runs AFTER a.mu is released, because showPlanBubble reaches
-	// showBubble, which takes a.mu itself. It is also gated on there being no
-	// bubble already: a reminder that arrived while the panel was open is a
-	// legitimate occupant, and the question is asked again on the next fold rather
-	// than over the top of it.
-	if !open && a.store.Pomodoro().PlanPending {
-		a.mu.Lock()
-		bubbleUp := a.bubble != nil
-		a.mu.Unlock()
-		if !bubbleUp {
-			a.showPlanBubble()
-		}
-	}
+	// Closing the panel no longer has to re-ask anything: the question that needed
+	// it (the plan prompt) is the pomodoro plugin's now, and it is asked in the
+	// plugin's own surface, which the panel never folds away (design.md §4.1).
 	return a.applyWindowGeometry()
 }
 
@@ -1218,14 +1130,13 @@ type State struct {
 	DataDir        string       `json:"dataDir"`
 	Autostart      bool         `json:"autostart"`
 	Now            string       `json:"now"`
-	// Pomodoro is the timer's current snapshot, recomputed on every read so the
-	// countdown is never stale.
-	Pomodoro PomodoroView `json:"pomodoro"`
-	// Records and RecordTotals back the records tab.
-	Records      []store.PomodoroRecord `json:"records"`
-	RecordTotals RecordTotals           `json:"recordTotals"`
-	// Reminder mirrors the scheduler's settings and its next fire time.
-	Reminder ReminderView `json:"reminder"`
+	// No Pomodoro, Records or RecordTotals member: the timer, its archive and the
+	// "N sessions / M minutes" counters all belong to the pomodoro plugin, which
+	// keeps them in its own storage. Sending an empty snapshot would make the panel
+	// draw a timer the host no longer runs.
+	// No Reminder member: it existed to draw the "next reminder at" strip, and the
+	// host stopped computing a next reminder when the todo plugin took reminders
+	// over. Sending it would be sending a time nobody can honour.
 	// Hotkeys carries the global shortcut state: the switches, the labels and
 	// whether the OS actually accepted the registration. It never contains a
 	// credential, and it is a view rather than the raw specs because the panel has
@@ -1238,12 +1149,6 @@ type State struct {
 	// Warnings reports non-fatal problems found while loading data files (for
 	// example a corrupt todos.json that had to be reset).
 	Warnings []string `json:"warnings,omitempty"`
-}
-
-// RecordTotals summarises the permanent archive.
-type RecordTotals struct {
-	Count        int `json:"count"`
-	FocusMinutes int `json:"focusMinutes"`
 }
 
 // GetState returns the current configuration, todos and derived counters.
@@ -1267,7 +1172,6 @@ func (a *App) GetState() (State, error) {
 			cfg = updated
 		}
 	}
-	count, minutes := a.store.PomodoroTotals()
 	return State{
 		Config:         cfg,
 		Todos:          a.store.Todos(),
@@ -1277,10 +1181,6 @@ func (a *App) GetState() (State, error) {
 		DataDir:        a.store.Dir(),
 		Autostart:      cfg.Autostart,
 		Now:            time.Now().Format(time.RFC3339),
-		Pomodoro:       a.pomodoroView(),
-		Records:        a.store.PomodoroRecords(),
-		RecordTotals:   RecordTotals{Count: count, FocusMinutes: minutes},
-		Reminder:       a.reminderView(),
 		Hotkeys:        a.hotkeyView(),
 		PetVisible:     !a.petHidden(),
 		Warnings:       a.store.Warnings(),

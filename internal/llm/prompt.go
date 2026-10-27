@@ -24,12 +24,11 @@ type PromptContext struct {
 	OpenCount    int
 	OverdueCount int
 	DueSoonCount int
-	// Pomodoro describes the timer, when the feature is on.
-	Pomodoro PromptPomodoro
-	// RecentSessions are the most recent pomodoro summaries, newest first.
-	RecentSessions []PromptSession
+	// There is no pomodoro in the snapshot any more: the timer, its countdown and
+	// its archive belong to the pomodoro plugin, which the host cannot see into.
+	// A field here would have to be filled with a guess.
 	// IncludeTodos is the LLMContextTodos switch. When false, none of the
-	// todo/session detail is written into the prompt - the user asked for the
+	// todo detail is written into the prompt - the user asked for the
 	// pet to know nothing about their day.
 	IncludeTodos bool
 }
@@ -44,27 +43,10 @@ type PromptTodo struct {
 	Overdue bool
 }
 
-// PromptPomodoro describes the timer for the prompt.
-type PromptPomodoro struct {
-	Enabled bool
-	// Phase is the user-facing phase name ("专注", "短休息"...).
-	Phase string
-	// Remaining is the countdown, already formatted as MM:SS.
-	Remaining string
-	// TodoTitle is the session's associated todo, if any.
-	TodoTitle string
-	// CompletedToday is how many focus phases have finished today.
-	CompletedToday int
-}
-
-// PromptSession is one finished pomodoro, for context.
-type PromptSession struct {
-	Title string
-	// Summary is what the user wrote (may be empty when they skipped it).
-	Summary string
-	// When is a human-readable timestamp ("今天 14:30").
-	When string
-}
+// PromptPomodoro and PromptSession used to live here: the timer's phase, its
+// countdown, the attached todo and the last few session summaries. All of it is the
+// pomodoro plugin's now, in its own storage, so this package has nothing to render
+// and the caller has nothing to fill in.
 
 // maxPromptTodos caps how many todos reach the prompt.
 //
@@ -73,16 +55,12 @@ type PromptSession struct {
 // single message.
 const maxPromptTodos = 12
 
-// maxPromptSessions caps the session history in the prompt.
-const maxPromptSessions = 3
-
-// MaxPromptTodos and MaxPromptSessions expose the caps so the caller can stop
-// collecting data it would only throw away.
-func MaxPromptTodos() int    { return maxPromptTodos }
-func MaxPromptSessions() int { return maxPromptSessions }
-
-// maxSummaryRunes caps one session summary's contribution.
-const maxSummaryRunes = 120
+// MaxPromptTodos exposes the cap so the caller can stop collecting data it would
+// only throw away.
+//
+// There is no MaxPromptSessions any more: the session list was the pomodoro
+// archive's, and the archive belongs to the pomodoro plugin.
+func MaxPromptTodos() int { return maxPromptTodos }
 
 // BuildMessages assembles the message list for one request.
 //
@@ -128,10 +106,8 @@ func BuildSystemPrompt(ctx PromptContext) string {
 
 	if ctx.IncludeTodos {
 		writeTodoSection(&b, ctx)
-		writePomodoroSection(&b, ctx)
-		writeSessionSection(&b, ctx)
 	} else {
-		b.WriteString("- 用户关闭了日程上下文：不知道他的待办和番茄钟，被问到就说明自己看不到。\n")
+		b.WriteString("- 用户关闭了日程上下文：不知道他的待办，被问到就说明自己看不到。\n")
 	}
 
 	return b.String()
@@ -177,63 +153,8 @@ func writeTodoSection(b *strings.Builder, ctx PromptContext) {
 	}
 }
 
-// writePomodoroSection renders the timer block.
-func writePomodoroSection(b *strings.Builder, ctx PromptContext) {
-	p := ctx.Pomodoro
-	if !p.Enabled {
-		b.WriteString("- 番茄钟：未开启。\n")
-		return
-	}
-	if p.Phase == "" {
-		b.WriteString("- 番茄钟：已开启，当前空闲。\n")
-		return
-	}
-	fmt.Fprintf(b, "- 番茄钟：%s", p.Phase)
-	if p.Remaining != "" {
-		fmt.Fprintf(b, "，还剩 %s", p.Remaining)
-	}
-	if t := strings.TrimSpace(p.TodoTitle); t != "" {
-		fmt.Fprintf(b, "，正在做「%s」", t)
-	}
-	b.WriteString("\n")
-	if p.CompletedToday > 0 {
-		fmt.Fprintf(b, "- 今天已完成 %d 个番茄。\n", p.CompletedToday)
-	}
-}
-
-// writeSessionSection renders the recent-summaries block.
-func writeSessionSection(b *strings.Builder, ctx PromptContext) {
-	if len(ctx.RecentSessions) == 0 {
-		return
-	}
-	b.WriteString("- 最近的番茄总结：\n")
-	n := 0
-	for _, s := range ctx.RecentSessions {
-		if n == maxPromptSessions {
-			break
-		}
-		summary := strings.TrimSpace(s.Summary)
-		if summary == "" {
-			continue // a skipped summary says nothing; an empty bullet invites invention
-		}
-		n++
-		fmt.Fprintf(b, "  %s《%s》：%s\n", s.When, strings.TrimSpace(s.Title), truncate(summary, maxSummaryRunes))
-	}
-	if n == 0 {
-		// Undo the header: it promised content that does not exist.
-		trimLastLine(b)
-	}
-}
-
-// trimLastLine removes the most recent line from b. It backs out a header that
-// turned out to have nothing under it, which is the alternative to buffering the
-// section first.
-func trimLastLine(b *strings.Builder) {
-	s := b.String()
-	if i := strings.LastIndex(strings.TrimRight(s, "\n"), "\n"); i >= 0 {
-		b.Reset()
-		b.WriteString(s[:i+1])
-	} else {
-		b.Reset()
-	}
-}
+// writePomodoroSection, writeSessionSection and trimLastLine used to render the
+// timer block and the recent-summary list. The timer and its archive belong to the
+// pomodoro plugin now, so the prompt has no phase, no countdown and no sessions to
+// describe - and trimLastLine existed only to back out a session header that turned
+// out to have nothing under it.

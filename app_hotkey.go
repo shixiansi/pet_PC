@@ -1,28 +1,17 @@
 package main
 
 import (
-	"errors"
 	"log"
 
 	"PetPC/internal/desktop"
 	"PetPC/internal/store"
 )
 
-// errSummaryBlocksHiding is returned when hiding is refused because a finished
-// session is still waiting for its summary.
-//
-// The summary prompt is the gate on the break (docs/reminder-pomodoro.md 4.5.1).
-// Hiding the pet would take the only way to answer it off screen and leave the
-// timer parked forever, so the refusal is the same one Escape and dragging get.
-var errSummaryBlocksHiding = errors.New("番茄钟还在等你写总结，先答完它再隐藏桌宠")
-
-// errPlanBlocksHiding is returned when hiding is refused because the plan
-// question is still waiting. It is the same promise as the summary refusal, with
-// one extra edge: the records tab can answer a summary, so a folded summary
-// prompt is recoverable from the panel - a plan question has NO answering surface
-// in the panel at all, so taking it off screen is a dead end
-// (docs/reminder-pomodoro.md 4.5.2).
-var errPlanBlocksHiding = errors.New("番茄钟还在等你写计划，先答完它再隐藏桌宠")
+// Hiding is refused for nothing any more. The two refusals that used to live here
+// - a finished session waiting for its summary, and the plan question - were the
+// host's own pomodoro gates; both questions belong to the pomodoro plugin now, and
+// the host neither parks a timer behind them nor holds the window on screen for
+// them (openspec/changes/todo-pomodoro-as-plugins, design.md §4.1).
 
 // eventPetVisible tells the frontend the pet was hidden or shown, so the settings
 // panel can describe the current state.
@@ -218,33 +207,11 @@ func (a *App) hotkeyView() desktop.HotkeyView {
 // Anything beside the pet goes first, exactly as dragging does (docs 9): the
 // panel and the overlay are laid out relative to a pet that is about to
 // disappear, and leaving them up would put a card on screen with nothing it is
-// attached to. The summary prompt is the exception, for the same reason Escape
-// and dragging except it - it is the gate on the break and has to be answered.
+// attached to.
 //
 // It is a no-op when the pet is already hidden, so a repeated shortcut cannot
 // produce an error or a second layout.
 func (a *App) HidePet() error {
-	// A pending summary prompt is a question, not decoration: hiding the pet
-	// would take the only way to answer it off screen and park the timer forever.
-	//
-	// The gate is checked BEFORE the window is resolved, which matters for the
-	// error the user sees: with a question waiting, "先答完它再隐藏桌宠" is the
-	// useful answer, and a window-resolution failure would replace it with
-	// something about a missing window.
-	if a.pendingSummaryWaiting() {
-		a.DebugLog("hide: refused, a record is waiting for its summary")
-		return errSummaryBlocksHiding
-	}
-	// The plan question blocks hiding for the same reason, and the check sits
-	// beside the summary one rather than after the window is resolved: with a
-	// question waiting, "先答完它再隐藏桌宠" is the useful answer, and a
-	// window-resolution failure would replace it with something about a missing
-	// window.
-	if a.pendingPlanWaiting() {
-		a.DebugLog("hide: refused, a focus is waiting for its plan")
-		return errPlanBlocksHiding
-	}
-
 	hwnd, err := a.resolveWindow()
 	if err != nil {
 		return err
@@ -252,7 +219,6 @@ func (a *App) HidePet() error {
 
 	a.mu.Lock()
 	wasBubble := a.bubble != nil
-	wasOwed := a.revealedForQuestion
 	// Fold the panel, the bubble and the floating surface away without
 	// re-cropping: the window is about to be hidden, and a geometry call would
 	// resolve the window and re-crop it for a frame nobody ever sees.
@@ -260,10 +226,6 @@ func (a *App) HidePet() error {
 	a.setPluginSurfaceLocked(nil)
 	a.setBubbleLocked(nil)
 	a.hidden = true
-	// A hide the user asked for supersedes a reveal the question did: from here
-	// the pet is away because THIS call put it there, and the answer to a prompt
-	// (or the end of one) must not decide to show it.
-	a.revealedForQuestion = false
 	a.mu.Unlock()
 
 	if wasBubble {
@@ -271,12 +233,10 @@ func (a *App) HidePet() error {
 	}
 
 	if err := desktop.Hide(hwnd); err != nil {
-		// Put BOTH back: claiming the pet is hidden when it is not would make
-		// the next show a no-op, and dropping the debt would silently cancel the
-		// re-hide the question still owes.
+		// Claiming the pet is hidden when it is not would make the next show a
+		// no-op, so the flag goes back.
 		a.mu.Lock()
 		a.hidden = false
-		a.revealedForQuestion = wasOwed
 		a.mu.Unlock()
 		return err
 	}
@@ -290,10 +250,6 @@ func (a *App) HidePet() error {
 // always-on-top re-assert the desktop helper already does. It also re-crops the
 // window, because hiding folded whatever was beside the pet away and the region
 // has to follow the state the page is now painting.
-//
-// Showing is the user's own request, so it also settles any debt a question
-// reveal left behind: whatever happens to a prompt afterwards, this pet stays
-// out until it is hidden again.
 func (a *App) ShowPet() error {
 	hwnd, err := a.resolveWindow()
 	if err != nil {
@@ -301,18 +257,14 @@ func (a *App) ShowPet() error {
 	}
 	a.mu.Lock()
 	wasHidden := a.hidden
-	wasOwed := a.revealedForQuestion
 	a.hidden = false
-	a.revealedForQuestion = false
 	a.mu.Unlock()
 
 	if err := desktop.Show(hwnd); err != nil {
-		// Put BOTH back: claiming the pet is visible when it is not would make
-		// the next show a no-op, and dropping the debt would leave a pet that is
-		// hidden with nothing left that will ever hide it again.
+		// Claiming the pet is visible when it is not would make the next show a
+		// no-op.
 		a.mu.Lock()
 		a.hidden = wasHidden
-		a.revealedForQuestion = wasOwed
 		a.mu.Unlock()
 		return err
 	}
@@ -331,150 +283,22 @@ func (a *App) petHidden() bool {
 	return a.hidden
 }
 
-// --- the question reveal ----------------------------------------------------
-
-// setQuestionVisibility performs the native step the reveal cycle needs: make the
-// pet's window visible (without activating it) or hidden again.
+// The question-reveal cycle used to live here: setQuestionVisibility,
+// revealForQuestion and hideAfterQuestion, plus App.revealedForQuestion and the
+// App.questionVisibility seam they were testable through.
 //
-// It is the ONE place either call is made, which is what keeps the state machine
-// and the window in step by construction. The injected seam, when there is one,
-// replaces the whole step - resolving the handle included - because a windowless
-// test has no handle to resolve and the state machine is the half under test.
-func (a *App) setQuestionVisibility(visible bool) error {
-	if fn := a.questionVisibility; fn != nil {
-		return fn(0, visible)
-	}
-	hwnd, err := a.resolveWindow()
-	if err != nil {
-		return err
-	}
-	if visible {
-		// SW_SHOWNOACTIVATE, not Show: the user is very likely typing in
-		// another application, and an activated pet would swallow their next
-		// keystroke into its own input box.
-		return desktop.ShowNoActivate(hwnd)
-	}
-	return desktop.Hide(hwnd)
-}
-
-// revealForQuestion brings the pet back so a question the timer is parked behind
-// can actually be answered.
+// It existed for ONE reason: hiding the pet is a promise to leave the user alone,
+// and both pomodoro gates parked the timer behind a question. Hiding while a
+// question was already up was refused (see HidePet), but the reverse order - hide
+// the pet, then a phase runs out - would have drawn the prompt into a hidden window
+// and parked the timer forever, with no pixels on screen saying so. So a question
+// revealed the pet WITHOUT activating it, and answering it put the pet back.
 //
-// WHY THE PET COMES BACK AT ALL. Hiding is a promise to leave the user alone,
-// and both the summary prompt and the plan prompt hold the timer: the rest does
-// not start until the first is answered and the focus does not start until the
-// second is. Hiding was refused while either was ALREADY waiting (see HidePet),
-// but that guard only covers the order "question first, then hide". The reverse
-// order - hide the pet, then a phase runs out - used to leave the prompt drawn
-// into an SW_HIDEd window: the timer parked forever, no pixels on screen saying
-// so, and the only way out was to remember the show shortcut. That is the dead
-// end the refusal exists to prevent, so it has to be prevented from this side
-// too.
-//
-// It is deliberately NOT a plain ShowPet:
-//
-//   - The window is shown WITHOUT activation (ShowNoActivate). The user is very
-//     likely typing in another application - the whole reason the prompts do not
-//     steal focus (docs/reminder-pomodoro.md 4.5) - and an activated pet would
-//     swallow the next keystroke into its own box. It also goes through
-//     desktop.ShowNoActivate rather than desktop.Show for the same reason: the
-//     latter activates by design.
-//   - The panel, the overlay and the plugin surface are NOT restored. They were
-//     folded away by the hide and the question is the only thing that has to be
-//     visible; bringing them back would be a second, larger interruption.
-//   - `hidden` becomes false for as long as the question is up, because the
-//     window really is on screen: the reminder and proactive gates read that
-//     flag, and leaving it true would keep them suppressed against a visible
-//     pet.
-//
-// The user's own "hidden" is remembered in revealedForQuestion, and
-// hideAfterQuestion is what puts the pet back. An explicit show - the shortcut,
-// the tray, opening the panel - clears the memory, because "I asked for it back"
-// must not be undone later by answering a prompt.
-//
-// A window that cannot be resolved is a no-op rather than an error: the caller
-// is a timer tick with nowhere to report a failure, and a reveal that fails
-// leaves the state exactly as it was.
-func (a *App) revealForQuestion() {
-	a.mu.Lock()
-	wasHidden := a.hidden
-	a.mu.Unlock()
-	if !wasHidden {
-		return
-	}
-
-	if err := a.setQuestionVisibility(true); err != nil {
-		// Nothing changed on screen, so nothing may change in the state: the pet
-		// is still hidden, and the show shortcut remains the way back.
-		a.DebugLog("question reveal: show failed: " + err.Error())
-		return
-	}
-
-	a.mu.Lock()
-	a.hidden = false
-	// The debt is recorded only once the window really is visible, so a failed
-	// reveal can never make a later answer hide a pet that was never shown.
-	a.revealedForQuestion = true
-	a.mu.Unlock()
-	a.emitVisibility()
-	// The re-crop is deliberately NOT done here. Every caller is about to paint
-	// something beside the pet (showBubble -> applyWindowGeometry), and that pass
-	// computes the region from the state as it then stands, so cropping here
-	// would crop to the pet alone and be immediately redone.
-	a.DebugLog("question reveal: the pet came back for a question")
-}
-
-// hideAfterQuestion puts the pet away again once the question that brought it
-// back has been answered.
-//
-// It is the other half of revealForQuestion, and it runs from every path that
-// clears a gate: saving or skipping the summary, answering the plan, giving the
-// session up, switching the pomodoro off. It is a no-op unless the window is
-// visible ONLY because of a question - revealedForQuestion is set and the user
-// has not asked for the pet back in the meantime - so an explicit show is never
-// undone, and a pet that was never hidden never moves.
-//
-// The panel, the overlay and the bubble are folded away exactly as HidePet folds
-// them, because they are all painted against a pet that is about to disappear.
-// No gate can be waiting here (that is the caller's contract), so nothing on
-// screen is lost by doing so.
-func (a *App) hideAfterQuestion() {
-	a.mu.Lock()
-	owed := a.revealedForQuestion
-	// Cleared unconditionally, including when the hide below fails. A debt that
-	// survives a failure is worse than a missed re-hide: nothing would ever run
-	// the answer path again, so it would sit there until the user showed the pet
-	// for their own reasons - and then put it away. Failing visible is also the
-	// safe direction, because a visible pet is never the dead end this whole
-	// cycle exists to prevent.
-	a.revealedForQuestion = false
-	if !owed || a.hidden {
-		a.mu.Unlock()
-		return
-	}
-	a.panelOpen = false
-	wasBubble := a.bubble != nil
-	a.setPluginSurfaceLocked(nil)
-	a.setBubbleLocked(nil)
-	a.mu.Unlock()
-
-	if wasBubble {
-		a.emitBubble(BubbleNone, false)
-	}
-
-	if err := a.setQuestionVisibility(false); err != nil {
-		// The fold above is NOT undone, exactly as HidePet leaves it: the panels
-		// are painted against a pet that was going away, and putting a panel back
-		// beside a visible pet would be a second, larger change than the failure.
-		a.DebugLog("question re-hide: hide failed: " + err.Error())
-		return
-	}
-	a.mu.Lock()
-	a.hidden = true
-	a.mu.Unlock()
-	a.emitVisibility()
-	a.DebugLog("question re-hide: the pet went back into hiding")
-}
+// None of that can happen now. Both questions belong to the pomodoro plugin, which
+// reveals its own floating surface, and the host's timer is gone: nothing left in
+// the host can raise a question, so there is no debt to remember and no cycle to
+// run. The mechanism went with the timer it existed for
+// (openspec/changes/todo-pomodoro-as-plugins, design.md §4.1).
 
 // emitVisibility tells the frontend the pet was hidden or shown.
 //

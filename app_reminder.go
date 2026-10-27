@@ -2,276 +2,53 @@ package main
 
 import (
 	"fmt"
-	"math/rand"
 	"time"
 
-	"PetPC/internal/desktop"
 	"PetPC/internal/store"
 )
 
-// The reminder scheduler.
+// The reminder BUBBLE, and the one reminder the host still sends.
 //
-// The decision of whether to interrupt is a pure function - decideReminder - so
-// the entire gating ruleset can be tested without a clock, a window or a running
-// pet. This file's other job is to feed it a tick every 30 seconds and act on the
-// verdict.
+// The automatic scheduler that used to live here is gone: decideReminder (a pure function), the 30
+// second tick, the interval + jitter arithmetic, the catch-up for a reminder a focus phase
+// suppressed, and the break trigger that queued one when a rest began. Reminders belong to the todo
+// plugin (market/plugins/com.shixiansi.plugin-todo) now: its headless frame reads the same todo list,
+// applies the user's interval / jitter / hours / limit and calls `bubble.say`. Two schedulers over
+// one list meant the user could be reminded twice, which is why this is a deletion and not a
+// tidy-up - and a reminder the host held back for a later moment would fire outside the plugin's
+// schedule, which is that same double reminder in another form.
 //
-// The rules, from docs/reminder-pomodoro.md 5.2:
+// The "next reminder at" strip went with it (ReminderView / reminderView / logReminderState): it
+// described a due time the host no longer computes, so it could only ever show a stale one. The todo
+// plugin knows when it will next speak; the host does not.
 //
-//	focusing          -> never (record the miss, make it up when resting)
-//	resting           -> yes, on the interval
-//	paused / stopped  -> yes, on the interval (a paused pomodoro is not focus)
-//	pomodoro off      -> yes, on the interval
-//	full screen       -> never
-//	outside active hours -> never
-//	nothing to show   -> never, unless told otherwise
+// What stays is the MANUAL reminder: "立刻提醒" from the tray menu and the pet's menu cell, plus the
+// bubble it shows. That is a user action rather than a schedule, and it is the one path a plugin
+// cannot take over - nothing outside the host can ask the host to remind *now* on the user's behalf.
+
+// RemindNow shows a reminder immediately, from the tray menu or the pet's menu cell.
 //
-// A manual "remind me now" bypasses every one of these except the content check.
-
-// reminderCheckEvery is how often the scheduler evaluates. It is deliberately
-// much shorter than the shortest interval so the interval itself is honoured to
-// within half a minute regardless of when the tick lands.
-const reminderCheckEvery = 30 * time.Second
-
-// reminderDecision is the scheduler's verdict for one tick.
-type reminderDecision struct {
-	// Fire is true when a bubble should be shown now.
-	Fire bool
-	// Reason explains the verdict, for the debug log. It is the single most
-	// useful thing when a reminder "did not appear": it says which gate closed.
-	Reason string
-	// Missed is true when a reminder came due but was suppressed because a focus
-	// phase was running. It is made up once the phase ends.
-	Missed bool
-	// NextIn is how long to wait before evaluating again.
-	NextIn time.Duration
-}
-
-// decideReminder evaluates one tick.
-//
-// now is the current time, dueAt is when the next reminder is scheduled (zero
-// when none is pending) and lastFired is when the previous one appeared.
-func decideReminder(cfg store.Config, st store.PomodoroState, now, dueAt time.Time, jitter func() time.Duration, fullscreen bool) reminderDecision {
-	rem := cfg.Reminder()
-
-	if !rem.Enabled {
-		return reminderDecision{Reason: "reminders are off"}
-	}
-	// A focus phase suppresses everything automatic. The miss is recorded by the
-	// caller so it can be made up when the phase ends.
-	if st.IsFocusing() {
-		return reminderDecision{Reason: "a focus phase is running", Missed: true}
-	}
-	// A break is the best moment to interrupt, but only if the user wants to be
-	// interrupted while resting: this is the RemindDuringBreak switch
-	// (docs 4.8), and it has to be enforced here or the setting is decorative.
-	if store.IsBreakPhase(st.Phase) && !rem.DuringBreak {
-		return reminderDecision{Reason: "resting, and reminders during breaks are off"}
-	}
-	if fullscreen {
-		return reminderDecision{Reason: "a full-screen window is in front", Missed: true}
-	}
-	if !store.WithinActiveWindow(rem.From, rem.To, now) {
-		return reminderDecision{Reason: fmt.Sprintf("outside the active window %s-%s", rem.From, rem.To)}
-	}
-	if dueAt.IsZero() {
-		// Nothing scheduled yet: schedule the first one rather than firing
-		// immediately, so switching reminders on does not interrupt at once.
-		return reminderDecision{Reason: "scheduled", NextIn: nextInterval(rem, jitter)}
-	}
-	if now.Before(dueAt) {
-		return reminderDecision{Reason: "waiting", NextIn: dueAt.Sub(now)}
-	}
-	return reminderDecision{Fire: true, Reason: "due"}
-}
-
-// nextInterval is the gap until the next reminder: the configured interval plus
-// a random 0..jitter slack, so the pet never becomes a metronome
-// (docs/reminder-pomodoro.md 5.3).
-func nextInterval(rem store.ReminderSettings, jitter func() time.Duration) time.Duration {
-	base := time.Duration(rem.IntervalMin) * time.Minute
-	if base <= 0 {
-		base = time.Duration(store.DefaultReminderIntervalMin) * time.Minute
-	}
-	if jitter == nil {
-		return base
-	}
-	return base + jitter()
-}
-
-// jitterFunc builds the random-slack generator for a configured maximum.
-//
-// It returns a function rather than a duration so that each interval draws its
-// own value: drawing once at startup would just be a random constant offset.
-func jitterFunc(maxMinutes int) func() time.Duration {
-	if maxMinutes <= 0 {
-		return func() time.Duration { return 0 }
-	}
-	span := time.Duration(maxMinutes) * time.Minute
-	return func() time.Duration {
-		// Second-level granularity is plenty for a reminder and makes the
-		// distribution easy to reason about.
-		return time.Duration(rand.Int63n(int64(span/time.Second)+1)) * time.Second
-	}
-}
-
-// --- view ------------------------------------------------------------------
-
-// ReminderView is the scheduler's state as the frontend sees it.
-type ReminderView struct {
-	Enabled bool `json:"enabled"`
-	// NextAt is when the next automatic reminder is due (RFC3339, "" if none).
-	NextAt string `json:"nextAt,omitempty"`
-	// NextInSec is the same thing as a countdown, for display.
-	NextInSec int `json:"nextInSec"`
-	// Suppressed explains why nothing will fire right now, "" when it will.
-	Suppressed string `json:"suppressed,omitempty"`
-	// Missed is true when a reminder was suppressed by a focus phase and is owed.
-	Missed bool `json:"missed"`
-}
-
-// reminderView renders the scheduler for the frontend, including whether it is
-// currently suppressed - the answer to "why didn't it pop up?".
-func (a *App) reminderView() ReminderView {
-	cfg := a.store.Config()
-	rem := cfg.Reminder()
-
-	a.remMu.Lock()
-	nextAt := a.remNextAt
-	missed := a.remMissed
-	a.remMu.Unlock()
-
-	view := ReminderView{Enabled: rem.Enabled, Missed: missed}
-
-	if !rem.Enabled {
-		return view
-	}
-	now := time.Now()
-	if !nextAt.IsZero() {
-		view.NextAt = nextAt.Format(time.RFC3339)
-		if d := nextAt.Sub(now); d > 0 {
-			view.NextInSec = int(d.Seconds())
-		}
-	}
-	switch {
-	case a.store.Pomodoro().IsFocusing():
-		view.Suppressed = "专注中"
-	case desktop.IsForegroundFullscreen(a.windowHandle()):
-		view.Suppressed = "全屏中"
-	case !store.WithinActiveWindow(rem.From, rem.To, now):
-		view.Suppressed = "不在活跃时段"
-	}
-	return view
-}
-
-// --- scheduling ------------------------------------------------------------
-
-// initReminders applies the startup preference and schedules the first check.
-func (a *App) initReminders() {
-	cfg, err := a.store.UpdateConfig(func(c *store.Config) { c.ReminderEnabled = c.ReminderOnStartup })
-	if err != nil {
-		a.DebugLog("reminder: could not apply the startup preference: " + err.Error())
-		return
-	}
-	a.DebugLog(fmt.Sprintf("reminder: enabled=%v interval=%dm jitter=%dm",
-		cfg.ReminderEnabled, cfg.ReminderIntervalMin, cfg.ReminderJitterMaxMin))
-}
-
-// startReminderLoop drives the scheduler.
-//
-// The stop channel is captured once for the same reason as the pomodoro loop: a
-// field read inside the loop would race shutdown closing (and then clearing) it.
-func (a *App) startReminderLoop() {
-	stop := a.remStop
-	go func() {
-		ticker := time.NewTicker(reminderCheckEvery)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				a.tickReminder()
-			}
-		}
-	}()
-}
-
-// tickReminder evaluates the schedule and shows a bubble when it says to.
-func (a *App) tickReminder() {
-	cfg := a.store.Config()
-	rem := cfg.Reminder()
-	now := time.Now()
-
-	a.remMu.Lock()
-	dueAt := a.remNextAt
-	a.remMu.Unlock()
-
-	decision := decideReminder(cfg, a.store.Pomodoro(), now, dueAt, jitterFunc(rem.JitterMax), desktop.IsForegroundFullscreen(a.windowHandle()))
-
-	a.remMu.Lock()
-	if decision.Missed {
-		a.remMissed = true
-	}
-	a.remMu.Unlock()
-
-	if decision.NextIn > 0 {
-		a.setNextReminder(now.Add(decision.NextIn))
-	}
-	if !decision.Fire {
-		// The reason is logged every tick on purpose: when a reminder does not
-		// appear, this line says which gate closed (docs 11, step 2).
-		a.DebugLog("reminder: no (" + decision.Reason + ")")
-		return
-	}
-	// The panel already shows every todo, so a bubble beside it would be
-	// redundant - and the two cannot be visible at once anyway.
-	if a.panelIsOpen() {
-		a.DebugLog("reminder: suppressed (the panel is open)")
-		return
-	}
-	if !a.showReminderBubble(false) {
-		// Nothing worth showing: the interval restarts so the pet does not retry
-		// on every tick.
-		a.DebugLog("reminder: nothing to show")
-	}
-}
-
-// RemindNow shows a reminder immediately, ignoring the schedule and every
-// suppression except the content check.
-//
-// This is the manual escape hatch the design calls for: "manual wins" even in
-// the middle of a focus phase (docs/reminder-pomodoro.md 5.2).
+// This is the manual escape hatch the design calls for: "manual wins" even in the
+// middle of a focus phase (docs/reminder-pomodoro.md 5.2). It is also the only reminder the host
+// still sends, because the schedule belongs to the todo plugin.
 func (a *App) RemindNow() (State, error) {
 	a.DebugLog("reminder: manual")
 	if !a.showReminderBubble(true) {
 		st, _ := a.GetState()
 		return st, fmt.Errorf("没有需要提醒的待办")
 	}
-	// A manual reminder restarts the interval, so it is not immediately followed
-	// by an automatic one.
-	cfg := a.store.Config()
-	a.setNextReminder(time.Now().Add(nextInterval(cfg.Reminder(), jitterFunc(cfg.ReminderJitterMaxMin))))
 	return a.GetState()
 }
 
 // showReminderBubble shows the todo reminder bubble. It reports whether there was
 // anything to show.
 //
-// The content gate applies to manual reminders too: "remind me now" overrides the
-// schedule and the focus suppression, but it cannot conjure up something to say.
-// With RemindWhenEmpty on, an empty list is itself the message.
+// The content gate used to be the last of several: the schedule decided WHETHER to speak and this
+// decided WHAT to say. With the schedule gone, all that is left to decide is "is there something to
+// say?" - the slot gates below (an unanswered question, a plugin's surface, a hidden pet) are about
+// where the bubble may appear, not about whether it should. With RemindWhenEmpty on, an empty list
+// is itself the message.
 func (a *App) showReminderBubble(manual bool) bool {
-	// Never displace a question the user has not answered. The picker and the
-	// summary prompt hold a decision; a reminder is only a notification, and
-	// letting it overwrite either one would silently lose the question (and, for
-	// the summary, leave the session's prompt unreachable). A manual reminder is
-	// no exception: the user asking to be reminded is not asking to cancel the
-	// picker they just opened.
-	if a.bubbleAwaitingAnswer() {
-		a.DebugLog("reminder: suppressed (a bubble is waiting for an answer)")
-		return false
-	}
 	// Nor may it displace a plugin's floating surface. That surface is a
 	// transient thing holding the round the user is in the middle of reading,
 	// and a reminder is at best redundant there - the pet is already the thing
@@ -340,32 +117,8 @@ func (a *App) showReminderBubble(manual bool) bool {
 	stats := a.store.Stats()
 	a.notifyPluginReminderFired(stats.DueSoon, stats.Overdue, stats.Open)
 
-	a.remMu.Lock()
-	a.remMissed = false
-	a.remMu.Unlock()
 	a.DebugLog(fmt.Sprintf("reminder: shown (%d items, manual=%v)", len(bubbleItems), manual))
 	return true
-}
-
-// setNextReminder records when the next automatic reminder is due.
-//
-// remMu guards both the schedule and the missed flag: the scheduler goroutine
-// writes them while webview calls read them, and they are read together when
-// rendering the status line.
-func (a *App) setNextReminder(at time.Time) {
-	a.remMu.Lock()
-	a.remNextAt = at
-	a.remMu.Unlock()
-}
-
-// panelIsOpen reports whether the todo panel is currently showing.
-//
-// The panel and a bubble cannot both be visible, so a reminder that comes due
-// while the user is already looking at their todos is redundant.
-func (a *App) panelIsOpen() bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.panelOpen
 }
 
 // ReminderSettingsInput carries the reminder preferences from the settings tab.
@@ -382,7 +135,10 @@ type ReminderSettingsInput struct {
 	SilentFull  bool   `json:"silentFullscreen"`
 }
 
-// SaveReminderSettings persists the reminder preferences and reschedules.
+// SaveReminderSettings persists the reminder preferences.
+//
+// It writes the config and nothing else: the countdown these values describe is the todo plugin's,
+// and the plugin reads them from the same settings file, so there is no host schedule to restart.
 func (a *App) SaveReminderSettings(in ReminderSettingsInput) (State, error) {
 	if _, err := a.store.UpdateConfig(func(c *store.Config) {
 		c.ReminderOnStartup = in.OnStartup
@@ -397,23 +153,17 @@ func (a *App) SaveReminderSettings(in ReminderSettingsInput) (State, error) {
 	}); err != nil {
 		return State{}, err
 	}
-	cfg := a.store.Config()
-	// Restart the countdown from now so a changed interval takes effect for the
-	// next reminder rather than after the old one.
-	a.setNextReminder(time.Now().Add(nextInterval(cfg.Reminder(), jitterFunc(cfg.ReminderJitterMaxMin))))
 	return a.GetState()
 }
 
 // SetReminderEnabled switches reminders on or off from the panel or the tray.
 func (a *App) SetReminderEnabled(enabled bool) (State, error) {
-	cfg, err := a.store.UpdateConfig(func(c *store.Config) { c.ReminderEnabled = enabled })
-	if err != nil {
+	if _, err := a.store.UpdateConfig(func(c *store.Config) { c.ReminderEnabled = enabled }); err != nil {
 		return State{}, err
 	}
-	if enabled {
-		a.setNextReminder(time.Now().Add(nextInterval(cfg.Reminder(), jitterFunc(cfg.ReminderJitterMaxMin))))
-	} else {
-		a.setNextReminder(time.Time{})
+	if !enabled {
+		// Switching reminders off takes the bubble down with it; switching them on has nothing to
+		// schedule here, because the schedule lives in the todo plugin.
 		a.clearBubble(BubbleReminder)
 	}
 	a.emitLayout()
@@ -429,14 +179,6 @@ func (a *App) SetBubbleHover(hovered bool) {
 	a.remMu.Lock()
 	a.remHovered = hovered
 	a.remMu.Unlock()
-}
-
-// ConfirmPomodoroStart starts focusing on the todo the picker selected.
-//
-// It is separate from StartPomodoro so the frontend's confirm button has a
-// single, explicit call to make: the picker never starts a session on its own.
-func (a *App) ConfirmPomodoroStart(todoID string) (State, error) {
-	return a.StartPomodoro(PomodoroStartInput{TodoID: todoID})
 }
 
 // OpenTodoPanelFromBubble handles a click on a reminder bubble: the bubble goes
@@ -457,14 +199,12 @@ func (a *App) OpenTodoPanelFromBubble() (Layout, error) {
 
 // shutdown stops the background loops.
 //
-// The channels are closed but deliberately NOT cleared: the loops hold their own
-// reference to them, and clearing the fields would only mean a second call could
-// not close anything. Closing twice would panic, so the closer is made
-// idempotent with a dedicated flag under its own mutex.
+// The channel that used to end the pomodoro ticker is gone with the timer itself,
+// so what is left is the two things that are still owned by this process and must
+// be handed back deliberately. The closer is made idempotent with a dedicated flag
+// under its own mutex.
 func (a *App) shutdown() {
 	a.shutdownOnce.Do(func() {
-		close(a.pomoStop)
-		close(a.remStop)
 		// There is nothing to tear down for speech any more: the pet does not play
 		// the lines, the voice plugin does, and it owns its own audio sink and its
 		// own lifetime. The pet's shutdown is now purely its timer loops and its
@@ -482,68 +222,4 @@ func (a *App) shutdown() {
 		// at a session nobody is reading.
 		a.closePluginWS()
 	})
-}
-
-// logReminderState writes the scheduler's view to the debug log. It exists so
-// step 2 of the implementation plan can be verified from the log alone, before
-// any bubble UI is trusted.
-func (a *App) logReminderState() {
-	v := a.reminderView()
-	a.DebugLog(fmt.Sprintf("reminder: enabled=%v next=%s in=%ds suppressed=%q missed=%v",
-		v.Enabled, v.NextAt, v.NextInSec, v.Suppressed, v.Missed))
-}
-
-// makeUpMissedReminder shows the reminder that a focus phase suppressed, if there
-// was one.
-//
-// Called when a bubble that was occupying the slot goes away, so a missed
-// reminder is delivered once rather than as a backlog
-// (docs/reminder-pomodoro.md 4.7, 9).
-func (a *App) makeUpMissedReminder() {
-	a.remMu.Lock()
-	missed := a.remMissed
-	a.remMu.Unlock()
-	if !missed {
-		return
-	}
-	cfg := a.store.Config()
-	if !cfg.ReminderEnabled {
-		return
-	}
-	// Resting only counts as a make-up opportunity if the user allows reminders
-	// during breaks. Leaving the flag set would deliver it at the next break
-	// instead, which is not what the switch says.
-	if store.IsBreakPhase(a.store.Pomodoro().Phase) && !cfg.RemindDuringBreak {
-		a.remMu.Lock()
-		a.remMissed = false
-		a.remMu.Unlock()
-		return
-	}
-	if a.panelIsOpen() {
-		return
-	}
-	if !a.showReminderBubble(true) {
-		return
-	}
-	a.remMu.Lock()
-	a.remMissed = false
-	a.remMu.Unlock()
-	// The interval restarts from the make-up reminder.
-	a.setNextReminder(time.Now().Add(nextInterval(cfg.Reminder(), jitterFunc(cfg.ReminderJitterMaxMin))))
-}
-
-// noteBreakReminderOwed records that entering a rest should pop a reminder.
-//
-// docs 5.2 makes "the pomodoro entered a break" an immediate trigger rather than
-// a scheduled one. The summary prompt is occupying the bubble slot at that exact
-// moment, so the reminder is marked as owed and delivered as soon as that prompt
-// is answered - the break itself is already counting down behind it.
-func (a *App) noteBreakReminderOwed() {
-	cfg := a.store.Config()
-	if !cfg.ReminderEnabled || !cfg.RemindDuringBreak {
-		return
-	}
-	a.remMu.Lock()
-	a.remMissed = true
-	a.remMu.Unlock()
 }

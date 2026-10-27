@@ -91,24 +91,6 @@ type Config struct {
 	// editor or an IDE. Opting in is the only polite default.
 	GlobalHotkeys bool `json:"globalHotkeys"`
 
-	// --- pomodoro (docs/reminder-pomodoro.md 4.8) ---
-
-	// PomodoroOnStartup decides whether a launch switches the pomodoro on. Off
-	// by default: the feature is opt-in and the runtime state in pomodoro.json
-	// remembers what the user actually chose.
-	PomodoroOnStartup bool `json:"pomodoroOnStartup"`
-	// AutoStartNextPhase chains focus -> break -> focus without a click.
-	AutoStartNextPhase bool `json:"autoStartNextPhase"`
-	// RemindDuringBreak allows todo reminders while resting.
-	RemindDuringBreak bool `json:"remindDuringBreak"`
-	// PomodoroSound plays the system sound when a phase ends.
-	PomodoroSound bool `json:"pomodoroSound"`
-
-	FocusMinutes      int `json:"focusMinutes"`
-	ShortBreakMinutes int `json:"shortBreakMinutes"`
-	LongBreakMinutes  int `json:"longBreakMinutes"`
-	LongBreakEvery    int `json:"longBreakEvery"`
-
 	// --- todo reminders (docs/reminder-pomodoro.md 5.5) ---
 
 	// ReminderOnStartup decides whether a launch enables reminders.
@@ -164,7 +146,7 @@ type Config struct {
 	LLMSystemPrompt string `json:"llmSystemPrompt"`
 	// LLMHistoryTurns is how many past messages are replayed as context.
 	LLMHistoryTurns int `json:"llmHistoryTurns"`
-	// LLMContextTodos injects the todo list and pomodoro state into the prompt.
+	// LLMContextTodos injects the todo list into the prompt.
 	// This is a privacy-relevant switch, so it is visible in the settings UI.
 	LLMContextTodos bool `json:"llmContextTodos"`
 	// LLMProactive allows the pet to speak up on its own (docs 9). Off by
@@ -209,9 +191,6 @@ type ReminderSettings struct {
 	MaxItems    int    `json:"maxItems"`
 	AutoHideSec int    `json:"autoHideSec"`
 	WhenEmpty   bool   `json:"whenEmpty"`
-	// DuringBreak mirrors RemindDuringBreak; kept together with the rest so the
-	// scheduler never has to reach back into the config.
-	DuringBreak bool `json:"duringBreak"`
 }
 
 // Base (unscaled) window sizes in logical pixels.
@@ -261,16 +240,10 @@ func DefaultConfig() Config {
 		// The global shortcuts are off until asked for: see the field's comment.
 		GlobalHotkeys: false,
 
-		// Pomodoro: off until asked for, but once it is on, phases chain and
-		// breaks are quiet-ish (reminders allowed) and audible.
-		PomodoroOnStartup:  false,
-		AutoStartNextPhase: true,
-		RemindDuringBreak:  true,
-		PomodoroSound:      true,
-		FocusMinutes:       DefaultFocusMinutes,
-		ShortBreakMinutes:  DefaultShortBreakMinutes,
-		LongBreakMinutes:   DefaultLongBreakMinutes,
-		LongBreakEvery:     DefaultLongBreakEvery,
+		// Pomodoro settings are NOT here any more: the timer, its phase lengths,
+		// its long-break rhythm and its sound all belong to the pomodoro plugin,
+		// which keeps them in its own `plugin.config`. A host field left behind
+		// would be a switch nothing reads.
 
 		// Reminders: likewise off until asked for.
 		ReminderOnStartup:    false,
@@ -324,11 +297,6 @@ func (c *Config) Normalise() {
 		c.EdgeMargin = DefaultEdgeGap
 	}
 
-	c.FocusMinutes = clampOr(c.FocusMinutes, MinFocusMinutes, MaxFocusMinutes, DefaultFocusMinutes)
-	c.ShortBreakMinutes = clampOr(c.ShortBreakMinutes, MinBreakMinutes, MaxBreakMinutes, DefaultShortBreakMinutes)
-	c.LongBreakMinutes = clampOr(c.LongBreakMinutes, MinBreakMinutes, MaxBreakMinutes, DefaultLongBreakMinutes)
-	c.LongBreakEvery = clampOr(c.LongBreakEvery, MinLongBreakEvery, MaxLongBreakEvery, DefaultLongBreakEvery)
-
 	c.ReminderIntervalMin = clampOr(c.ReminderIntervalMin, MinReminderIntervalMin, MaxReminderIntervalMin, DefaultReminderIntervalMin)
 	// The jitter floor is 0, so an absent key is indistinguishable from an
 	// explicit "fire exactly on time". Falling back to 0 rather than to the
@@ -367,6 +335,12 @@ func clampOr(v, min, max, fallback int) int {
 }
 
 // Reminder returns the reminder settings as one bundle.
+//
+// There is no DuringBreak field any more. It existed so the host's scheduler could
+// keep quiet while the host's timer was resting; both the scheduler and the timer
+// are gone (reminders belong to the todo plugin, the timer to the pomodoro plugin),
+// and a field the host no longer consults would only invite a reader to think it
+// still did.
 func (c Config) Reminder() ReminderSettings {
 	return ReminderSettings{
 		Enabled:     c.ReminderEnabled,
@@ -377,7 +351,6 @@ func (c Config) Reminder() ReminderSettings {
 		MaxItems:    c.ReminderMaxItems,
 		AutoHideSec: c.ReminderAutoHideSec,
 		WhenEmpty:   c.RemindWhenEmpty,
-		DuringBreak: c.RemindDuringBreak,
 	}
 }
 
@@ -410,12 +383,6 @@ type Store struct {
 	settingsChecked time.Time
 	todos           []Todo
 	warnings        []string
-	// pomodoro is the timer's runtime state (pomodoro.json) and records is the
-	// permanent archive of finished sessions (pomodoro-records.json). They are
-	// kept here, rather than in a separate package, so that all persistence goes
-	// through the same atomic-write and corruption-handling code.
-	pomodoro PomodoroState
-	records  []PomodoroRecord
 	// chat is the LLM transcript (llm-history.json) and llmUsage today's request
 	// counters (llm-usage.json). Both live under the same mutex as everything
 	// else, so a turn that is being appended cannot race a read of the config.
@@ -482,16 +449,8 @@ func New(dir string) (*Store, error) {
 	if err := s.loadTodos(); err != nil {
 		return nil, err
 	}
-	// Neither of these can fail: a broken pomodoro state resets to idle and a
-	// broken record file is quarantined and reported as a warning.
-	if err := s.loadPomodoro(); err != nil {
-		return nil, err
-	}
-	if err := s.loadPomodoroRecords(); err != nil {
-		return nil, err
-	}
-	// As with the pomodoro state: a broken transcript is quarantined and a
-	// broken usage file resets. Neither can stop the pet from starting.
+	// A broken transcript is quarantined and a broken usage file resets. Neither
+	// can stop the pet from starting.
 	if err := s.loadLLMHistory(); err != nil {
 		return nil, err
 	}

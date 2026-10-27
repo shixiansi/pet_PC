@@ -158,6 +158,19 @@ const maxConfigOptions = 64
 // host's resolver; nothing else in the repo spells these names out.
 const PanelSlotChat = "chat"
 
+// PanelSlotTodos is the 日程 slot: whoever claims it is what the pet's menu opens.
+//
+// A SLOT is a named mount point, not necessarily a panel tab. `chat` fills the panel's 对话 tab;
+// `todos` fills the column beside the pet with the claimant's own FLOATING SURFACE, because the
+// panel is on its way out (see openspec/changes/todo-pomodoro-as-plugins). The host resolves the
+// name and opens whatever surface the claimant declared - it never learns which plugin that is.
+const PanelSlotTodos = "todos"
+
+// PanelSlotPomodoro is the 番茄钟 slot: whoever claims it is what the pet's menu opens there.
+//
+// Same shape as PanelSlotTodos - a name the host resolves, filled by the claimant's own surface.
+const PanelSlotPomodoro = "pomodoro"
+
 // Rect is one declared plugin surface rectangle, in CSS pixels relative to the
 // pet's top-left corner.
 type Rect struct {
@@ -165,7 +178,26 @@ type Rect struct {
 	DY     float64 `json:"dy"`
 	W      float64 `json:"w"`
 	H      float64 `json:"h"`
+	// MaxH is how tall this block may GROW; 0 means "cannot grow".
+	//
+	// A surface block is sized by the manifest, because the window region is cropped to the
+	// declared rectangles when the surface opens - there is no CSS `height: auto` for a window
+	// region. A block whose content is a variable-length reply therefore needs a declared
+	// CEILING it may request up to (`surface.blocks` carrying `sizes`), and the ceiling is the
+	// only thing that stops a plugin asking for a window that covers half the screen. Blocks
+	// that leave this at 0 keep exactly the geometry they declare - which is every plugin in
+	// the market today except the chat one.
+	MaxH   float64 `json:"maxH,omitempty"`
 	Radius float64 `json:"radius"`
+	// Anchor says which edge of the PET `dy` is measured from, because the pet's size is the
+	// user's (`petScale`): "top" (or empty) means the pet's top-left corner, "bottom" means
+	// `dy` grows DOWNWARD from the pet's feet.
+	//
+	// It exists because a block UNDER the pet cannot be expressed as an offset from the pet's
+	// top: `dy: 204` was right for the default 200-tall pet and landed on the pet's legs at
+	// 1.5x, where the pet is 300 tall. Blocks above the pet do not need it - their offsets are
+	// from the top edge, which does not move.
+	Anchor string `json:"anchor,omitempty"`
 	// Ellipse makes the cropped region a true ellipse instead of a rounded
 	// rectangle, so the region matches the border-radius: 50% the page draws.
 	//
@@ -179,6 +211,12 @@ type Rect struct {
 
 // Manifest file name, used by both the loader and the installer.
 const ManifestName = "manifest.json"
+
+// The two values `Rect.Anchor` accepts. `""` behaves like top.
+const (
+	RectAnchorTop    = "top"
+	RectAnchorBottom = "bottom"
+)
 
 // Validation limits. They are constants rather than inline literals because the
 // packaging script and the docs quote the same numbers.
@@ -527,8 +565,16 @@ func (m Manifest) validatePanelSlot() error {
 			return fmt.Errorf("%s 字段 panelSlot=chat 要求 panel 为 true", ManifestName)
 		}
 		return nil
+	case PanelSlotTodos, PanelSlotPomodoro:
+		// The todo slot is filled by the claimant's own surface, so a manifest that claims it
+		// without declaring one would claim a slot it can never fill - the menu would open
+		// nothing at all, and nothing would say why.
+		if len(m.Surface) == 0 {
+			return fmt.Errorf("%s 字段 panelSlot=todos 要求声明 surface 矩形", ManifestName)
+		}
+		return nil
 	default:
-		return fmt.Errorf("%s 字段 panelSlot 只接受 \"chat\"：%q", ManifestName, m.PanelSlot)
+		return fmt.Errorf("%s 字段 panelSlot 只接受 %q、%q 或 %q：%q", ManifestName, PanelSlotChat, PanelSlotTodos, PanelSlotPomodoro, m.PanelSlot)
 	}
 }
 
@@ -737,6 +783,14 @@ func (m Manifest) validateSurface() error {
 		}
 		if r.DX < -maxRectOffset || r.DX > maxRectOffset || r.DY < -maxRectOffset || r.DY > maxRectOffset {
 			return fmt.Errorf("%s 字段 surface 第 %d 块的坐标偏移上限为 %d：dx=%g dy=%g", ManifestName, i, maxRectOffset, r.DX, r.DY)
+		}
+		// A typo here would silently anchor the block to the wrong edge of the pet, and the
+		// symptom (a composer sitting on the pet's legs) looks like a bug in the host.
+		switch r.Anchor {
+		case "", RectAnchorTop, RectAnchorBottom:
+		default:
+			return fmt.Errorf("%s 字段 surface 第 %d 块的 anchor 只能是 %q 或 %q：%q",
+				ManifestName, i, RectAnchorTop, RectAnchorBottom, r.Anchor)
 		}
 	}
 	return nil
