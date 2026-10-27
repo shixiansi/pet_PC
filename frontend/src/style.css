@@ -129,6 +129,76 @@ body {
   cursor: default;
 }
 
+/* --- conversation button -------------------------------------------------- */
+
+/* The hover-only entry to the conversation plugin - what the double click on the
+ * pet used to be.
+ *
+ * It sits INSIDE #pet's box on purpose. While the panel and the bubble are away
+ * the window is cropped to exactly the pet's rectangle (AGENTS.md 3.2), so a
+ * button hanging off the pet's edge would be sliced by the native region; growing
+ * the region to fit it would instead expose a strip beside the pet that the page
+ * never paints and that swallows clicks meant for the desktop. Inside the box this
+ * is a pure page-side control and Go's geometry is untouched.
+ *
+ * Hidden has to mean `visibility: hidden` as well as transparent: a transparent
+ * button still takes pointer events, so the pet's upper-left corner would open the
+ * conversation instead of the todo panel.
+ */
+.pet-chat {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  background: rgba(28, 30, 36, 0.92);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  /* Opacity only. A scale or translate would push pixels past the box the window
+   * is cropped to, so the animation would be cut mid-transition. */
+  transition: opacity 120ms ease;
+}
+
+#pet:hover .pet-chat,
+.pet-chat:focus-visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.pet-chat:hover {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(44, 48, 58, 0.96);
+}
+
+/* With the panel open the pet is its anchor and the panel already carries the
+ * 对话 tab - a second entry there would open a surface over the window the user
+ * is already looking at. */
+#pet.anchored .pet-chat {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.pet-chat-icon {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  /* The glyph is decoration: a click has to land on the button, not on the path. */
+  pointer-events: none;
+}
+
 /* --- badge --------------------------------------------------------------- */
 
 .badge {
@@ -156,42 +226,6 @@ body {
 
 .badge.soon {
   background: var(--warn);
-}
-
-/* --- pomodoro badge ------------------------------------------------------ */
-
-/* The timer badge sits above the todo-count badge in the pet's top-right
- * corner, so both are readable at once (docs 4.4: the countdown says how long
- * is left, the count says how much is waiting).
- *
- * Both badges are INSIDE the pet box. That is a hard requirement, not a layout
- * preference: the Go side crops the window to the pet's rectangle exactly, so
- * anything drawn outside it is clipped off - or worse, if the region were grown
- * to fit, leaves glass-composited pixels that read as a pale blue band. */
-.badge.timer {
-  top: 4px;
-  right: 4px;
-  /* Keep the two badges from overlapping: the timer is the taller string. */
-  font-variant-numeric: tabular-nums;
-}
-
-/* When the timer badge is showing, the count badge drops below it and shrinks
- * to a dot-sized counter. */
-.badge.timer:not(.hidden) ~ .badge {
-  top: 28px;
-}
-
-.badge.timer.focus {
-  background: var(--accent);
-}
-
-.badge.timer.break {
-  background: var(--ok);
-}
-
-.badge.timer.halted {
-  background: #6b7280;
-  animation: none;
 }
 
 @keyframes pulse {
@@ -448,42 +482,40 @@ button:disabled {
  * on a 380px panel it eats 15px of the content column. Every surface that
  * scrolls therefore gets this treatment, through one rule rather than one per
  * element - the settings tab and the todo list already had private copies, so the
- * records list and the chat log were left on the default and looked like a
- * different application.
+ * chat log was left on the default and looked like a different application.
  *
  * The bar is deliberately narrow (8px), trackless, and translucent white: it
  * reads as a hint about position rather than as a control, which is what a
  * scrollbar on a 380px panel should be. None of this paints outside its element's
- * box, so the window-region rules are untouched. */
+ * box, so the window-region rules are untouched.
+ *
+ * Two surfaces were dropped from this rule when their contents left the panel: the
+ * records archive (the pomodoro plugin keeps its own sessions now) and, before it,
+ * the settings page. A selector left behind would be a rule nothing can match. */
 .todo-list,
-.record-list,
 .chat-log {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
 .todo-list::-webkit-scrollbar,
-.record-list::-webkit-scrollbar,
 .chat-log::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 .todo-list::-webkit-scrollbar-track,
-.record-list::-webkit-scrollbar-track,
 .chat-log::-webkit-scrollbar-track {
   background: transparent;
 }
 
 .todo-list::-webkit-scrollbar-thumb,
-.record-list::-webkit-scrollbar-thumb,
 .chat-log::-webkit-scrollbar-thumb {
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.16);
 }
 
 .todo-list::-webkit-scrollbar-thumb:hover,
-.record-list::-webkit-scrollbar-thumb:hover,
 .chat-log::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.30);
 }
@@ -492,7 +524,6 @@ button:disabled {
  * opaque square there, which is the one pixel of the native widget that survives
  * `height: 8px` on the horizontal bar. */
 .todo-list::-webkit-scrollbar-corner,
-.record-list::-webkit-scrollbar-corner,
 .chat-log::-webkit-scrollbar-corner {
   background: transparent;
 }
@@ -704,26 +735,6 @@ button:disabled {
   flex: 0 0 auto;
 }
 
-.bubble-todo {
-  margin: 0;
-  font-size: 12px;
-  color: var(--accent);
-  word-break: break-word;
-  flex: 0 0 auto;
-}
-
-/* The plan line, on the summary prompt only: what the user set out to do, above
- * the box where they type what actually happened. Same family as .bubble-todo -
- * it is the second hint line of the card - but dimmer, because it is background
- * for the answer rather than a label on it. */
-.bubble-plan {
-  margin: 0;
-  font-size: 12px;
-  color: var(--text-dim);
-  word-break: break-word;
-  flex: 0 0 auto;
-}
-
 .bubble-list {
   margin: 0;
   padding: 0;
@@ -766,42 +777,11 @@ button:disabled {
   color: var(--warn);
 }
 
-/* Picker rows are clickable and carry a radio button. */
-.bubble-choice {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  width: 100%;
-  cursor: pointer;
-}
-
-.bubble-choice input[type="radio"] {
-  margin: 0;
-  flex: 0 0 auto;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-.bubble-item-main {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
 .bubble-more {
   margin: 0;
   font-size: 11px;
   color: var(--text-dim);
   flex: 0 0 auto;
-}
-
-.bubble-input {
-  width: 100%;
-  min-height: 52px;
-  flex: 1 1 auto;
-  resize: none;
 }
 
 .bubble-actions {
@@ -811,322 +791,105 @@ button:disabled {
   flex: 0 0 auto;
 }
 
-/* --- pomodoro strip ------------------------------------------------------ */
+/* --- pet menu ------------------------------------------------------------ */
 
-.pomo-strip {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px 9px;
-  border: 1px solid var(--panel-border);
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.045);
-  flex: 0 0 auto;
-}
-
-.pomo-line {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.pomo-phase {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.pomo-countdown {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--accent);
-  /* Tabular figures stop the countdown jittering as digits change width. */
-  font-variant-numeric: tabular-nums;
-}
-
-.pomo-todo {
-  margin: 0;
-  font-size: 11px;
-  color: var(--text-dim);
-  word-break: break-word;
-}
-
-.pomo-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-
-.pomo-actions button {
-  padding: 4px 9px;
-  font-size: 12px;
-}
-
-/* --- records ------------------------------------------------------------- */
-
-/* The archive, folded by day.
+/* The grid inside the bubble card (a right-click on the pet opens it).
  *
- * The list is a column of day cards rather than a column of sessions: a year of
- * daily sessions as flat rows put the newest record - the only one anyone reads -
- * at the top of a screenful of history, and reaching anything else meant scrolling
- * through all of it. Each card is a header that summarises its day even when
- * closed, so the folded state is still informative. */
-.record-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
+ * It is a CHILD of #bubble, so the card's own rules decide the frame: the same
+ * background, the same radius, the same "nothing may overflow" contract. What
+ * this block owns is only the arrangement of nine cells.
+ *
+ * The rows are `1fr`, not a pixel height. Go fixes the card's height
+ * (bubbleHeightMenu) and the window is cropped to exactly that, so the grid has
+ * to FILL whatever it is given rather than declare a size of its own - a grid
+ * that came up short would leave a band of the card empty, and one that ran over
+ * would be clipped by the region and look torn. */
+.bubble-menu {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 1fr;
   gap: 6px;
-  overflow-y: auto;
+  flex: 1 1 auto;
+  /* A grid item's default minimum is its content, which would let a long label
+   * push a row taller than the card. The rows are the card's to decide. */
   min-height: 0;
-  flex: 1 1 auto;
 }
 
-.record-day {
+.menu-cell {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  flex: 0 0 auto;
-}
-
-/* The whole header is the control, not a small caret beside it: a 380px panel
- * with a 12px hit target is a panel where folding never happens by accident. */
-.record-day-head {
-  display: flex;
   align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 5px 7px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text);
-  font-size: 12px;
-  text-align: left;
-}
-
-.record-day-head:hover {
-  background: rgba(255, 255, 255, 0.09);
-}
-
-/* The caret. It changes GLYPH rather than rotating.
- *
- * A transform here would be harmless - this element is inside the panel's border
- * box and the panel clips - but the project's one unbreakable rule is that
- * nothing outside the panel may carry a transform, and a rotation is exactly the
- * kind of exception that stops being audited. Two characters cost nothing and
- * keep the rule total. */
-.record-caret {
-  flex: 0 0 auto;
-  width: 9px;
-  color: var(--text-dim);
-  font-size: 9px;
-  line-height: 1;
-}
-
-.record-day-name {
-  flex: 1 1 auto;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 2px;
   min-width: 0;
-  font-weight: 600;
+  min-height: 0;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid transparent;
+  border-radius: 9px;
+  cursor: default;
+}
+
+/* Hover and keyboard focus share one look: a launcher where the pointer doesn't
+ * tell you which cell you are on is a guessing game. */
+.menu-cell:hover,
+.menu-cell:focus-visible {
+  background: rgba(76, 141, 255, 0.2);
+  border-color: rgba(76, 141, 255, 0.5);
+  outline: none;
+}
+
+/* 退出 is red BEFORE the pointer arrives, not only while hovering it: the cell
+ * inherits the app's own `button.danger` tint, so "this one ends the program" is
+ * visible while the user is still reading the grid. These two rules exist because
+ * `.menu-cell:hover` above would otherwise paint a blue border on a red cell - the
+ * global `button.danger:hover` wins on background, and this file's hover rule wins
+ * on the border. */
+.menu-cell.danger:hover,
+.menu-cell.danger:focus-visible {
+  background: rgba(224, 85, 78, 0.2);
+  border-color: rgba(224, 85, 78, 0.5);
+  outline: none;
+}
+
+.menu-ico {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: 0 0 auto;
+}
+
+.menu-label {
+  /* Label text is never allowed to widen its cell: the columns are thirds of a
+   * fixed card, and an ellipsis would lie about what the button does. */
+  max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.record-day-meta {
-  flex: 0 0 auto;
-  color: var(--text-dim);
-  font-size: 11px;
-}
+/* --- transitions ---------------------------------------------------------- */
 
-/* The sessions of one day. Indented and lighter than the header, so the nesting
- * is visible without a second border. */
-.record-day-list {
-  margin: 0;
-  padding: 0 0 0 8px;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.record-item {
-  padding: 7px 8px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.045);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.record-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--text-dim);
-}
-
-.record-when {
-  word-break: break-word;
-}
-
-.record-mins {
-  flex: 0 0 auto;
-  color: var(--accent);
-}
-
-.record-line {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
-}
-
-/* The plan line of a record. Same row as .record-line (so both body lines share
- * one left edge) but dimmer: it is the intention, and the 实际 line below it is
- * what the user came to read. It is allowed to wrap onto a second line rather
- * than overflow the fixed panel width - a plan is prose, not a label. */
-.record-plan {
-  font-size: 12px;
-  color: var(--text-dim);
-  word-break: break-word;
-}
-
-/* The two textareas of the in-place editor, stacked. They are the only body the
- * row can have while editing, so the column layout keeps them inside the fixed
- * 380px panel: side by side they would each be half a sentence wide. */
-.record-inputs {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.record-summary {
-  word-break: break-word;
-  white-space: pre-wrap;
-}
-
-.record-blank {
-  color: var(--text-dim);
-  font-style: italic;
-}
-
-.record-input {
-  width: 100%;
-  min-height: 46px;
-  resize: none;
-}
-
-.record-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  margin-top: 5px;
-}
-
-.record-actions button {
-  padding: 4px 9px;
-  font-size: 12px;
-}
-
-.record-total {
-  margin: 0;
-  padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 11px;
-  color: var(--text-dim);
-  text-align: center;
-  flex: 0 0 auto;
-}
-
-/* --- confirmation dialog -------------------------------------------------- */
-
-/* Drawn inside the panel, unlike window.confirm() which WebView2 renders as a
- * native browser-chrome dialog ("wails.localhost 閺勫墽銇?): white, unfocused by the
- * app's theme, covering the panel, and positioned outside the window region the
- * app is cropped to.
- *
- * Structure is a full-panel scrim plus a centred card, which solves two things
- * at once:
- *
- *  1. SEPARATION. The card sits on a dimmed backdrop, so it does not read as
- *     just another panel row. An earlier version tinted the card almost exactly
- *     like the panel it covered, which made the two blend together.
- *  2. NO MOVEMENT. The scrim is a plain absolutely-positioned box (no transform),
- *     and the card is centred with flexbox rather than `top:50%` +
- *     `translateY(-50%)`. That transform used to be clobbered by the shared
- *     `panel-in` keyframes, which animate `transform: translateY(4px) -> none`,
- *     so the dialog visibly slid/jumped as it appeared. Centring without a
- *     transform removes the conflict entirely rather than papering over it. */
-.confirm {
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  /* Dim the panel content behind the dialog so the card stands out.
-   *
-   * Deliberately fairly dark: the card is only a little lighter than the panel,
-   * so most of the separation comes from the scrim. Measured against the panel
-   * colour, this pairing gives the card ~2.4:1 over the dimmed panel and ~2.0:1
-   * over an undimmed one, which is enough to read as a raised surface at a
-   * glance. An earlier, gentler scrim left the card at 1.3:1 - visually
-   * indistinguishable, which is exactly what made it look like part of the
-   * panel. */
-  background: rgba(6, 7, 9, 0.68);
-  animation: fade-in 0.12s ease-out;
-}
-
-.confirm-card {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-  /* Clearly lighter than both the panel (28,30,36) and the dimmed panel, so the
-   * card reads as a distinct raised surface rather than another panel row. */
-  background: #4a5162;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 11px;
-}
-
-.confirm-text {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--text);
-}
-
-.confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.confirm-actions button {
-  padding: 5px 12px;
-  font-size: 12px;
-}
+/* No confirmation-dialog rules here any more: #confirm, confirmDialog() and the two
+ * destructive timer actions it guarded (跳过 / 放弃当前番茄钟) all retired with the host
+ * timer. The keyframes below stay, because the bubble and the panel still use them. */
 
 /* Opacity-only transitions, for the same reason the bubble uses them: this
  * window is cropped to exactly what the page draws, so anything that MOVES an
  * element briefly exposes the part of its box that has not been drawn yet.
  *
- * The card deliberately does NOT scale in. A scale is motion, and motion here is
- * both against that rule and the very thing that made the dialog look like it
- * was jumping - the previous version inherited `panel-in`, whose
- * `translateY(4px) -> none` fought the `translateY(-50%)` centring. Struggling
- * transform against transform was the bug; the fix is to not animate transform
- * at all. */
+ * Nothing scales in. A scale is motion, and motion here is both against that rule
+ * and the exact bug the retired dialog had: it inherited `panel-in`, whose
+ * `translateY(4px) -> none` fought its own `translateY(-50%)` centring. Struggling
+ * transform against transform was the bug; the fix is to not animate transform at
+ * all. */
 @keyframes fade-in {
   from {
     opacity: 0;

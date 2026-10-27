@@ -5,7 +5,7 @@
  * fake Wails bridge, then drives the app the way a user would and asserts on
  * what it asked the backend to do. This is the substitute for a live GUI run:
  * WebView2 cannot create a controller in this environment (the pre-change binary
- * fails identically), so the click/double-click split, the streaming renderer
+ * fails identically), so the pet's click handling, the streaming renderer
  * and the settings wiring would otherwise be unverified.
  *
  * Run:  node .dev/run-frontend-harness.cjs
@@ -87,19 +87,18 @@ ${markup}
   // down twice).
   const methods = [
     'AddTodo', 'ChoosePetImage', 'ClearDone', 'ClosePluginSurface',
-    'ConfirmPomodoroStart', 'DebugLog', 'DeleteTodo', 'DismissBubble', 'DragTo',
-    'EditPomodoroRecord', 'EndDrag', 'GetLayout', 'GetState', 'HidePet',
+    'DebugLog', 'DeleteTodo', 'DismissBubble', 'DragTo',
+    'EndDrag', 'GetLayout', 'GetState', 'HidePet',
     'HidePetForUser', 'OpenChat', 'OpenChatPluginSurface', 'OpenPetMenu', 'OpenPluginMarket',
-    'OpenPluginSurface', 'OpenTodoPanelFromBubble', 'OpenTodoPanelFromChat',
-    'PausePomodoro', 'PetImageURL', 'PluginMarketCandidates',
-    'PluginMarketPath', 'PluginRequest', 'PluginsInstalled', 'PomodoroRecords',
-    'Quit', 'Ready', 'RemindNow', 'ResetPetImage', 'ResetPomodoro',
-    'ResetToDefaultPosition', 'ResumePomodoro',
-    'SaveHotkeySettings', 'SavePomodoroSettings', 'SavePomodoroSummary',
-    'SaveReminderSettings', 'SetAutostart', 'SetBubbleHover',
-    'SetPanelOpen', 'SetPomodoroEnabled', 'SetReminderEnabled', 'SetScale',
-    'SetSnapToEdge', 'ShowPet', 'ShowPetForUser', 'ShowPomodoroPicker', 'SkipPhase',
-    'SnapNow', 'StartDrag', 'StartPomodoro', 'StartPomodoroWithPlan', 'StopPomodoro',
+    'OpenPluginSurface', 'OpenTodoPanelFromBubble', 'OpenTodoPanelFromChat', 'SetPluginSurfaceBlocks',
+    'PetImageURL', 'PluginMarketCandidates',
+    'PluginMarketPath', 'PluginRequest', 'PluginsInstalled',
+    'Quit', 'Ready', 'RemindNow', 'ResetPetImage',
+    'ResetToDefaultPosition',
+    'SaveHotkeySettings', 'SaveReminderSettings', 'SetAutostart', 'SetBubbleHover',
+    'SetPanelOpen', 'SetReminderEnabled', 'SetScale',
+    'SetSnapToEdge', 'ShowPet', 'ShowPetForUser',
+    'SnapNow', 'StartDrag',
     'TogglePanel', 'ToggleTodo', 'UpdateTodo',
     'WindowReady',
   ];
@@ -258,9 +257,10 @@ const checksJs = `
   const baseState = (over = {}) => ({
     config: {
       petScale: 1, snapToEdge: true, edgeMargin: 8,
-      pomodoroOnStartup: false, autoStartNextPhase: true, remindDuringBreak: true,
-      pomodoroSound: true, focusMinutes: 25, shortBreakMinutes: 5,
-      longBreakMinutes: 15, longBreakEvery: 4,
+      // No pomodoro* keys: the timer, its phase lengths and its "sound" switch are the
+      // pomodoro plugin's own config now. A fake that still sent them would let a
+      // renderer reading config.focusMinutes pass here while the real GetState has
+      // stopped producing it - the same trap the llm keys below are absent for.
       reminderEnabled: false, reminderOnStartup: false, reminderIntervalMin: 30,
       reminderJitterMaxMin: 3, reminderFrom: '09:00', reminderTo: '22:00',
       reminderMaxItems: 3, reminderAutoHideSec: 12, remindWhenEmpty: false,
@@ -273,13 +273,11 @@ const checksJs = `
     todos: [], stats: { total: 0, open: 0, overdue: 0, dueSoon: 0 },
     petImageUrl: '', hasCustomImage: false, dataDir: 'C:\\\\data', autostart: false,
     now: new Date().toISOString(),
-    pomodoro: { enabled: false, phase: 'idle', runState: 'idle', label: '番茄钟未开启',
-      remainingSec: 0, countdown: '', endsAtMs: 0, running: false, focusing: false,
-      completedCount: 0, longBreakEvery: 4, untilLongBreak: 0, pendingSummary: false },
-    records: [], recordTotals: { count: 0, focusMinutes: 0 },
-    reminder: { enabled: false },
-    // There is no "voice" block in this fixture: speech is a plugin now, and the pet
-    // reports nothing about it. The panel therefore has no voice section to render,
+    // No pomodoro, records, recordTotals or reminder block: State carries none
+    // of them any more (app.go's State comment says why), so a fixture that sent them
+    // would be testing a snapshot the host cannot produce.
+    // There is no "voice" block in this fixture either: speech is a plugin now, and the
+    // pet reports nothing about it. The panel therefore has no voice section to render,
     // which is what the checks below assert.
     // Global hide/show shortcuts. The fake mirrors desktop.HotkeyView, and the
     // default is the honest "off" shape: disabled, with the documented labels and
@@ -420,13 +418,23 @@ const checksJs = `
     // the frontend switches the tab from the event.
     OpenChat: () => { panelOpen = true; currentSurface = null; currentBubble = null; return layout(true); },
     OpenTodoPanelFromChat: () => { panelOpen = true; currentSurface = null; currentBubble = null; return layout(true); },
-    // Dismissing the summary prompt is refused by the real backend while a record
-    // is pending, so the fake refuses too - otherwise the escape hatches would look
-    // like they work here and fail on the real window.
+    // Nothing refuses a dismissal any more: the two bubbles the host used to protect
+    // were the summary and plan prompts, and both were the host timer's questions. A
+    // reminder and the menu card are dismissable, so the fake dismisses whatever is up.
     DismissBubble: () => {
-      if (currentBubble && currentBubble.kind === 'summary') return layout(panelOpen, currentBubble);
       currentBubble = null;
       return layout(panelOpen);
+    },
+    // The pet's own menu: a BUBBLE the page draws, not an OS popup. The fake has to
+    // model it the way it models the reminder - a kind in the slot, with the box Go
+    // crops the window to (bubbleHeightMenu = 226 in app_bubble.go) - because a
+    // fake that answered null would make "the grid is on screen" unobservable.
+    OpenPetMenu: () => {
+      if (currentBubble) return layout(panelOpen, currentBubble);
+      panelOpen = false;
+      currentSurface = null;
+      currentBubble = { kind: 'menu', title: '', x: 160, y: 147, w: 300, h: 226, onRight: true };
+      return layout(false, currentBubble);
     },
 
     // --- plugins -----------------------------------------------------------
@@ -446,7 +454,7 @@ const checksJs = `
       currentSurface = surfaceView();
       return layout(false, null, currentSurface);
     },
-    // The double-click target: the chat slot's own plugin, or the explanation
+    // The conversation button's target: the chat slot's own plugin, or the explanation
     // bubble when there is none. The fake resolves the slot from the same rows and
     // by the same rule the frontend does, so a change to the rule cannot pass here
     // and fail on the host.
@@ -503,24 +511,14 @@ const checksJs = `
 
     DebugLog: () => null,
     SetBubbleHover: () => null,
-    // The real SavePomodoroSummary writes the record, clears the prompt and
-    // RETURNS the whole state. The fake must clear it too: without that the next
-    // summary prompt would arrive while the previous one is still "showing", the
-    // kind would not change, and the card would never be re-rendered - which would
-    // make the stale-handler check below pass for the wrong reason.
-    SavePomodoroSummary: (recordId, summary) => {
-      currentBubble = null;
-      window.__savedSummary = { recordId, summary };
-      return window.__handlers.GetState();
-    },
   };
 
   // --- helpers to drive the UI ----------------------------------------------
   const pet = document.getElementById('pet');
   const petRect = { x: 100, y: 300 };
 
-  // Models what Go does when the double click resolves to the chat plugin's own
-  // floating surface: the surface takes the slot from the panel and the bubble,
+  // Models what Go does when the conversation button resolves to the chat plugin's
+  // own floating surface: the surface takes the slot from the panel and the bubble,
   // and the layout carries the rectangles. The checks cannot set the closure
   // variable themselves, so the fake exposes the transition.
   window.__openSurface = () => {
@@ -530,24 +528,38 @@ const checksJs = `
     return currentSurface;
   };
 
-  // Raises the summary prompt the way Go does: the bubble takes the slot (the
-  // panel and the surface go away) and pet:bubble announces it, then the layout
-  // carries the card and its geometry.
+  // Takes the floating surface back down: the slot goes back to whatever else was
+  // there, and the layout says so. Without this the fake could still hold a surface
+  // the page has already unmounted, and the next GetLayout would contradict the DOM.
+  window.__closeSurface = () => {
+    currentSurface = null;
+    const next = layout(panelOpen, currentBubble, null);
+    window.__emit('pet:layout', next);
+    return next;
+  };
+
+  // Raises a reminder bubble the way Go does: the card takes the slot (the panel and
+  // the surface go away), pet:bubble announces it, and the layout carries the card and
+  // its geometry.
   //
-  // The geometry is the real one for this kind - 300x160 at the panel's slot,
-  // centred on the pet's band - because the frontend positions the card verbatim
-  // from it and a made-up rectangle would let a placement bug pass.
-  window.__showSummaryPrompt = (recordId) => {
+  // The geometry is the real one for this kind - 300x140 at the panel's slot, centred
+  // on the pet's band - because the frontend positions the card verbatim from it and a
+  // made-up rectangle would let a placement bug pass.
+  //
+  // A REMINDER, not the summary prompt this helper used to raise: the prompts were the
+  // host timer's questions, and a reminder is the only bubble the host still raises on
+  // its own (RemindNow). It is what a surface has to be able to open over.
+  window.__showReminder = () => {
     panelOpen = false;
     currentSurface = null;
     currentBubble = {
-      kind: 'summary',
-      title: '这一个番茄做了什么？',
-      todoTitle: '写周报',
-      recordId: recordId || 'rec-1',
-      x: 168, y: 180, w: 300, h: 160, onRight: true,
+      kind: 'reminder',
+      title: '该歇一会儿了',
+      items: [{ id: 't1', title: '写周报', due: '今天 18:00' }],
+      more: 0,
+      x: 168, y: 180, w: 300, h: 140, onRight: true,
     };
-    window.__emit('pet:bubble', { kind: 'summary', shown: true });
+    window.__emit('pet:bubble', { kind: 'reminder', shown: true });
     // The layout is what actually paints the card: the frontend renders the bubble
     // FROM the layout, never from the event alone (that is the bug that once made
     // the prompt impossible to dismiss).
@@ -555,19 +567,18 @@ const checksJs = `
     return layout(false, currentBubble);
   };
 
-  // Takes the prompt down and repaints, so the scenarios that follow start from a
+  // Takes the card down and repaints, so the scenarios that follow start from a
   // known slot.
   window.__clearBubble = () => {
     currentBubble = null;
-    window.__emit('pet:bubble', { kind: 'summary', shown: false });
+    window.__emit('pet:bubble', { kind: 'reminder', shown: false });
     window.__emit('pet:layout', layout(panelOpen, null, currentSurface));
     return layout(panelOpen, null, currentSurface);
   };
 
   function pressPet(times) {
-    // Two presses within the double-click window. The pointer handlers are what
-    // the app actually listens to, so the harness dispatches those rather than
-    // synthetic click events.
+    // A press on the pet. The pointer handlers are what the app actually listens
+    // to, so the harness dispatches those rather than synthetic click events.
     const fire = (type, extra = {}) => pet.dispatchEvent(new PointerEvent(type, {
       bubbles: true, cancelable: true, button: 0, buttons: 1,
       pointerId: 1, pointerType: 'mouse',
@@ -576,6 +587,15 @@ const checksJs = `
     fire('pointerdown');
     fire('pointerup');
     if (times === 2) { fire('pointerdown'); fire('pointerup'); }
+  }
+
+  // The conversation entry: the button painted over the pet on hover. Hover
+  // itself is a stylesheet rule, which a dispatched event cannot turn on - the
+  // gate pins the rule statically - so the scenario clicks the button the way a
+  // user would once it is visible.
+  function clickChatButton() {
+    document.getElementById('pet-chat')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   }
 
   async function run() {
@@ -630,27 +650,33 @@ const checksJs = `
 
     // Reset the click bookkeeping between scenarios.
     //
-    // The wait has to exceed DOUBLE_CLICK_MS comfortably: a single click schedules
-    // its toggle 200ms out, so a scenario that starts too soon has the PREVIOUS
-    // scenario's timer fire in the middle of it and overwrite the layout under
-    // test. That produced a very convincing "the card does not show" failure that
-    // was purely a harness race.
+    // A click on the pet acts at once now, but the binding it calls is still a
+    // promise: a scenario that starts too soon can see the PREVIOUS scenario's
+    // layout land in the middle of it and overwrite the state under test. That
+    // produced a very convincing "the card does not show" failure that was purely
+    // a harness race.
     const settle = () => sleep(500);
 
-    // --- 1. single click toggles the panel, after the double-click window ----
+    // --- 1. a click on the pet toggles the panel, at once -------------------
+    //
+    // It used to act only after the system's double-click interval, so that a
+    // second click could open the conversation without the panel first flashing
+    // open and shut. The conversation is a hover button now, so nothing competes
+    // for the second click and the wait is gone: a click has to take effect on the
+    // spot, not 200ms later.
     panelOpen = false;
     await settle();
     pressPet(1);
-    ok('single click does not act immediately', !panelOpen, 'panel opened synchronously');
-    await sleep(300);
-    ok('single click opens the panel after the delay', panelOpen === true, 'panel state ' + panelOpen);
-    // The single click must not reach for the conversation plugin either: the two
-    // gestures share the pointer stream, and a single click that opened the
-    // surface would make the panel impossible to open at all.
+    ok('single click toggles the panel at once', panelOpen === true, 'panel state ' + panelOpen);
+    await sleep(100);
+    ok('the panel stayed open', panelOpen === true, 'panel state ' + panelOpen);
+    // A click on the pet must not reach for the conversation plugin: the two
+    // gestures take different targets, and a click that opened the surface would
+    // make the panel impossible to open at all.
     ok('single click never asks for the plugin surface',
       calls('OpenChatPluginSurface').length === 0, 'OpenChatPluginSurface was called');
 
-    // --- 2. double click asks the conversation plugin for its surface --------
+    // --- 2. the conversation button asks the plugin for its surface ----------
     //
     // The gesture is ONE binding call, not a host-side overlay: the host does not
     // know how to draw a conversation, so it asks Go to open whatever plugin owns
@@ -661,14 +687,35 @@ const checksJs = `
     panelOpen = false;
     window.__calls.length = 0;
     await settle();
-    pressPet(2);
-    ok('double click asks the conversation plugin for its surface',
+    // Inert until the pet is hovered - asserted in a real engine, because this is
+    // the one rule whose failure would silently change what a click on the pet's
+    // upper-left corner does. Hover itself cannot be simulated from script, so the
+    // :hover rule is pinned by .dev/check-frontend.cjs instead.
+    const chatButtonEl = document.getElementById('pet-chat');
+    ok('the conversation button is inert while the pet is not hovered',
+      getComputedStyle(chatButtonEl).visibility === 'hidden' &&
+        getComputedStyle(chatButtonEl).pointerEvents === 'none',
+      'visibility=' + getComputedStyle(chatButtonEl).visibility +
+        ' pointer-events=' + getComputedStyle(chatButtonEl).pointerEvents);
+    // Inside the pet's box, measured rather than assumed: the window region is cut
+    // to that box while the panel and the bubble are away, so a button even one
+    // pixel outside it would be clipped by the OS - or worse, a wider region would
+    // be a strip of window the page never paints.
+    const petBox = pet.getBoundingClientRect();
+    const chatBox = chatButtonEl.getBoundingClientRect();
+    ok('the conversation button sits inside the pet box the region is cut to',
+      chatBox.left >= petBox.left && chatBox.top >= petBox.top &&
+        chatBox.right <= petBox.right && chatBox.bottom <= petBox.bottom,
+      'pet ' + [petBox.left, petBox.top, petBox.right, petBox.bottom].join(',') +
+        ' button ' + [chatBox.left, chatBox.top, chatBox.right, chatBox.bottom].join(','));
+    clickChatButton();
+    ok('the conversation button asks the plugin for its surface',
       calls('OpenChatPluginSurface').length === 1,
       'OpenChatPluginSurface calls: ' + calls('OpenChatPluginSurface').length);
-    ok('double click does not open the panel tab', calls('OpenChat').length === 0, 'OpenChat calls: ' + calls('OpenChat').length);
-    ok('double click does not toggle the panel', calls('TogglePanel').length === 0, 'TogglePanel calls: ' + calls('TogglePanel').length);
+    ok('the button does not open the panel tab', calls('OpenChat').length === 0, 'OpenChat calls: ' + calls('OpenChat').length);
+    ok('the button does not toggle the panel', calls('TogglePanel').length === 0, 'TogglePanel calls: ' + calls('TogglePanel').length);
     await sleep(300);
-    ok('double click does not toggle the panel afterwards', calls('TogglePanel').length === 0, 'TogglePanel calls: ' + calls('TogglePanel').length);
+    ok('the button does not toggle the panel afterwards', calls('TogglePanel').length === 0, 'TogglePanel calls: ' + calls('TogglePanel').length);
 
     // --- 2b. every declared rectangle gets a frame at its exact pixels -------
     //
@@ -718,94 +765,48 @@ const checksJs = `
       }),
       surfaceFrames.map((f, i) => SURFACE_RECTS[i].ellipse + ':' + f.style.borderTopLeftRadius).join(' | '));
 
-    // --- 2c. the surface must NOT eat the pomodoro summary prompt ------------
+    // --- 2c. nothing refuses the surface any more ----------------------------
     //
-    // The surface and the speech bubble share one slot and OpenPluginSurface TAKES
-    // it, so a double click on the pet used to delete the summary prompt - leaving
-    // the timer parked behind a question that was no longer on screen. The refused
-    // gesture is turned into "go answer it": the caret lands in the box.
+    // The surface and the speech bubble share one slot and OpenPluginSurface TAKES it,
+    // so a bubble that was waiting for an answer used to be destroyed by the
+    // conversation gesture - which is why that gesture was refused and the caret went
+    // into the question instead ("go answer it").
     //
-    // The refusal is the BACKEND's (OpenChatPluginSurface never reaches the plugin
-    // while a question waits), but the frontend has to check too, or the refusal
-    // arrives as an error toast that cannot be seen - the toast lives inside the
-    // panel, which is necessarily closed while the bubble is up.
+    // There is no host question left: the summary and plan prompts were the host
+    // timer's, and they are the pomodoro plugin's own surface now
+    // (openspec/changes/todo-pomodoro-as-plugins). So the rule INVERTED, and this
+    // scenario pins the inversion: the card carries no box to answer into, and the
+    // conversation button opens the plugin's surface OVER a bubble instead of
+    // protecting it.
     await settle();
     window.__calls.length = 0;
     const bubbleEl = document.getElementById('bubble');
-    const bubbleInput = document.getElementById('bubble-input');
-    window.__showSummaryPrompt('rec-42');
-    await waitFor('the summary prompt', () => !bubbleEl.classList.contains('hidden'));
-    ok('the summary prompt is up',
-      !bubbleEl.classList.contains('hidden') && !bubbleInput.classList.contains('hidden'),
-      'bubble hidden=' + bubbleEl.classList.contains('hidden') + ' input hidden=' + bubbleInput.classList.contains('hidden'));
-    ok('the prompt advertises Enter in its placeholder',
-      bubbleInput.placeholder === '写点什么…（Enter 保存）',
-      'placeholder: ' + bubbleInput.placeholder);
+    ok('the bubble card has no answer box any more',
+      document.getElementById('bubble-input') === null,
+      'a textarea for a question the host no longer asks is still in the markup');
 
-    // The double click that would open the conversation instead answers the prompt.
+    window.__showReminder();
+    await waitFor('the reminder bubble', () => !bubbleEl.classList.contains('hidden'));
+    ok('a reminder bubble is up',
+      !bubbleEl.classList.contains('hidden'),
+      'the card did not paint: hidden=' + bubbleEl.classList.contains('hidden'));
+
     document.activeElement?.blur?.();
-    pressPet(2);
-    await sleep(120);
-    ok('a double click does NOT ask for the plugin surface over the prompt',
-      calls('OpenChatPluginSurface').length === 0,
+    window.__calls.length = 0;
+    clickChatButton();
+    await waitFor('OpenChatPluginSurface over the bubble',
+      () => calls('OpenChatPluginSurface').length === 1);
+    ok('the conversation button asks for the surface even while a bubble is up',
+      calls('OpenChatPluginSurface').length === 1,
       'OpenChatPluginSurface calls: ' + calls('OpenChatPluginSurface').length);
-    ok('the surface stayed closed', surfaceMount.classList.contains('hidden'), 'the surface opened anyway');
-    ok('the refused gesture sent the caret to the summary box',
-      document.activeElement === bubbleInput, 'active element: ' + (document.activeElement?.id || document.activeElement?.tagName));
-    ok('the prompt survived the gesture',
-      !bubbleEl.classList.contains('hidden'), 'the prompt was eaten by the double click');
-
-    // Enter confirms it, without the mouse. The backend is told the record id the
-    // prompt carries, not a stale one from a previous session.
-    window.__calls.length = 0;
-    bubbleInput.value = '写完了数据部分';
-    bubbleInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    await waitFor('SavePomodoroSummary from Enter', () => calls('SavePomodoroSummary').length === 1);
-    ok('Enter saved the summary against the record the prompt carried',
-      last('SavePomodoroSummary')?.args[0] === 'rec-42' && last('SavePomodoroSummary')?.args[1] === '写完了数据部分',
-      'args: ' + JSON.stringify(last('SavePomodoroSummary')?.args));
-
-    // Shift+Enter must still insert a newline: a summary is prose, and Enter is
-    // now claimed.
-    await sleep(60);
-    window.__showSummaryPrompt('rec-43');
-    await waitFor('the second prompt', () => !bubbleEl.classList.contains('hidden'));
-    // Enter must not have leaked the previous prompt's handler: the fake replaces
-    // the card rather than rebuilding it, so a stale handler saving rec-42 would
-    // show up here as a call with the wrong id.
-    bubbleInput.value = '第二轮';
-    window.__calls.length = 0;
-    const shiftEnter = new KeyboardEvent('keydown', {
-      key: 'Enter', shiftKey: true, bubbles: true, cancelable: true,
-    });
-    bubbleInput.dispatchEvent(shiftEnter);
-    await sleep(60);
-    ok('Shift+Enter does not save the summary',
-      calls('SavePomodoroSummary').length === 0,
-      'SavePomodoroSummary calls: ' + calls('SavePomodoroSummary').length);
-    ok('Shift+Enter is left to the textarea',
-      !shiftEnter.defaultPrevented, 'the keydown was cancelled, so no newline can appear');
-
-    // An IME composition commit must not save either: typing Chinese, that Enter
-    // picks a candidate, and saving on it would store a half-finished summary.
-    window.__calls.length = 0;
-    bubbleInput.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Enter', isComposing: true, bubbles: true, cancelable: true,
-    }));
-    await sleep(60);
-    ok('an IME Enter does not save the summary',
-      calls('SavePomodoroSummary').length === 0,
-      'SavePomodoroSummary calls: ' + calls('SavePomodoroSummary').length);
-
-    // And the prompt that replaced it answers its OWN record.
-    window.__calls.length = 0;
-    bubbleInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    await waitFor('the second save', () => calls('SavePomodoroSummary').length === 1);
-    ok('the second prompt saved its own record, not the first one',
-      last('SavePomodoroSummary')?.args[0] === 'rec-43' && last('SavePomodoroSummary')?.args[1] === '第二轮',
-      'args: ' + JSON.stringify(last('SavePomodoroSummary')?.args));
+    ok('the surface took the slot from the bubble',
+      !surfaceMount.classList.contains('hidden') && bubbleEl.classList.contains('hidden'),
+      'surface hidden=' + surfaceMount.classList.contains('hidden') +
+      ' bubble hidden=' + bubbleEl.classList.contains('hidden'));
 
     // Put the slot back to a known state for the scenarios that follow.
+    window.__calls.length = 0;
+    window.__closeSurface();
     window.__clearBubble();
     await sleep(60);
 
@@ -817,7 +818,7 @@ const checksJs = `
     // three rows are installed here and only one of them may win.
     //
     // The panel is opened with the pet's own single click and then the tab is
-    // clicked, which is the only way in: the double click opens the plugin's
+    // clicked, which is the only way in: the conversation button opens the plugin's
     // floating surface, not the panel, and the tab strip does not open the panel
     // by itself.
     if (panelEl.classList.contains('hidden')) {
@@ -1159,10 +1160,15 @@ const checksJs = `
       document.getElementById('panel').classList.contains('hidden'),
       'the panel stayed open under the new window');
 
-    // Right-click on the pet asks the HOST for its menu. Nothing is drawn here: a page-drawn
-    // menu would have to live inside the window's region, i.e. become a fourth occupant of
-    // the one-visible-placeholder slot - which is why it is a native popup. What the page
-    // owns is one call, and that is what this checks.
+    // Right-click on the pet opens the pet's OWN menu: a grid of icon cells in the
+    // card the pet speaks in. It used to forward the gesture to the tray thread and
+    // pop the tray icon's native list, which is exactly what it looked like - the
+    // same grey column of system text from both gestures.
+    //
+    // What is checked here is the page's half: the card is drawn from the layout Go
+    // returns, it is a grid of cells inside #bubble, and a second right-click closes
+    // it instead of asking again. The geometry (the crop, the fixed height) is Go's
+    // and is covered by app_pet_menu_test.go.
     window.__calls.length = 0;
     document.getElementById('pet')
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
@@ -1170,6 +1176,27 @@ const checksJs = `
     ok('right-clicking the pet asks the host for its menu',
       calls('OpenPetMenu').length === 1,
       'OpenPetMenu calls: ' + calls('OpenPetMenu').length);
+    const menuGrid = document.getElementById('bubble-menu');
+    ok('the menu is drawn as a grid inside the speech bubble card',
+      !!menuGrid && !menuGrid.classList.contains('hidden') && menuGrid.closest('#bubble') === document.getElementById('bubble'),
+      'grid hidden or outside the card');
+    ok('the menu has one cell per action, each with a word',
+      !!menuGrid && menuGrid.querySelectorAll('[data-menu]').length === 9 &&
+        [...menuGrid.querySelectorAll('[data-menu]')].every((c) => (c.textContent || '').trim().length > 0),
+      'cells: ' + (menuGrid ? menuGrid.querySelectorAll('[data-menu]').length : 'no grid'));
+    window.__calls.length = 0;
+    document.getElementById('pet')
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await waitFor('DismissBubble', () => calls('DismissBubble').length === 1);
+    ok('a second right-click closes the menu instead of asking again',
+      calls('DismissBubble').length === 1 && calls('OpenPetMenu').length === 0,
+      'DismissBubble=' + calls('DismissBubble').length + ' OpenPetMenu=' + calls('OpenPetMenu').length);
+    // The card (not the grid) is what hides: the grid is a child of #bubble and
+    // goes with its parent. Asserting the parent is the honest check - the grid
+    // element keeps its own class until the next kind is rendered.
+    ok('the card went away with it',
+      document.getElementById('bubble').classList.contains('hidden'),
+      'the card is still drawn');
     // Re-open for the sections below, which measure the panel - only if it is closed, so a
     // handler that failed to close it does not become "the panel is closed twice".
     if (document.getElementById('panel').classList.contains('hidden')) {
@@ -1250,6 +1277,11 @@ const checksJs = `
 
     // --- 8. Escape unwinds the innermost thing first -------------------------
     // Inside the panel with no bubble up, that is the panel itself.
+    //
+    // The call log is cleared first: the assertion below is about THIS gesture, and
+    // an earlier scenario's own DismissBubble (the pet menu closing on a second
+    // right-click, for instance) would otherwise read as "Escape dismissed a bubble".
+    window.__calls.length = 0;
     document.querySelector('.tab[data-tab="chat"]').dispatchEvent(new Event('click', { bubbles: true }));
     await sleep(30);
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -1297,9 +1329,17 @@ const checksJs = `
         !document.getElementById('hotkey-enabled') &&
         !document.getElementById('rem-enabled'),
       'settings UI came back into the panel');
-    ok('the 记录 archive is inside the 待办 tab instead',
-      document.getElementById('records-list')?.closest('#tab-todos') !== null,
-      'the archive is not in the todo tab');
+    // The 记录 archive used to be asserted HERE as well, because it had moved into the
+    // 待办 tab rather than leaving. It has left now: the archive was the host timer's,
+    // and the pomodoro plugin keeps its own sessions in its own surface. So the
+    // assertion is the absence, queried against the DOM the app actually built.
+    ok('the host timer left no controls behind in the panel',
+      !document.getElementById('records-list') &&
+        !document.getElementById('records-fold') &&
+        !document.getElementById('pomo-strip') &&
+        !document.getElementById('pomo-toggle') &&
+        !document.getElementById('timer-badge'),
+      'a control the host timer owned is still on the page');
 
     // --- 18. the floating surface: geometry, handshake and routing -----------
     //

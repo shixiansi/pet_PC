@@ -18,10 +18,6 @@ export function ClosePluginSurface() {
   return window['go']['main']['App']['ClosePluginSurface']();
 }
 
-export function ConfirmPomodoroStart(arg1) {
-  return window['go']['main']['App']['ConfirmPomodoroStart'](arg1);
-}
-
 export function DebugLog(arg1) {
   return window['go']['main']['App']['DebugLog'](arg1);
 }
@@ -36,10 +32,6 @@ export function DismissBubble() {
 
 export function DragTo(arg1, arg2) {
   return window['go']['main']['App']['DragTo'](arg1, arg2);
-}
-
-export function EditPomodoroRecord(arg1, arg2, arg3) {
-  return window['go']['main']['App']['EditPomodoroRecord'](arg1, arg2, arg3);
 }
 
 export function EndDrag() {
@@ -90,10 +82,6 @@ export function OpenTodoPanelFromChat() {
   return window['go']['main']['App']['OpenTodoPanelFromChat']();
 }
 
-export function PausePomodoro() {
-  return window['go']['main']['App']['PausePomodoro']();
-}
-
 export function PetImageURL() {
   return window['go']['main']['App']['PetImageURL']();
 }
@@ -114,10 +102,6 @@ export function PluginsInstalled() {
   return window['go']['main']['App']['PluginsInstalled']();
 }
 
-export function PomodoroRecords() {
-  return window['go']['main']['App']['PomodoroRecords']();
-}
-
 export function Quit() {
   return window['go']['main']['App']['Quit']();
 }
@@ -134,28 +118,12 @@ export function ResetPetImage() {
   return window['go']['main']['App']['ResetPetImage']();
 }
 
-export function ResetPomodoro() {
-  return window['go']['main']['App']['ResetPomodoro']();
-}
-
 export function ResetToDefaultPosition() {
   return window['go']['main']['App']['ResetToDefaultPosition']();
 }
 
-export function ResumePomodoro() {
-  return window['go']['main']['App']['ResumePomodoro']();
-}
-
 export function SaveHotkeySettings(arg1) {
   return window['go']['main']['App']['SaveHotkeySettings'](arg1);
-}
-
-export function SavePomodoroSettings(arg1) {
-  return window['go']['main']['App']['SavePomodoroSettings'](arg1);
-}
-
-export function SavePomodoroSummary(arg1, arg2) {
-  return window['go']['main']['App']['SavePomodoroSummary'](arg1, arg2);
 }
 
 export function SaveReminderSettings(arg1) {
@@ -174,8 +142,8 @@ export function SetPanelOpen(arg1) {
   return window['go']['main']['App']['SetPanelOpen'](arg1);
 }
 
-export function SetPomodoroEnabled(arg1) {
-  return window['go']['main']['App']['SetPomodoroEnabled'](arg1);
+export function SetPluginSurfaceBlocks(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetPluginSurfaceBlocks'](arg1, arg2, arg3);
 }
 
 export function SetReminderEnabled(arg1) {
@@ -198,32 +166,12 @@ export function ShowPetForUser() {
   return window['go']['main']['App']['ShowPetForUser']();
 }
 
-export function ShowPomodoroPicker() {
-  return window['go']['main']['App']['ShowPomodoroPicker']();
-}
-
-export function SkipPhase() {
-  return window['go']['main']['App']['SkipPhase']();
-}
-
 export function SnapNow() {
   return window['go']['main']['App']['SnapNow']();
 }
 
 export function StartDrag() {
   return window['go']['main']['App']['StartDrag']();
-}
-
-export function StartPomodoro(arg1) {
-  return window['go']['main']['App']['StartPomodoro'](arg1);
-}
-
-export function StartPomodoroWithPlan(arg1) {
-  return window['go']['main']['App']['StartPomodoroWithPlan'](arg1);
-}
-
-export function StopPomodoro() {
-  return window['go']['main']['App']['StopPomodoro']();
 }
 
 export function TogglePanel() {

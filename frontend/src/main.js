@@ -3,10 +3,19 @@
  *
  * Responsibilities are split with the Go side deliberately:
  *  - Go owns the window: its size, its position, where the pet sits inside it,
- *    and which rectangle of the window is visible at all. It also owns the
- *    pomodoro state machine and the reminder schedule.
+ *    and which rectangle of the window is visible at all. It also owns the two
+ *    bubbles the pet speaks with - the manual reminder and the pet's own menu.
  *  - This file owns the presentation: painting the layout Go reports, the todo
- *    UI, the speech bubble, and the settings panel.
+ *    UI, the speech bubble and the menu's contents.
+ *
+ * There is NO timer here, and no timer state to render. The pomodoro is a PLUGIN
+ * (com.shixiansi.plugin-pomodoro): it runs its own state machine, keeps its own
+ * records, and draws its own phase, countdown and session list in its own floating
+ * surface. The host used to own all of that, and the strip, the folded records
+ * archive, the countdown badge and the two prompts (summary and plan) retired with
+ * it (openspec/changes/todo-pomodoro-as-plugins). A page still painting them would
+ * be drawing a timer the host no longer runs - which is exactly what the static
+ * gate caught as eleven calls to bindings that no longer exist.
  *
  * The single most important rule here is that nothing may draw outside the
  * rectangles Go crops the window to. The pet and the panel/bubble are the only
@@ -29,8 +38,11 @@ const $ = (id) => document.getElementById(id);
 const els = {
   pet: $('pet'),
   petImage: $('pet-image'),
+  // The hover-only conversation button inside the pet's box. Its visibility is
+  // the stylesheet's business (#pet:hover); the page only decides what a click
+  // on it does.
+  chatButton: $('pet-chat'),
   badge: $('badge'),
-  timerBadge: $('timer-badge'),
   panel: $('panel'),
   close: $('close-panel'),
   // Opens the control center - the window that owns settings and plugins now. In the panel
@@ -67,47 +79,33 @@ const els = {
   list: $('todo-list'),
   empty: $('empty-hint'),
 
-  // Pomodoro strip in the todo tab.
-  pomoStrip: $('pomo-strip'),
-  pomoPhase: $('pomo-phase'),
-  pomoCountdown: $('pomo-countdown'),
-  pomoTodo: $('pomo-todo'),
-  pomoToggle: $('pomo-toggle'),
-  pomoStart: $('pomo-start'),
-  pomoPause: $('pomo-pause'),
-  pomoResume: $('pomo-resume'),
-  pomoStop: $('pomo-stop'),
-  pomoSkip: $('pomo-skip'),
-
-  // Finished sessions, folded into the 待办 tab as a collapsed archive.
-  recordsList: $('records-list'),
-  recordsEmpty: $('records-empty'),
-  recordsTotal: $('records-total'),
-
-  // Bubble (reminder / picker / summary / plan).
+  // Bubble (reminder / menu). The picker, the summary prompt and the plan prompt
+  // were the other three kinds, and all three were questions about the host's
+  // timer: they are the pomodoro plugin's own surface now.
   bubble: $('bubble'),
   bubbleArrow: $('bubble-arrow'),
   bubbleTitle: $('bubble-title'),
-  bubbleTodo: $('bubble-todo'),
-  bubblePlan: $('bubble-plan'),
   bubbleList: $('bubble-list'),
   bubbleMore: $('bubble-more'),
-  bubbleInput: $('bubble-input'),
-  bubbleActions: $('bubble-actions'),
+  // The pet's own menu: a grid of icon buttons INSIDE the bubble card, opened by
+  // a right-click on the pet. The cells are declared in index.html (one button
+  // per action, with its icon and its label) and wired by delegation in wire();
+  // what each one DOES lives in PET_MENU_ACTIONS.
+  bubbleMenu: $('bubble-menu'),
+  // No entry for #bubble-actions: it is the row the two buttons below sit in, and the
+  // page never touches the row itself - only the buttons. (The element stays in the
+  // markup because it is what lays them out.)
   bubbleSecondary: $('bubble-secondary'),
   bubblePrimary: $('bubble-primary'),
 
   // No settings entries: the settings tab moved to the control center, and the few
-  // controls that could not move are in the pomodoro strip below (放弃) or the tray menu
-  // (打开控制中心 / 退出 / 立刻提醒 / 打开数据目录). An `els` entry for an element the page no
-  // longer has would be a null that fails at the first click.
+  // controls that could not move are in the tray menu (打开控制中心 / 退出 / 立刻提醒 /
+  // 打开数据目录). An `els` entry for an element the page no longer has would be a null
+  // that fails at the first click. The textarea that used to be here (bubble-input) is
+  // one of those: its only users were the summary and plan prompts.
 
-  confirm: $('confirm'),
-  confirmText: $('confirm-text'),
-  confirmOk: $('confirm-ok'),
-  confirmCancel: $('confirm-cancel'),
-
-  pomoReset: $('pomo-reset'),
+  // No confirm-dialog entries: the self-drawn dialog went with the two destructive
+  // timer actions it used to guard (跳过 / 放弃当前番茄钟), and the markup went with it.
 
   // Speech has NO entries here: the voice plugin owns its switches, and it is
   // configured in the plugin market's own window. See the "speech" section near the
@@ -131,30 +129,8 @@ let state = null;
 let editingId = null;
 /** The bubble currently on screen (a copy of the layout's bubble), or null. */
 let bubble = null;
-/** ID of the record whose summary is being edited in the records tab. */
-let editingRecordId = null;
-/**
- * Day groups the records tab has open, or null before the first render.
- *
- * The archive is grouped by day and every group but the newest starts closed,
- * because "all records in one column" meant the only way to reach the bottom was
- * to scroll past a year of sessions. The set lives here rather than in the DOM so
- * a re-render (every todo toggle returns a whole new state snapshot) cannot
- * throw the user's expand/collapse choices away.
- */
-let openRecordDays = null;
-/**
- * Day groups that have ever been rendered, or null before the first render.
- *
- * This is what makes a day that appears LATER - a session finished while the app
- * was open, or the first record of a new day - start expanded, without also
- * expanding the whole back catalogue on the first render.
- */
-let seenRecordDays = null;
 /** Auto-hide timer for a reminder bubble. */
 let bubbleHideTimer = null;
-/** Todo ids ticked in the picker, and the picker's chosen id. */
-let pickerChoice = '';
 
 /**
  * Active drag, or null.
@@ -168,29 +144,6 @@ let pickerChoice = '';
 let drag = null;
 /** Pointer movement (px) before a press counts as a drag rather than a click. */
 const DRAG_THRESHOLD = 4;
-
-/**
- * Pending single-click action, or null.
- *
- * The pet has to distinguish one click (toggle the panel) from two (open the
- * chat). Without this, a double click unwinds as click-click and the panel
- * visibly opens and closes again before the chat appears. The press is therefore
- * held for the system's double-click interval; see the pointerup handler.
- */
-let pendingClick = null;
-/**
- * Timestamp of the last completed click, for the double-click test.
- *
- * The double click is detected here, from the pointer stream, rather than by
- * listening for the `dblclick` event. The pet's pointerdown handler calls
- * preventDefault (so the webview never starts a text selection or a native drag),
- * and relying on which compatibility mouse events a browser still synthesises
- * after that is a subtlety this code should not depend on. The pointer stream is
- * already the single source of truth for press/move/release.
- */
-let lastClickAt = 0;
-/** How long a single click waits for a possible second one. */
-const DOUBLE_CLICK_MS = 200;
 
 /** The sandboxed-iframe host for plugin interfaces, created in wire(). */
 let pluginHost = null;
@@ -209,7 +162,7 @@ let installedPlugins = null;
 /**
  * True while an on-demand read of the installed list is in flight.
  *
- * The floating surface can be opened by double-clicking the pet WITHOUT the 对话
+ * The floating surface can be opened from the pet's hover button WITHOUT the 对话
  * tab ever having been visited, so the list may not be read yet. That read is
  * kicked off from `applyLayout`, which runs on every state push - so without this
  * flag one un-read list would start a read per push.
@@ -272,52 +225,11 @@ function fail(err) {
 
 const pad = (n) => String(n).padStart(2, '0');
 
-/**
- * Asks the user to confirm something, in the app's own styling.
- *
- * Replaces window.confirm(), which WebView2 renders as a native browser dialog:
- * a white "wails.localhost 显示" box that ignores the pet's theme, covers the
- * panel, and lives outside the window region the app is cropped to. It looked
- * like a stray browser window rather than part of the pet.
- *
- * Resolves true when confirmed and false otherwise, so callers can await it.
- */
-function confirmDialog(message, okLabel = '确定') {
-  return new Promise((resolve) => {
-    els.confirmText.textContent = message;
-    els.confirmOk.textContent = okLabel;
-    els.confirm.classList.remove('hidden');
-
-    const finish = (result) => {
-      els.confirm.classList.add('hidden');
-      els.confirmOk.onclick = null;
-      els.confirmCancel.onclick = null;
-      els.confirm.onkeydown = null;
-      resolve(result);
-    };
-
-    els.confirmOk.onclick = () => finish(true);
-    els.confirmCancel.onclick = () => finish(false);
-    // Escape and Enter work while the dialog is up, which is what a user expects
-    // from a modal.
-    els.confirm.onkeydown = (e) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        finish(false);
-      } else if (e.key === 'Enter') {
-        e.stopPropagation();
-        finish(true);
-      }
-    };
-    // Focus the safe choice, so a stray Enter does not destroy the session.
-    els.confirmCancel.focus();
-  });
-}
-
-/** True while the confirmation dialog is up. */
-function confirmOpen() {
-  return !els.confirm.classList.contains('hidden');
-}
+// No confirmDialog() here any more. It existed for the two operations that could
+// lose work - 跳过 (a focus phase that would not be recorded) and 放弃当前番茄钟 - and
+// both belonged to the host's timer. With the timer gone there is nothing on this
+// page destructive enough to ask about, so the function, its #confirm markup and its
+// CSS went with it: an unreachable dialog is a second UI nobody can check.
 
 /** Formats a Date as the value <input type="datetime-local"> expects. */
 function toLocalInput(date) {
@@ -349,13 +261,6 @@ function dueStatus(todo) {
   if (due.getTime() < now) return 'overdue';
   if (due.getTime() - now <= 86400000) return 'soon';
   return '';
-}
-
-/** Renders an RFC3339 timestamp as "18:00". */
-function formatClock(iso) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 // --- layout ---------------------------------------------------------------
@@ -439,7 +344,7 @@ function applyLayout(layout) {
   if (surface) {
     // The surface needs the plugin's METADATA (its entry file and its grants), and
     // that comes from the installed list - which is read when the 对话 tab is
-    // opened, NOT at startup. Opening the surface by double-clicking the pet can
+    // opened, NOT at startup. Opening the surface from the pet's hover button can
     // therefore arrive before the list has ever been read, and the old code passed
     // an empty view in that case: the iframe got a default entry and no grants, and
     // the plugin rendered as unauthorised (or asked for an asset path that does not
@@ -545,145 +450,43 @@ function applyBubble(next) {
 
 /** Renders a bubble's contents for its kind. */
 function renderBubble(b) {
-  // Reset everything first: the kinds share the card.
+  // Reset everything first: the two kinds share the card.
   els.bubbleList.replaceChildren();
   els.bubbleList.classList.add('hidden');
-  els.bubbleTodo.classList.add('hidden');
-  els.bubblePlan.classList.add('hidden');
   els.bubbleMore.classList.add('hidden');
-  els.bubbleInput.classList.add('hidden');
-  // The Enter handler is installed per kind, so a stale one from the previous
-  // prompt must not survive into the next render.
-  els.bubbleInput.onkeydown = null;
+  els.bubbleMenu.classList.add('hidden');
   els.bubbleSecondary.classList.add('hidden');
   els.bubblePrimary.classList.add('hidden');
   els.bubbleTitle.textContent = b.title || '';
+  // An empty heading is hidden rather than left in the flow: the menu card has no
+  // title, and a zero-height element still costs the flex gap it stands in.
+  els.bubbleTitle.classList.toggle('hidden', !b.title);
 
-  if (b.kind === 'reminder') {
-    renderBubbleList(b.items || [], false);
-    els.bubbleMore.textContent = b.more ? `还有 ${b.more} 项` : '';
-    els.bubbleMore.classList.toggle('hidden', !b.more);
-    els.bubbleSecondary.textContent = '知道了';
-    els.bubbleSecondary.classList.remove('hidden');
-    els.bubbleSecondary.onclick = () => App.DismissBubble().then(applyLayout).catch(fail);
-    els.bubblePrimary.textContent = '看看待办';
-    els.bubblePrimary.classList.remove('hidden');
-    els.bubblePrimary.onclick = () => App.OpenTodoPanelFromBubble().then(applyLayout).catch(fail);
+  if (b.kind === 'menu') {
+    // The grid is the whole card - no heading, no list, no buttons - and Go sized
+    // the box for exactly that (bubbleHeightMenu). Everything else has just been
+    // reset, so this branch only has to reveal the grid.
+    els.bubbleMenu.classList.remove('hidden');
     return;
   }
 
-  if (b.kind === 'pick') {
-    pickerChoice = b.selectedId || '';
-    renderBubbleList(b.items || [], true);
-    els.bubbleMore.textContent = b.more ? `还有 ${b.more} 项` : '';
-    els.bubbleMore.classList.toggle('hidden', !b.more);
-    els.bubbleSecondary.textContent = '取消';
-    els.bubbleSecondary.classList.remove('hidden');
-    els.bubbleSecondary.onclick = () => App.DismissBubble().then(applyLayout).catch(fail);
-    els.bubblePrimary.textContent = '开始专注';
-    els.bubblePrimary.classList.remove('hidden');
-    els.bubblePrimary.onclick = confirmStart;
-    // With nothing open to choose from there is no list to show, so the hint
-    // explains why "start" is nevertheless clickable (the timer would otherwise
-    // be unusable with an empty todo list).
-    if (b.allowUnattached && !(b.items || []).length) {
-      els.bubbleMore.textContent = '没有未完成的待办，可直接开始';
-      els.bubbleMore.classList.remove('hidden');
-    }
-    return;
-  }
-
-  if (b.kind === 'plan') {
-    // The plan question. It is asked before a focus starts, so it has no record
-    // to name - and it must be answerable with nothing at all, which is why both
-    // buttons submit rather than one of them only closing the card.
-    if (b.todoTitle) {
-      els.bubbleTodo.textContent = `待办：${b.todoTitle}`;
-      els.bubbleTodo.classList.remove('hidden');
-    }
-    // Go offers the PREVIOUS session's plan as a starting value: a user who is
-    // still on the same task then only confirms it.
-    els.bubbleInput.value = b.plan || '';
-    els.bubbleInput.classList.remove('hidden');
-    // Written at RUNTIME, not in index.html: the textarea's attribute belongs to
-    // the summary prompt, and this branch has to be able to hand it back (see the
-    // summary branch below). A static attribute could not describe both prompts.
-    els.bubbleInput.placeholder = '这件事是…（可留空，Enter 开始）';
-    els.bubbleSecondary.textContent = '跳过';
-    els.bubbleSecondary.classList.remove('hidden');
-    els.bubbleSecondary.onclick = () => startWithPlan('');
-    els.bubblePrimary.textContent = '开始专注';
-    els.bubblePrimary.classList.remove('hidden');
-    els.bubblePrimary.onclick = () => startWithPlan(els.bubbleInput.value);
-
-    // Enter submits, exactly as it does on the summary prompt and in the chat
-    // box. The reasoning is the same and is spelled out there: Shift+Enter is a
-    // newline, and an IME's Enter commits a candidate rather than answering.
-    els.bubbleInput.onkeydown = (e) => {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-        e.preventDefault();
-        startWithPlan(els.bubbleInput.value);
-      }
-    };
-
-    // Deliberately NOT focused: the question can appear while the user is typing
-    // in another application (same rule as the summary prompt).
-    if (document.hasFocus()) els.bubbleInput.focus();
-    return;
-  }
-
-  // Summary prompt.
-  if (b.todoTitle) {
-    els.bubbleTodo.textContent = `待办：${b.todoTitle}`;
-    els.bubbleTodo.classList.remove('hidden');
-  }
-  // What the user set out to do, shown above the answer. The record's own plan is
-  // used, so the line survives a restart; with no plan there is nothing to say
-  // and the line stays hidden rather than showing an empty 「计划：」.
-  if (b.plan) {
-    els.bubblePlan.textContent = `计划：${b.plan}`;
-    els.bubblePlan.classList.remove('hidden');
-  }
-  els.bubbleInput.value = '';
-  els.bubbleInput.classList.remove('hidden');
-  // The shared textarea carries the plan prompt's wording too, and this branch
-  // runs after it whenever the two prompts follow each other. index.html's
-  // attribute is left alone: it is the summary prompt's own text, so restoring it
-  // here is what keeps the two prompts from sharing the wrong hint.
-  els.bubbleInput.placeholder = '写点什么…（Enter 保存）';
-  els.bubbleSecondary.textContent = '跳过';
+  // Reminder. It is the only other kind left: BubbleView has two (app_bubble.go),
+  // and the three question kinds - picker, summary, plan - were all questions about
+  // the host's timer. The pomodoro plugin asks them in its own surface, so this card
+  // has no textarea, no radio list and no Enter handler to install any more.
+  renderBubbleList(b.items || []);
+  els.bubbleMore.textContent = b.more ? `还有 ${b.more} 项` : '';
+  els.bubbleMore.classList.toggle('hidden', !b.more);
+  els.bubbleSecondary.textContent = '知道了';
   els.bubbleSecondary.classList.remove('hidden');
-  els.bubbleSecondary.onclick = () => saveSummary(b.recordId, '');
-  els.bubblePrimary.textContent = '保存';
+  els.bubbleSecondary.onclick = () => App.DismissBubble().then(applyLayout).catch(fail);
+  els.bubblePrimary.textContent = '看看待办';
   els.bubblePrimary.classList.remove('hidden');
-  els.bubblePrimary.onclick = () => saveSummary(b.recordId, els.bubbleInput.value);
-
-  // Enter confirms the summary, exactly as it sends a chat message in the popup
-  // and the conversation tab. The bubble is not a <form>, so this has to be
-  // spelled out here or Enter would insert a newline and the user would have to
-  // reach for the mouse to release the gate.
-  //
-  // Shift+Enter still inserts a newline: a summary is prose and one line is not
-  // always enough. `isComposing` guards the IME, whose Enter commits the
-  // candidate - without that check, typing Chinese would save a half-finished
-  // summary on the keystroke that was meant to pick a character.
-  els.bubbleInput.onkeydown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-      e.preventDefault();
-      saveSummary(b.recordId, els.bubbleInput.value);
-    }
-  };
-
-  // Do NOT focus the textarea automatically. The prompt appears while the user
-  // is very likely typing in another application, and stealing the keyboard
-  // there would be worse than making them click once
-  // (docs/reminder-pomodoro.md 4.5). It is only focused if this window already
-  // had focus, which means the user was already working in the pet.
-  if (document.hasFocus()) els.bubbleInput.focus();
+  els.bubblePrimary.onclick = () => App.OpenTodoPanelFromBubble().then(applyLayout).catch(fail);
 }
 
-/** Renders a bubble's todo list. `selectable` adds picker radio behaviour. */
-function renderBubbleList(items, selectable) {
+/** Renders the reminder's todo list. */
+function renderBubbleList(items) {
   if (!items.length) return;
   els.bubbleList.replaceChildren();
   els.bubbleList.classList.remove('hidden');
@@ -691,49 +494,15 @@ function renderBubbleList(items, selectable) {
   for (const item of items) {
     const li = document.createElement('li');
     li.className = 'bubble-item';
-
-    if (selectable) {
-      const label = document.createElement('label');
-      label.className = 'bubble-choice';
-      const radio = document.createElement('input');
-      radio.type = 'radio';
-      radio.name = 'pomo-todo';
-      radio.value = item.id;
-      radio.checked = item.id === pickerChoice;
-      radio.addEventListener('change', () => {
-        pickerChoice = item.id;
-      });
-      label.append(radio);
-      li.append(label);
-      const body = document.createElement('div');
-      body.className = 'bubble-item-main';
-      const t = document.createElement('span');
-      t.className = 'bubble-item-title';
-      t.textContent = item.title;
-      body.append(t);
-      if (item.due) {
-        const m = document.createElement('span');
-        m.className = `bubble-item-due ${item.status || ''}`.trim();
-        m.textContent = item.due;
-        body.append(m);
-      }
-      label.append(body);
-      // Clicking anywhere on the row picks it.
-      li.addEventListener('click', (e) => {
-        if (e.target !== radio) radio.checked = true;
-        pickerChoice = item.id;
-      });
-    } else {
-      const t = document.createElement('span');
-      t.className = 'bubble-item-title';
-      t.textContent = item.title;
-      li.append(t);
-      if (item.due) {
-        const m = document.createElement('span');
-        m.className = `bubble-item-due ${item.status || ''}`.trim();
-        m.textContent = item.due;
-        li.append(m);
-      }
+    const t = document.createElement('span');
+    t.className = 'bubble-item-title';
+    t.textContent = item.title;
+    li.append(t);
+    if (item.due) {
+      const m = document.createElement('span');
+      m.className = `bubble-item-due ${item.status || ''}`.trim();
+      m.textContent = item.due;
+      li.append(m);
     }
     els.bubbleList.append(li);
   }
@@ -742,8 +511,11 @@ function renderBubbleList(items, selectable) {
 /**
  * Starts the countdown that fades a reminder bubble.
  *
- * The picker and the summary prompt never auto-hide: they are waiting for a
- * decision, and a question that vanishes on its own is a bug, not a feature.
+ * The guard names the one kind that may auto-hide rather than listing the kinds
+ * that may not: a notification that vanishes on its own is the feature, and a
+ * question that did the same was the bug. The questions are the plugin's now, so
+ * this card only ever holds the notification - the check stays because the menu is
+ * also a kind here, and a menu that timed out would be worse than a stray one.
  */
 function scheduleBubbleHide(b) {
   clearTimeout(bubbleHideTimer);
@@ -773,30 +545,6 @@ function renderBadge() {
         ? `${dueSoon} 项即将到期`
         : `${open} 项待办`;
   }
-  renderTimerBadge();
-}
-
-/**
- * Renders the pomodoro badge, which stacks above the todo badge.
- *
- * Both are shown at once while the timer runs (docs 4.4): the countdown says how
- * long is left, the count says how much is waiting. Hiding either would make the
- * user choose which half of the状态 to see.
- */
-function renderTimerBadge() {
-  const p = state?.pomodoro;
-  if (!p || !p.enabled || p.phase === 'idle') {
-    els.timerBadge.classList.add('hidden');
-    return;
-  }
-  els.timerBadge.textContent = p.countdown;
-  els.timerBadge.classList.remove('hidden');
-  els.timerBadge.classList.toggle('focus', p.phase === 'focus' && p.running);
-  els.timerBadge.classList.toggle('break', p.phase !== 'focus' && p.running);
-  els.timerBadge.classList.toggle('halted', !p.running);
-  els.timerBadge.title = p.running
-    ? `${p.label} · 剩余 ${p.countdown}`
-    : `${p.label}已暂停 · 剩余 ${p.countdown}`;
 }
 
 /**
@@ -901,279 +649,6 @@ function renderTodoItem(todo) {
 
   actions.append(edit, del);
   li.append(check, main, actions);
-  return li;
-}
-
-// --- pomodoro UI ----------------------------------------------------------
-
-/** Renders the pomodoro strip in the todo tab. */
-function renderPomodoro() {
-  const p = state?.pomodoro;
-  if (!p) return;
-
-  els.pomoToggle.textContent = p.enabled ? '关闭番茄钟' : '开启番茄钟';
-
-  const idle = !p.enabled || p.phase === 'idle';
-  els.pomoPhase.textContent = !p.enabled ? '番茄钟未开启' : p.label;
-  els.pomoPhase.classList.toggle('hidden', false);
-  els.pomoCountdown.textContent = idle ? '' : p.countdown;
-
-  if (p.todoTitle) {
-    els.pomoTodo.textContent = `本轮：${p.todoTitle}`;
-    els.pomoTodo.classList.remove('hidden');
-  } else {
-    els.pomoTodo.classList.add('hidden');
-  }
-
-  // Start is offered when the timer is on and nothing is running. Everything
-  // else depends on whether a phase is actually counting down.
-  els.pomoStart.classList.toggle('hidden', !p.enabled || !idle);
-  els.pomoStart.textContent = p.phase === 'focus' ? '选择待办' : '开始专注';
-  els.pomoPause.classList.toggle('hidden', !p.running);
-  els.pomoResume.classList.toggle('hidden', !p.enabled || p.running || idle);
-  els.pomoStop.classList.toggle('hidden', !p.running);
-  els.pomoSkip.classList.toggle('hidden', !p.enabled || idle);
-  // Same rule as 跳过: there has to be a session to abandon. 停止 is the reversible one and
-  // 放弃 is not, which is why the button carries its own confirmation in the click handler.
-  els.pomoReset.classList.toggle('hidden', !p.enabled || idle);
-}
-
-/**
- * Renders the permanent records archive, grouped by day.
- *
- * A flat list of every session ever is unusable once the archive is a few weeks
- * old: the newest records - the only ones anyone reads - share one screen with a
- * year of history, and finding anything means scrolling through all of it. So the
- * list is folded by the day each session ENDED on, newest day first, and only the
- * newest day is open on first render.
- *
- * The day keys are local YYYY-MM-DD rather than the raw timestamp, because
- * "which day was this" is a question about the user's clock - a 23:30 session
- * belongs to that evening, not to the UTC date the JSON happens to store.
- */
-function renderRecords() {
-  if (!state) return;
-  const records = state.records || [];
-  els.recordsList.replaceChildren();
-  els.recordsEmpty.classList.toggle('hidden', records.length > 0);
-
-  // Records arrive newest first (store.PomodoroRecords sorts by endedAt), so the
-  // groups come out in the right order by simply walking the list once.
-  const groups = [];
-  for (const rec of records) {
-    const key = localDayKey(rec.endedAt);
-    const last = groups[groups.length - 1];
-    if (last && last.key === key) last.records.push(rec);
-    else groups.push({ key, records: [rec] });
-  }
-
-  // The first render opens the newest day. After that only days that have never
-  // been seen before open by themselves - a session finishing while the app is
-  // open, or the first record of a new day, lands expanded and visible; a day the
-  // user has already collapsed stays collapsed.
-  if (openRecordDays === null || seenRecordDays === null) {
-    openRecordDays = new Set(groups.length ? [groups[0].key] : []);
-    seenRecordDays = new Set(groups.map((g) => g.key));
-  } else {
-    for (const group of groups) {
-      if (!seenRecordDays.has(group.key)) {
-        seenRecordDays.add(group.key);
-        openRecordDays.add(group.key);
-      }
-    }
-  }
-
-  const today = localDayKey(new Date().toISOString());
-  const yesterday = localDayKey(new Date(Date.now() - 86400000).toISOString());
-  for (const group of groups) {
-    els.recordsList.append(renderRecordDay(group, today, yesterday));
-  }
-
-  const totals = state.recordTotals || { count: 0, focusMinutes: 0 };
-  const hours = (totals.focusMinutes / 60).toFixed(1);
-  els.recordsTotal.textContent = totals.count
-    ? `共 ${totals.count} 条 · 累计专注 ${hours} 小时`
-    : '';
-}
-
-/** The local calendar day of an RFC3339 timestamp, as YYYY-MM-DD. */
-function localDayKey(iso) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-/**
- * One collapsible day: a header that toggles, then that day's sessions.
- *
- * The header carries the whole summary of the day - its date, how many sessions,
- * how long - so a collapsed group still answers "did I work that day?" without
- * being opened. That is the point of the fold: the closed state has to be
- * informative, not just short.
- */
-function renderRecordDay(group, today, yesterday) {
-  const open = openRecordDays.has(group.key);
-  const first = group.records[0];
-  const day = new Date(first.endedAt);
-  const minutes = group.records.reduce((sum, r) => sum + (r.focusMinutes || 0), 0);
-
-  // "今天/昨天" only when they are true: the labels are computed from the local
-  // clock, not from the index in the list, so a gap in the archive cannot
-  // mislabel a day.
-  let label = `${day.getMonth() + 1}月${day.getDate()}日`;
-  if (group.key === today) label = `今天 · ${label}`;
-  else if (group.key === yesterday) label = `昨天 · ${label}`;
-  else if (day.getFullYear() !== new Date().getFullYear()) label = `${day.getFullYear()}年${label}`;
-
-  const li = document.createElement('li');
-  li.className = 'record-day';
-
-  const head = document.createElement('button');
-  head.type = 'button';
-  head.className = `record-day-head${open ? ' open' : ''}`;
-  head.setAttribute('aria-expanded', open ? 'true' : 'false');
-
-  const caret = document.createElement('span');
-  caret.className = 'record-caret';
-  // Two glyphs rather than one rotated by CSS: a transform inside the panel would
-  // be safe, but keeping the "nothing transforms" rule total is worth more than
-  // the smoother animation (see style.css).
-  caret.textContent = open ? '▾' : '▸';
-
-  const name = document.createElement('span');
-  name.className = 'record-day-name';
-  name.textContent = label;
-
-  const meta = document.createElement('span');
-  meta.className = 'record-day-meta';
-  meta.textContent = `${group.records.length} 条 · ${minutes} 分`;
-
-  head.append(caret, name, meta);
-  head.addEventListener('click', () => {
-    if (openRecordDays.has(group.key)) openRecordDays.delete(group.key);
-    else openRecordDays.add(group.key);
-    renderRecords();
-  });
-
-  const list = document.createElement('ul');
-  list.className = 'record-day-list';
-  list.classList.toggle('hidden', !open);
-  for (const rec of group.records) list.append(renderRecordItem(rec));
-
-  li.append(head, list);
-  return li;
-}
-
-function renderRecordItem(rec) {
-  const li = document.createElement('li');
-  li.className = 'record-item';
-
-  const head = document.createElement('div');
-  head.className = 'record-head';
-  const when = document.createElement('span');
-  when.className = 'record-when';
-  // The DATE is on the group header above, so repeating it on every row would be
-  // noise; what is left is the time within the day plus what was worked on.
-  when.textContent = `${formatClock(rec.endedAt)} · ${rec.todoTitle || '未关联待办'}`;
-  const mins = document.createElement('span');
-  mins.className = 'record-mins';
-  mins.textContent = `${rec.focusMinutes}分`;
-  head.append(when, mins);
-
-  const body = document.createElement('div');
-  body.className = 'record-summary';
-
-  if (editingRecordId === rec.id) {
-    // Editing happens in place, which is the only mutation the archive allows.
-    // BOTH fields are editable in one form and saved in one write: a page that
-    // wrote them separately could leave the record half-edited if the second call
-    // failed, and a plan that can be set but never corrected would be worse than
-    // no plan at all.
-    const inputs = document.createElement('div');
-    inputs.className = 'record-inputs';
-
-    const planInput = document.createElement('textarea');
-    planInput.rows = 2;
-    planInput.maxLength = 2000;
-    planInput.value = rec.plan || '';
-    planInput.className = 'record-input';
-    planInput.placeholder = '计划：这一段要做什么';
-    planInput.setAttribute('aria-label', '计划');
-
-    const summaryInput = document.createElement('textarea');
-    summaryInput.rows = 2;
-    summaryInput.maxLength = 2000;
-    summaryInput.value = rec.summary || '';
-    summaryInput.className = 'record-input';
-    summaryInput.placeholder = '实际：最后做了什么';
-    summaryInput.setAttribute('aria-label', '实际');
-
-    inputs.append(planInput, summaryInput);
-
-    const actions = document.createElement('div');
-    actions.className = 'record-actions';
-    const save = document.createElement('button');
-    save.type = 'button';
-    save.className = 'primary';
-    save.textContent = '保存';
-    save.onclick = () => {
-      // One call, both fields: an empty plan is a legitimate value (the user may
-      // have decided the session had no plan after all).
-      App.EditPomodoroRecord(rec.id, planInput.value, summaryInput.value)
-        .then((next) => {
-          editingRecordId = null;
-          applyState(next);
-        })
-        .catch(fail);
-    };
-    const cancel = document.createElement('button');
-    cancel.type = 'button';
-    cancel.textContent = '取消';
-    cancel.onclick = () => {
-      // Cancel only leaves edit mode: the archive is not touched, so the re-render
-      // puts the stored values back.
-      editingRecordId = null;
-      renderRecords();
-    };
-    actions.append(save, cancel);
-    body.append(inputs, actions);
-  } else {
-    // Two fixed lines, plan first. The plan falls back to the todo the session was
-    // associated with: for records written before plans existed (and for sessions
-    // nobody planned) that name IS what the user set out to do, and an empty line
-    // would lose the association the row used to carry.
-    const planText = rec.plan || rec.todoTitle || '未关联待办';
-    const plan = document.createElement('div');
-    plan.className = 'record-line record-plan';
-    plan.textContent = `计划：${planText}`;
-
-    // The 实际 line is the one that can be edited, so the 改 control lives here.
-    const real = document.createElement('div');
-    real.className = 'record-line';
-    const text = document.createElement('span');
-    if (rec.summary) {
-      text.textContent = `实际：${rec.summary}`;
-    } else {
-      text.className = 'record-blank';
-      text.textContent = '实际：（未填写）';
-    }
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.className = 'link-btn';
-    edit.textContent = '改';
-    edit.title = '修改计划与实际';
-    edit.onclick = () => {
-      editingRecordId = rec.id;
-      renderRecords();
-    };
-    real.append(text, edit);
-
-    body.append(plan, real);
-  }
-
-  li.append(head, body);
-  // There is deliberately no delete control anywhere on this page: records are
-  // permanent (docs/reminder-pomodoro.md 6.1).
   return li;
 }
 
@@ -1377,9 +852,9 @@ function chatSlotDiagnosis() {
  * slot the plugin asked to fill.
  *
  * The three clauses mirror `chatSlotPlugin()` in Go exactly, and they have to:
- * the backend resolves the double-click target from the same rule, so a page
- * that mounted a plugin the host refuses (or refused one the host accepts) would
- * show an interface whose every capability call comes back "未获权限".
+ * the backend resolves the conversation button's target from the same rule, so a
+ * page that mounted a plugin the host refuses (or refused one the host accepts)
+ * would show an interface whose every capability call comes back "未获权限".
  *
  *  - `enabled`: a plugin the user switched off must not keep the tab;
  *  - `granted` contains `pet.surface`: the slot draws a sandboxed iframe outside
@@ -1405,37 +880,193 @@ function slotPlugin() {
 const CHAT_SLOT_HINT = '对话插件还没装好：点右上角的 ⚙ 打开控制中心，装上并授权它。';
 
 /**
- * True while a bubble is holding the slot with a question the user must answer.
+ * Asks Go to open the 对话 slot's plugin surface (a click on the hover button).
  *
- * The picker, the summary prompt and the plan prompt are the three. They occupy
- * the same rectangle as a plugin's floating surface, so the surface cannot open
- * beside them - and it must not take the slot from them either, because the
- * summary prompt is the gate on the break and the plan prompt is the gate on the
- * focus: replacing either leaves the timer parked with nothing on screen
- * explaining why. The backend refuses too (OpenPluginSurface); checking here as
- * well keeps a refused gesture from becoming a round trip that ends in an
- * invisible error.
- */
-function bubbleAwaitingAnswer() {
-  return bubble?.kind === 'summary' || bubble?.kind === 'pick' || bubble?.kind === 'plan';
-}
-
-/**
- * Asks Go to open the 对话 slot's plugin surface (the double-click gesture).
+ * A click on the pet toggles the panel; the conversation is the BUTTON that
+ * appears over the pet while the pointer is on it. The host used to have its own
+ * conversation overlay, and a double click opened it; the overlay is gone, so the
+ * gesture now asks the plugin for its own floating surface - the plugin decides
+ * what (if anything) to show, and with no slot plugin installed Go answers with a
+ * bubble that says so.
  *
- * A single-click on the pet toggles the panel; a double-click used to open the
- * conversation overlay. The overlay is gone, so the gesture now asks the plugin
- * for its own floating surface - the plugin decides what (if anything) to show,
- * and with no slot plugin installed Go answers with a bubble that says so.
+ * There used to be a "a question owns the slot, go answer it instead" branch here.
+ * It is gone with the questions: the summary and plan prompts were the host
+ * timer's, so no bubble on this page is waiting for an answer any more, and the
+ * backend no longer refuses the surface for holding the slot (OpenPluginSurface).
  */
 function openChatPluginSurface() {
-  if (bubbleAwaitingAnswer()) {
-    focusAnswer();
-    return;
-  }
   App.OpenChatPluginSurface()
     .then(applyLayout)
     .catch(fail);
+}
+
+// --- the pet's own menu ----------------------------------------------------
+
+/**
+ * True while the menu card is the bubble on screen.
+ *
+ * The menu is a bubble KIND (BubbleMenu in app_pet_menu.go), not an overlay of its
+ * own: it shares the slot beside the pet and the card the pet speaks in, so "is
+ * the menu up?" is a question about the bubble this page already tracks. That is
+ * also why nothing here has to hide it: opening the panel, opening a plugin's
+ * surface, hiding the pet, dragging it, Escape and a phase transition all fold a
+ * bubble away, and the menu goes with them.
+ */
+function petMenuOpen() {
+  return bubble?.kind === 'menu';
+}
+
+/** Closes the menu card; Go re-crops the window to the pet alone. */
+function closePetMenu() {
+  return App.DismissBubble().then(applyLayout);
+}
+
+/**
+ * Opens the surface of whichever plugin claims a SLOT, or runs `fallback`.
+ *
+ * A slot is a named mount point and the name is all this page knows: `todos` and `pomodoro`
+ * today, and the claimant decides what that looks like (its own declared rectangles). Resolution
+ * mirrors the backend's rule for the chat slot - installed, enabled, holding `pet.surface`,
+ * claiming the name - so a disabled or unauthorised plugin simply does not answer and the
+ * fallback runs.
+ *
+ * `App.OpenPluginSurface` still refuses for reasons of its own (not enabled, no grant, no
+ * declared surface, rectangles entirely outside the window), which is why its rejection is passed
+ * through instead of swallowed: the user needs to see why the surface did not appear.
+ */
+function openSlotPluginSurface(slot, fallback) {
+  return App.PluginsInstalled()
+    .then((rows) => {
+      const owner = (rows || []).find(
+        (row) =>
+          row &&
+          row.enabled &&
+          row.panelSlot === slot &&
+          (row.granted || []).includes('pet.surface'),
+      );
+      if (!owner) return fallback();
+      return App.OpenPluginSurface(owner.id).then(applyLayout);
+    })
+    .catch(fail);
+}
+
+/**
+ * Opens or closes the menu: one gesture, both directions.
+ *
+ * A right-click that only ever opened it would leave two ways to dismiss (pick a
+ * cell, press Escape) and none with the hand already on the mouse - which is what
+ * a menu's own gesture is for.
+ *
+ * There used to be a third outcome here: a bubble waiting for an answer owned the
+ * slot, and the caret went into its textarea instead of the menu taking the slot.
+ * That bubble was the host timer's question, so nothing on this page can be
+ * waiting for an answer now, and the backend's matching refusal (petMenuBlocked)
+ * is gone too.
+ */
+function togglePetMenu() {
+  if (petMenuOpen()) {
+    closePetMenu().catch(fail);
+    return;
+  }
+  App.OpenPetMenu().then(applyLayout).catch(fail);
+}
+
+/**
+ * Launches the control center: the SEPARATE PROGRAM that holds settings and plugin
+ * management.
+ *
+ * 插件 and 设置 are two cells for one program, deliberately. The program is called
+ * the control center because it holds both halves, and it takes no arguments - so
+ * there is no way to open it "on the plugins page". A single cell would have to be
+ * named for one half, and a user looking for the other would conclude the pet has
+ * no way in. The two cells' titles name which half each one is for.
+ */
+function launchControlCenter() {
+  return App.OpenPluginMarket().then((next) => {
+    applyState(next);
+    // A card left beside the pet while a window opens over it is a card in the way
+    // of the thing the user just asked for.
+    return closePetMenu();
+  });
+}
+
+/**
+ * What each cell does, keyed by the cell's `data-menu` in index.html.
+ *
+ * Every entry calls the binding its action already had, so a menu cell and the
+ * tray entry it mirrors stay ONE action rather than two definitions that can
+ * drift. Which cells exist is the markup's business; what they do is this map's.
+ */
+const PET_MENU_ACTIONS = {
+  // 日程: whoever claims the `todos` SLOT, through its own floating surface - the column beside
+  // the pet. The slot name is resolved from the installed list, so the host never has to know
+  // which plugin is "the todo one" (the same idea as the chat slot, see app_chat_slot.go).
+  //
+  // The PANEL is the FALLBACK, not the target: with no claimant the gesture still has to do
+  // something, and an older installation's panel tab is what it used to do. That is also what
+  // keeps this cell alive until the panel is deleted for good
+  // (openspec/changes/todo-pomodoro-as-plugins, stage 3).
+  todos: () =>
+    openSlotPluginSurface('todos', () =>
+      App.SetPanelOpen(true).then((next) => {
+        applyLayout(next);
+        // The panel renders from `state`, and the list may have been edited in the
+        // control center since the last push.
+        return App.GetState().then(applyState);
+      })),
+
+  // 对话: the conversation plugin's floating surface - the same thing the hover
+  // button opens. That call folds the card away itself, or says why it cannot
+  // open (no chat plugin, missing grant, an old package).
+  chat: () => openChatPluginSurface(),
+
+  // 番茄钟: whoever claims the `pomodoro` slot gets the cell, through its own surface - the timer
+  // is something you glance at, and the plugin draws it beside the pet.
+  //
+  // There is no host timer to fall back on any more, so the fallback is not "flip it on/off"
+  // (that binding is gone) but the one place the user can DO something about a missing plugin:
+  // the control center, where the pomodoro plugin is installed, switched on and granted. A cell
+  // that quietly did nothing would look like a broken button, and a toast would be invisible -
+  // the toast lives inside the panel, which is closed while the menu card is up.
+  pomodoro: () => openSlotPluginSurface('pomodoro', () => launchControlCenter()),
+
+  // 提醒: one reminder now. It REPLACES the card with the reminder bubble (Go
+  // re-crops to it), so there is nothing to dismiss here - and when there is
+  // nothing worth reminding, the call fails and the menu stays up to pick from.
+  remind: () => App.RemindNow().then(applyState),
+
+  plugins: () => launchControlCenter(),
+  settings: () => launchControlCenter(),
+
+  // 归位: back to the first-run resting place. It re-places the window, and folds
+  // the card away with the panel and any surface - a card beside a pet that just
+  // moved somewhere else is a card pointing at nothing.
+  snap: () => App.ResetToDefaultPosition().then(applyLayout),
+
+  // 隐藏: the same HidePet the shortcut and the tray use. It folds everything
+  // beside the pet away, because the pet itself is about to disappear.
+  hide: () => App.HidePetForUser().then(applyState),
+
+  quit: () => App.Quit(),
+};
+
+/**
+ * Runs one cell's action and surfaces a rejection like every other control does.
+ *
+ * A cell with no entry in the map is a wiring mistake, not a refusal, so it says
+ * so in the console rather than looking like a button that does nothing.
+ */
+function runPetMenuAction(name) {
+  const run = PET_MENU_ACTIONS[name];
+  if (!run) {
+    console.warn(`pet menu: no action for ${name}`);
+    return;
+  }
+  try {
+    Promise.resolve(run()).catch(fail);
+  } catch (err) {
+    fail(err);
+  }
 }
 
 function applyState(next) {
@@ -1443,8 +1074,6 @@ function applyState(next) {
   state = next;
   renderPet();
   renderTodos();
-  renderPomodoro();
-  renderRecords();
   renderBadge();
   renderChatSlot();
   renderBackgroundPlugins();
@@ -1660,74 +1289,6 @@ function openChat() {
     });
 }
 
-/**
- * Sends the caret to whatever the on-screen question is waiting for.
- *
- * This is what a double click on the pet does when the plugin surface cannot
- * open: the gesture is turned into "go answer it" rather than silently doing
- * nothing. No toast is used, because the toast lives inside the panel and the
- * panel is necessarily closed while a bubble holds the slot - the caret landing
- * in the box IS the explanation.
- */
-function focusAnswer() {
-  if (bubble?.kind === 'summary' || bubble?.kind === 'plan') {
-    // Only the caret: the user may have typed something already, and selecting
-    // it would make the next keystroke replace their own words.
-    els.bubbleInput.focus();
-    return;
-  }
-  // The picker: its primary button is the answer ("开始专注").
-  els.bubblePrimary.focus();
-}
-
-// --- pomodoro actions -----------------------------------------------------
-
-/** Confirms the picker's choice and starts focusing. */
-function confirmStart() {
-  // The design requires a choice before focusing starts; the picker only offers
-  // "no todo" when there is genuinely nothing to pick from.
-  if (!pickerChoice && !(bubble?.allowUnattached)) {
-    toast('请先选择一条待办');
-    return;
-  }
-  App.ConfirmPomodoroStart(pickerChoice || '')
-    .then((next) => {
-      applyState(next);
-      return App.GetLayout();
-    })
-    .then(applyLayout)
-    .catch(fail);
-}
-
-/** Saves (or skips) a summary. An empty summary is a legitimate value. */
-function saveSummary(recordId, text) {
-  App.SavePomodoroSummary(recordId, text)
-    .then((next) => {
-      applyState(next);
-      return App.GetLayout();
-    })
-    .then(applyLayout)
-    .catch(fail);
-}
-
-/**
- * Answers the plan question and starts the focus session.
- *
- * Both buttons go through here, and the empty string is a real answer rather than
- * a cancellation: "跳过" means "just start, this session has no plan" and Go
- * produces the record all the same. Making the secondary button merely close the
- * bubble would leave the timer parked behind a question nobody can see.
- */
-function startWithPlan(plan) {
-  App.StartPomodoroWithPlan(plan)
-    .then((next) => {
-      applyState(next);
-      return App.GetLayout();
-    })
-    .then(applyLayout)
-    .catch(fail);
-}
-
 // --- wiring ---------------------------------------------------------------
 
 function wire() {
@@ -1777,18 +1338,39 @@ function wire() {
   // the backend until the pointer actually moves past the threshold. That way a
   // plain click never triggers the drag path (which collapses the panel), so
   // click-to-toggle stays unambiguous.
-  // Right-click on the PET opens the host's menu - the same one the tray icon shows, because
-  // it IS the same list and the same command switch (see App.OpenPetMenu). Not on the panel
-  // or a bubble: those are windows with their own contents, and a right-click inside them is
-  // about what is in them, not about the pet.
+  // Right-click on the PET opens the pet's own menu: a 3x3 grid of icon buttons in
+  // the same card the pet speaks in (see app_pet_menu.go and #bubble-menu).
   //
-  // The menu itself is a native Win32 popup, deliberately: a menu drawn in the page would
-  // have to live inside the window's region, which would make it a FOURTH occupant of the
-  // one-visible-at-a-time slot the panel, the bubble and the plugin surface already share
-  // (AGENTS.md §3.2). A native menu is its own window and touches none of that.
+  // It used to pop the TRAY's native menu here, which is exactly what it looked
+  // like: a column of grey system text, no picture, nothing in common with the rest
+  // of the app. A page-drawn menu was avoided for a while because a menu inside the
+  // page has to fit inside the window region - but the region's slot already
+  // carries one card at a time, and a BUBBLE is that card, so the menu is a bubble
+  // kind rather than a fourth placeholder (AGENTS.md §3.2).
+  //
+  // Not on the panel, the bubble or a plugin's surface: those are windows with their
+  // own contents, and a right-click inside them is about what is in them, not about
+  // the pet.
   els.pet.addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    App.OpenPetMenu().catch(fail);
+    togglePetMenu();
+  });
+
+  // One delegated listener for the whole grid, so adding a cell is an edit to
+  // index.html plus an entry in PET_MENU_ACTIONS - not a line of wiring per cell.
+  els.bubbleMenu.addEventListener('click', (e) => {
+    const cell = e.target.closest('[data-menu]');
+    if (!cell) return;
+    runPetMenuAction(cell.dataset.menu);
+  });
+
+  // A page-drawn menu cannot see the click that dismisses it: the window is cropped
+  // to the card, so clicking anywhere else lands on another program. Losing focus is
+  // the observable half of "the user went elsewhere", so that is what closes the
+  // card - otherwise it sits there until it is picked from, which reads as stuck.
+  window.addEventListener('blur', () => {
+    if (!petMenuOpen()) return;
+    closePetMenu().catch(() => {});
   });
 
   els.pet.addEventListener('pointerdown', (e) => {
@@ -1825,14 +1407,12 @@ function wire() {
       // Moving the pet while a bubble is up would leave the bubble pointing at
       // nothing, so the bubble goes away first (docs 9).
       //
-      // EXCEPT the questions the timer is parked behind: the summary prompt holds
-      // the break and the plan prompt holds the focus, so both must be answered
-      // rather than waved away. The backend refuses to dismiss them, and checking
-      // here as well keeps the frontend from redrawing a bubble that is still there
-      // - which would look like a flicker.
-      if (bubble && bubble.kind !== 'summary' && bubble.kind !== 'plan') {
-        App.DismissBubble().catch(() => {});
-      }
+      // Unconditionally, now. The exception was the summary and plan prompts: both
+      // were gates on the host timer, both refused dismissal, and redrawing a bubble
+      // that is still there would have looked like a flicker. They are the pomodoro
+      // plugin's questions, so neither this card nor DismissBubble has a gate to
+      // respect.
+      if (bubble) App.DismissBubble().catch(() => {});
       // First movement past the threshold: hand over to the backend.
       drag.startPromise = App.StartDrag()
         .then((origin) => {
@@ -1864,35 +1444,16 @@ function wire() {
         await startPromise;
         applyLayout(await App.EndDrag());
       } else {
-        // A press that never moved is a click, but it may still turn out to be
-        // the first half of a double click, so the action is held for the
-        // system's double-click interval. Acting immediately made a double click
-        // unwind as click-click: the panel opened and closed and only then did
-        // the chat appear.
-        const now = Date.now();
-        if (now - lastClickAt < DOUBLE_CLICK_MS) {
-          // Second click inside the interval: this is a double click. Cancel the
-          // pending single click and ask the conversation plugin for its floating
-          // surface. Doing it here rather than on a `dblclick` listener means the
-          // two paths cannot disagree.
-          lastClickAt = 0;
-          clearTimeout(pendingClick);
-          pendingClick = null;
-          openChatPluginSurface();
-          return;
-        }
-        lastClickAt = now;
-        clearTimeout(pendingClick);
-        pendingClick = setTimeout(() => {
-          pendingClick = null;
-          lastClickAt = 0;
-          App.TogglePanel()
-            .then(applyLayout)
-            .then(() => {
-              if (editingId === null) els.title.focus();
-            })
-            .catch(fail);
-        }, DOUBLE_CLICK_MS);
+        // A press that never moved is a click, and a click toggles the panel.
+        //
+        // It used to be HELD for the system's double-click interval, because a
+        // second click opened the conversation and letting the first one act at
+        // once made a double click unwind as click-click: the panel opened and
+        // closed and only then did the chat appear. The conversation entry is a
+        // hover button now (see els.chatButton), so nothing competes with this
+        // click any more - and the delay, which every click paid, is gone.
+        applyLayout(await App.TogglePanel());
+        if (editingId === null) els.title.focus();
       }
     } catch (err) {
       fail(err);
@@ -1902,10 +1463,17 @@ function wire() {
   els.pet.addEventListener('pointerup', endDrag);
   els.pet.addEventListener('pointercancel', endDrag);
 
-  // The `dblclick` event is not used: the double click is detected in the
-  // pointer stream (see endDrag), because pointerdown calls preventDefault and
-  // which compatibility mouse events still follow that is not something this
-  // code should have to know.
+  // The conversation button drawn over the pet on hover (style.css).
+  //
+  // It is the entry to the 对话 slot's plugin surface - exactly what the double
+  // click on the pet used to be, now with a target the user can see.
+  //
+  // pointerdown is stopped here rather than handled: the pet's own pointerdown
+  // starts a drag and calls preventDefault, and letting it see this press would
+  // both register a phantom drag origin and swallow the click that follows in
+  // engines that tie compatibility mouse events to the prevented press.
+  els.chatButton.addEventListener('pointerdown', (e) => e.stopPropagation());
+  els.chatButton.addEventListener('click', () => openChatPluginSurface());
 
   // Go emits the layout after asynchronous work (initial placement, snapping).
   EventsOn('pet:layout', applyLayout);
@@ -1945,39 +1513,23 @@ function wire() {
       .catch(() => {});
   });
 
-  // The timer snapshot arrives on its own so the countdown ticks without a full
-  // state refresh every second.
-  EventsOn('pet:pomodoro', (view) => {
-    if (state) state.pomodoro = view;
-    renderTimerBadge();
-    renderPomodoro();
-  });
-
   // Panel interaction.
   els.close.addEventListener('click', closePanel);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      // A confirmation dialog swallows Escape: it is the innermost thing on
-      // screen, and closing the whole panel out from under it would leave the
-      // pending action ambiguous.
-      if (confirmOpen()) return;
-      // Escape unwinds the most transient thing first: an edit, then a bubble,
-      // then the panel. The conversation overlay is not in this list any more:
-      // its interface belongs to the plugin, so the plugin decides what Escape
-      // means inside it.
-      if (editingRecordId !== null) {
-        editingRecordId = null;
-        renderRecords();
-      } else if (bubble) {
-        // The summary prompt and the plan prompt are gates: the break waits on the
-        // first and the focus waits on the second, so Escape does not close either.
-        // They have to be answered. The backend refuses too (DismissBubble), so
-        // this only saves a round trip - but it also stops the panel fall-through
-        // below, which would otherwise close the panel behind a question that is
-        // still waiting.
-        if (bubble.kind !== 'summary' && bubble.kind !== 'plan') {
-          App.DismissBubble().then(applyLayout).catch(fail);
-        }
+      // Escape unwinds the most transient thing first: a bubble, then a form edit,
+      // then the panel. The conversation overlay is not in this list any more: its
+      // interface belongs to the plugin, so the plugin decides what Escape means
+      // inside it. Neither is a record edit - there is no archive on this page to
+      // edit a record in. Nor is a confirmation dialog: there is no destructive
+      // action left on this page to confirm.
+      if (bubble) {
+        // Nothing on this page is a gate any more. The two that were - the summary
+        // prompt and the plan prompt - held the host timer's break and focus, and
+        // they belong to the pomodoro plugin now; its own surface decides what
+        // Escape means there. So a bubble is always dismissable here, and
+        // DismissBubble no longer refuses anything.
+        App.DismissBubble().then(applyLayout).catch(fail);
       } else if (editingId !== null) {
         resetForm();
       } else {
@@ -2010,39 +1562,17 @@ function wire() {
     scheduleBubbleHide(bubble);
   });
 
-  // --- pomodoro strip -----------------------------------------------------
-  els.pomoToggle.addEventListener('click', () => {
-    App.SetPomodoroEnabled(!state?.pomodoro?.enabled).then(applyState).catch(fail);
-  });
-  els.pomoStart.addEventListener('click', () => {
-    App.ShowPomodoroPicker().then(applyLayout).catch(fail);
-  });
-  els.pomoPause.addEventListener('click', () => {
-    App.PausePomodoro().then(applyState).catch(fail);
-  });
-  els.pomoResume.addEventListener('click', () => {
-    App.ResumePomodoro().then(applyState).catch(fail);
-  });
-  els.pomoStop.addEventListener('click', () => {
-    App.StopPomodoro().then(applyState).catch(fail);
-  });
-  els.pomoSkip.addEventListener('click', async () => {
-    // Skipping a focus phase is the one way to leave a session out of the
-    // permanent archive, so it is confirmed.
-    const p = state?.pomodoro;
-    const warn = p?.phase === 'focus' ? '跳过这个专注不会生成记录，确定吗？' : '跳过当前阶段？';
-    if (!(await confirmDialog(warn, '跳过'))) return;
-    App.SkipPhase().then(applyState).catch(fail);
-  });
-  els.pomoReset.addEventListener('click', async () => {
-    if (!(await confirmDialog('彻底放弃当前番茄钟（不会生成记录）？', '放弃'))) return;
-    App.ResetPomodoro().then(applyState).catch(fail);
-  });
-
-  // No settings wiring here any more. Everything this block used to do now belongs to one
-  // of three places: the control center (preferences, the picture), the pomodoro strip
-  // (放弃, wired above with the other strip buttons), or the tray menu (打开控制中心 /
-  // 立刻提醒 / 打开数据目录 / 退出) - each the place that owns the thing being changed.
+  // No pomodoro wiring here any more: the strip's eight buttons drove eight bindings
+  // (SetPomodoroEnabled / ShowPomodoroPicker / Pause / Resume / Stop / SkipPhase /
+  // ResetPomodoro, plus the picker's ConfirmPomodoroStart) and every one of them went
+  // with the host timer. The timer's controls are the pomodoro plugin's, drawn in its
+  // own floating surface and wired by the plugin's own script.
+  //
+  // No settings wiring here either. Everything this block used to do belongs to one of
+  // three places: the control center (preferences, the picture), the pet's own menu
+  // (日程 / 对话 / 番茄钟 / 提醒 / 归位 / 隐藏 / 退出 and the two control-center cells), or
+  // the tray menu (打开控制中心 / 立刻提醒 / 打开数据目录 / 退出) - each the place that owns
+  // the thing being changed.
 }
 
 // --- speech ---------------------------------------------------------------
@@ -2151,45 +1681,22 @@ async function boot() {
 wire();
 boot();
 
-// Keep the badge, the countdown and the reminder status honest between full
-// refreshes.
+// Keep the badge honest between full refreshes.
+//
+// There is no "next reminder at" line here any more: the host has no reminder
+// schedule to display (the todo plugin owns reminders now), so this poll only
+// re-reads what it still renders - the open-todo count. The two things it used to
+// also keep in step (the countdown badge and the strip) went with the host timer,
+// and the 250ms local countdown tick below went with them: it existed to correct
+// drift against Go's own rounding of a phase deadline, and there is no phase here
+// to count down.
 setInterval(() => {
   if (!state) return;
   renderBadge();
-  renderReminderStatus();
-  // Re-read the schedule so the "next reminder in N minutes" hint stays true.
   App.GetState()
     .then((next) => {
       state = next;
-      renderTimerBadge();
-      renderPomodoro();
-      renderReminderStatus();
+      renderBadge();
     })
     .catch(() => {});
 }, 30000);
-
-// The countdown between Go's events.
-//
-// Go already pushes a snapshot every second, but the display must not depend on
-// an event arriving: a dropped or late event would freeze or jump the number.
-// This tick therefore recomputes the remainder from the phase's ABSOLUTE end
-// time (endsAtMs) rather than decrementing a counter.
-//
-// That distinction is the whole fix for the countdown flickering. Decrementing a
-// local copy raced the events: Go rounds its seconds up while the local tick
-// rounded down, so the two fought over the same digit every second. Deriving
-// both from the same instant, and applying Go's own rounding (ceil) here, makes
-// them agree by construction and lets this tick self-correct any drift.
-function tickCountdown() {
-  const p = state?.pomodoro;
-  if (!p || !p.enabled || !p.running || !p.endsAtMs) return;
-  const msLeft = p.endsAtMs - Date.now();
-  // Ceil, exactly like ceilSeconds on the Go side.
-  const secs = msLeft <= 0 ? 0 : Math.ceil(msLeft / 1000);
-  p.remainingSec = secs;
-  p.countdown = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
-  renderTimerBadge();
-  renderPomodoro();
-}
-
-setInterval(tickCountdown, 250);

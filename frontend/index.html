@@ -9,26 +9,130 @@
 <body>
   <!-- Everything is positioned from the layout the Go side computes. -->
   <div id="stage">
-    <div id="pet" title="拖动移动 · 单击打开待办">
+    <div id="pet" title="拖动移动 · 单击打开待办 · 悬停出现对话按钮">
       <img id="pet-image" alt="桌宠" draggable="false" />
-      <!-- Two badges, stacked: the pomodoro countdown on top of the open-todo
-           count. Both are inside the pet box so neither can draw outside the
-           window region. -->
-      <span id="timer-badge" class="badge timer hidden"></span>
+      <!-- The open-todo count, inside the pet box so it cannot draw outside the
+           window region. It is the only badge left: the countdown above it
+           belonged to the host's timer, and the timer is the pomodoro plugin's
+           now (openspec/changes/todo-pomodoro-as-plugins). The plugin draws its
+           own countdown in its own surface, which is not part of this box and
+           therefore could never have been stacked here. -->
       <span id="badge" class="badge hidden"></span>
+
+      <!-- The conversation entry: painted by hover, opened by a click (the gesture
+           the double click used to be).
+
+           It sits INSIDE #pet's box deliberately. While no panel or bubble is up
+           the window is cropped to exactly the pet's rectangle, so anything hanging
+           off the pet's edge would be cut away by the native region - and enlarging
+           the region to fit it would leave a hole beside the pet that the page never
+           paints and that eats clicks meant for the desktop. Inside the box the
+           button needs no geometry from Go at all; see the .pet-chat rules in
+           style.css and AGENTS.md 3.2. -->
+      <button id="pet-chat" class="pet-chat" type="button" title="对话" aria-label="对话">
+        <svg class="pet-chat-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M4 3h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-6 5v-5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+        </svg>
+      </button>
     </div>
 
-    <!-- Speech bubble: the todo reminder, the todo picker and the summary
-         prompt all use this one card, because they all occupy the same slot
-         beside the pet. Only one of {bubble, panel} is ever visible. -->
+    <!-- Speech bubble: the reminder and the pet's own menu use this one card,
+         because both occupy the same slot beside the pet. Only one of {bubble,
+         panel, surface} is ever visible.
+
+         Two kinds are left of the four this card used to draw. The picker, the
+         summary prompt and the plan prompt all belonged to the host's timer and
+         went with it; the pomodoro plugin asks its own questions in its own
+         surface, so there is no host question left that needs a textarea or a
+         list of todos inside this card. -->
     <section id="bubble" class="bubble hidden" aria-live="polite">
       <div id="bubble-arrow" class="bubble-arrow"></div>
       <h2 id="bubble-title" class="bubble-title"></h2>
-      <p id="bubble-todo" class="bubble-todo hidden"></p>
-      <p id="bubble-plan" class="bubble-plan hidden"></p>
       <ul id="bubble-list" class="bubble-list hidden"></ul>
       <p id="bubble-more" class="bubble-more hidden"></p>
-      <textarea id="bubble-input" class="bubble-input hidden" rows="3" placeholder="写点什么…（Enter 保存）" maxlength="2000"></textarea>
+      <!-- The pet's own menu: what a right-click on the pet opens, and the reason
+           the pet no longer borrows the tray icon's menu.
+
+           It lives INSIDE the bubble card rather than in a container of its own,
+           because it is a bubble kind (BubbleMenu in app_pet_menu.go): the window
+           is cropped to this card's rectangle, so a grid here costs no geometry
+           and no new placeholder in the one-visible-thing-at-a-time slot. The
+           cheat sheet "a new control has to answer which rectangle it lives in"
+           is answered by this div's parent - see AGENTS.md 3.2.
+
+           Three columns of three, one icon and one word per cell. The labels are
+           the same words the tray menu uses where the two share an action, so a
+           user who has met one menu recognises the other.
+
+           The icons are inline SVG on purpose: the pet has no image assets beyond
+           the picture, and a glyph font would put a dependency between the window
+           and an installed font. Strokes are `currentColor`, so a cell's hover
+           colour takes the icon with it. -->
+      <div id="bubble-menu" class="bubble-menu hidden">
+        <button type="button" class="menu-cell" data-menu="todos" title="待办与日程">
+          <svg class="menu-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <rect x="3" y="4.5" width="18" height="16.5" rx="2.5" />
+            <path d="M8 2.5v4M16 2.5v4M3 9.5h18" />
+          </svg>
+          <span class="menu-label">日程</span>
+        </button>
+        <button type="button" class="menu-cell" data-menu="chat" title="对话">
+          <svg class="menu-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 3h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-6 5v-5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+          </svg>
+          <span class="menu-label">对话</span>
+        </button>
+        <button type="button" class="menu-cell" data-menu="pomodoro" title="打开番茄钟">
+          <svg class="menu-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="13.5" r="7.5" />
+            <path d="M12 9.5v4l2.5 2M9 2.6h6" />
+          </svg>
+          <span class="menu-label">番茄钟</span>
+        </button>
+        <button type="button" class="menu-cell" data-menu="remind" title="立刻提醒一次">
+          <svg class="menu-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M6.5 9.5a5.5 5.5 0 0 1 11 0c0 4 1.5 5.5 1.5 5.5H5s1.5-1.5 1.5-5.5z" />
+            <path d="M10 18.5a2 2 0 0 0 4 0" />
+          </svg>
+          <span class="menu-label">提醒</span>
+        </button>
+        <button type="button" class="menu-cell" data-menu="plugins" title="打开控制中心（插件管理）">
+          <svg class="menu-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M10 4.5a2 2 0 0 1 4 0V6h3.5A1.5 1.5 0 0 1 19 7.5V11h1.5a2 2 0 0 1 0 4H19v3.5a1.5 1.5 0 0 1-1.5 1.5H14v-1.5a2 2 0 0 0-4 0V20H6.5A1.5 1.5 0 0 1 5 18.5V15H3.5a2 2 0 0 1 0-4H5V7.5A1.5 1.5 0 0 1 6.5 6H10V4.5z" />
+          </svg>
+          <span class="menu-label">插件</span>
+        </button>
+        <button type="button" class="menu-cell" data-menu="settings" title="打开控制中心（偏好设置）">
+          <svg class="menu-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="12" r="3.2" />
+            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.55V21a2 2 0 0 1-4 0v-.1A1.7 1.7 0 0 0 9 19.35a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.65 15a1.7 1.7 0 0 0-1.55-1.03H3a2 2 0 0 1 0-4h.1A1.7 1.7 0 0 0 4.65 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.65a1.7 1.7 0 0 0 1.03-1.55V3a2 2 0 0 1 4 0v.1A1.7 1.7 0 0 0 15 4.65a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.35 9v.1A1.7 1.7 0 0 0 20.9 10.1H21a2 2 0 0 1 0 4h-.1A1.7 1.7 0 0 0 19.4 15z" />
+          </svg>
+          <span class="menu-label">设置</span>
+        </button>
+        <button type="button" class="menu-cell" data-menu="snap" title="归位到默认位置">
+          <svg class="menu-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="12" r="7" />
+            <path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4" />
+          </svg>
+          <span class="menu-label">归位</span>
+        </button>
+        <button type="button" class="menu-cell" data-menu="hide" title="隐藏桌宠（快捷键或托盘可以叫回来）">
+          <svg class="menu-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M3 3l18 18" />
+            <path d="M10.7 6.3A9.5 9.5 0 0 1 12 6.2c5 0 9 5.8 9 5.8a17.2 17.2 0 0 1-2.6 3.2" />
+            <path d="M6.4 7.9A17.5 17.5 0 0 0 3 12s4 5.8 9 5.8a9 9 0 0 0 3.1-.5" />
+            <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+          </svg>
+          <span class="menu-label">隐藏</span>
+        </button>
+        <button type="button" class="menu-cell danger" data-menu="quit" title="退出 PetPC">
+          <svg class="menu-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M18.4 6.6a9 9 0 1 1-12.8 0" />
+            <path d="M12 2.5v9.5" />
+          </svg>
+          <span class="menu-label">退出</span>
+        </button>
+      </div>
       <div id="bubble-actions" class="bubble-actions">
         <button id="bubble-secondary" type="button"></button>
         <button id="bubble-primary" type="button" class="primary"></button>
@@ -72,15 +176,17 @@
           <!-- 「记录」 and 「设置」 are gone, and this is where the panel stops being the
                place for either.
 
-               记录 folded into the 待办 tab as a collapsed archive (see #records-fold
-               below): the same list, one click away, and the panel stops having a tab that
-               opens onto "nothing yet".
+               记录 went with the host's timer. It was folded into the 待办 tab as a
+               collapsed archive when its own tab retired, and it is the pomodoro plugin's
+               now: the plugin keeps its sessions in its own storage and lists them in its
+               own floating surface, so the panel has no third copy to draw - and no
+               record left to edit.
 
                设置 moved to the control center (PetPCPluginMarket.exe) - the window that
                can hold five groups of controls. What could not move went to the places that
-               own it: 放弃 next to 停止/跳过 in the pomodoro strip, and the program-level
-               actions (打开控制中心 / 退出 / 立刻提醒 / 打开数据目录) to the tray menu. Nothing
-               is left reachable only from a tab that no longer exists. -->
+               own it: the program-level actions (打开控制中心 / 退出 / 立刻提醒 / 打开数据目录)
+               to the tray menu, and the pet's own gestures to the pet. Nothing is left
+               reachable only from a tab that no longer exists. -->
         </div>
         <!-- The way into the control center, where the user already is.
              It used to be a button on the 设置 tab; when that tab retired it briefly became
@@ -110,29 +216,13 @@
 
       <!-- Todo view -->
       <div id="tab-todos" class="tab-body">
-        <!-- Pomodoro strip: the timer's controls and countdown. -->
-        <div id="pomo-strip" class="pomo-strip">
-          <div class="pomo-line">
-            <span id="pomo-phase" class="pomo-phase">番茄钟未开启</span>
-            <span id="pomo-countdown" class="pomo-countdown"></span>
-          </div>
-          <p id="pomo-todo" class="pomo-todo hidden"></p>
-          <div class="pomo-actions">
-            <button id="pomo-toggle" type="button" class="link-btn">开启番茄钟</button>
-            <button id="pomo-start" type="button" class="primary hidden">开始专注</button>
-            <button id="pomo-pause" type="button" class="hidden">暂停</button>
-            <button id="pomo-resume" type="button" class="hidden">继续</button>
-            <button id="pomo-stop" type="button" class="hidden">停止</button>
-            <button id="pomo-skip" type="button" class="hidden">跳过</button>
-            <!-- 「放弃」lives here rather than with the other settings: it is an action on
-                 the session that is running right now, and it needs the confirmation dialog
-                 this page already owns. It used to sit in the settings tab, which is being
-                 retired (openspec/changes/ui-rebuild 阶段 3) - and of everything that tab
-                 held, this is the one control that could not simply move to the control
-                 center, because there the pet may not even be running. -->
-            <button id="pomo-reset" type="button" class="link-btn danger hidden">放弃</button>
-          </div>
-        </div>
+        <!-- No pomodoro strip. The countdown, the controls and the records archive
+             were the host's timer, and the timer is the pomodoro plugin's now: it
+             draws its own phase, countdown and session list in its own floating
+             surface, and it keeps its records in its own storage. What is left
+             here is one job - the todo list - which is also why the strip's
+             「放弃」 button and the folded 记录 archive are gone rather than moved:
+             both acted on a timer this page no longer runs (design.md §4.1). -->
 
         <form id="todo-form" class="todo-form">
           <input id="todo-title" type="text" placeholder="添加一件事…" autocomplete="off" maxlength="200" />
@@ -150,45 +240,17 @@
 
         <ul id="todo-list" class="todo-list"></ul>
         <p id="empty-hint" class="empty">还没有待办，上面添加一条吧。</p>
-
-        <!-- The finished-session archive used to be its own tab («记录»). It is here now,
-             folded shut, for two reasons. The panel has room for one job («今天要做什么»),
-             and the archive is something you open occasionally rather than watch. Nothing
-             about the rendering changed: the three ids below are the same ones main.js has
-             always painted into, so the folding, the day grouping and the inline editing of
-             a record's summary all still run through the same code.
-
-             A <details> rather than a fourth tab, because a tab that opens onto "nothing to
-             see yet" reads as a broken feature, whereas a closed summary reads as "there is
-             an archive here, open it if you want". -->
-        <details id="records-fold" class="records-fold">
-          <summary>番茄记录</summary>
-          <p id="records-empty" class="empty">还没有记录。完成一个番茄后会自动记录在这里。</p>
-          <ul id="records-list" class="record-list"></ul>
-          <p id="records-total" class="record-total"></p>
-        </details>
       </div>
 
       <p id="toast" class="toast hidden"></p>
 
-      <!-- Confirmation dialog. It is drawn INSIDE the panel rather than with
-           window.confirm(), because a native dialog is rendered by WebView2 as a
-           separate browser-chrome window: it ignores the app's styling, covers
-           the panel, and sits outside the region the window is cropped to, so it
-           looks nothing like the rest of the pet.
-
-           The outer element is a dimming scrim over the whole panel and the
-           inner one is the card, so the dialog reads as clearly separate from
-           the panel content behind it. -->
-      <div id="confirm" class="confirm hidden" role="dialog" aria-modal="true">
-        <div class="confirm-card">
-          <p id="confirm-text" class="confirm-text"></p>
-          <div class="confirm-actions">
-            <button id="confirm-cancel" type="button">取消</button>
-            <button id="confirm-ok" type="button" class="danger">确定</button>
-          </div>
-        </div>
-      </div>
+      <!-- No confirmation dialog. It was drawn INSIDE the panel rather than with
+           window.confirm() - a native dialog is rendered by WebView2 as a separate
+           browser-chrome window that ignores the app's styling and sits outside the
+           region the window is cropped to - and it guarded the two actions that
+           could lose work: 跳过 a focus phase and 放弃当前番茄钟. Both were the host
+           timer's, so the dialog has no caller left; an unreachable dialog is a
+           second UI nobody can check. -->
     </section>
   </div>
 

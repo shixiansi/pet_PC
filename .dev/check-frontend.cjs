@@ -49,18 +49,14 @@ const modelsTs = fs.readFileSync(path.join(root, 'frontend/wailsjs/go/models.ts'
 // The main app file, read here because the tray menu and its command handling
 // live in it - the shortcut feature's mouse fallback is checked against it.
 const mainGo = fs.readFileSync(path.join(root, 'app.go'), 'utf8');
-// The pomodoro gate: the app bindings and the pure state machine. Read separately
-// because the "does not auto-start" rule lives in the engine and everything that
-// releases it lives in the app layer.
-//
-// The engine is now a PACKAGE, not a file next to app_pomodoro.go: the extraction
-// (openspec/changes/pomodoro-state-machine-extraction) moved it to
-// internal/pomodoro/machine.go. This line is the second thing that has to move
-// with it - a gate that reads a file by path throws ENOENT the moment the file
-// moves, and a check that throws is a check nobody reads. The assertion below it
-// is unchanged, because the code shape it pins is unchanged.
-const goAppPomodoro = fs.readFileSync(path.join(root, 'app_pomodoro.go'), 'utf8');
-const goPomodoroEngine = fs.readFileSync(path.join(root, 'internal/pomodoro/machine.go'), 'utf8');
+// The pomodoro gate used to read app_pomodoro.go and internal/pomodoro/machine.go.
+// BOTH FILES ARE GONE: the host's timer retired into the pomodoro plugin
+// (openspec/changes/todo-pomodoro-as-plugins), taking the state machine, the two
+// gates, the picker and the question-reveal cycle with it. The bindings below are
+// empty strings so a straggling assertion fails LOUDLY instead of throwing ENOENT -
+// a gate that throws is a gate nobody reads.
+const goAppPomodoro = '';
+const goPomodoroEngine = '';
 // The chat request path, for the "no reply is read aloud" invariants.
 const goAppLlm = fs.readFileSync(path.join(root, 'app_llm.go'), 'utf8');
 // The plugin capability table and the shared asset/dispatch layer. Speech became a
@@ -106,11 +102,27 @@ const bundledPlugins = ['com.shixiansi.plugin-chat', 'com.shixiansi.plugin-qq', 
 // The market's plugin hosting: the asset route and the dispatcher that answer a
 // plugin's files and requests in THAT program.
 const marketPluginHost = fs.readFileSync(path.join(root, 'tools/plugin-market/pluginhost.go'), 'utf8');
-const marketPluginUI = fs.readFileSync(
-  path.join(root, 'tools/plugin-market/frontend/src/plugin-ui.js'), 'utf8');
+// The FRAME that hosts a plugin's own interface, i.e. the sandbox boundary.
+//
+// This used to read `tools/plugin-market/frontend/src/plugin-ui.js`. That file is still in
+// the tree but it is NO LONGER SHIPPED: the control center (`cc/`) became this program's
+// interface, and the plugin page it grew only listed plugins and their permissions - which
+// is exactly how three bundled plugins (voice / qq / bilibili, all `panel: false`) ended up
+// with no visible interface in any program. The frame host moved to
+// `cc/src/lib/plugin-frame.ts` and the assertions below follow it
+// (openspec/changes/plugin-page-workspace). A gate that pins a file nobody builds is worse
+// than no gate: it reports PASS about code that cannot run.
+const ccPluginFrame = fs.readFileSync(path.join(root, 'tools/plugin-market/cc/src/lib/plugin-frame.ts'), 'utf8');
+const ccPluginFrameHost = fs.readFileSync(
+  path.join(root, 'tools/plugin-market/cc/src/components/PluginFrame.svelte'), 'utf8');
+const ccPluginsPage = fs.readFileSync(path.join(root, 'tools/plugin-market/cc/src/pages/Plugins.svelte'), 'utf8');
+// The control center's palette, i.e. what a light window actually looks like. Its light
+// scheme is a token block keyed on `data-theme` (not a second stylesheet).
+const ccTokens = fs.readFileSync(path.join(root, 'tools/plugin-market/cc/src/tokens.css'), 'utf8');
 
 const failures = [];
 const notes = [];
+
 const check = (name, ok, detail) => {
   if (ok) notes.push(`  PASS  ${name}`);
   else failures.push(`  FAIL  ${name} -- ${detail}`);
@@ -223,7 +235,7 @@ check(
 const goFiles = [
   'app_llm.go',
   'app.go',
-  'app_pomodoro.go',
+  'app_bubble.go',
   'app_hotkey.go',
   'app_plugins.go',
   'app_plugin_market.go',
@@ -379,25 +391,78 @@ check(
   'the region carries a curve again: rounded/elliptical regions are what made the corners jagged',
 );
 
-// The pet's own menu is a NATIVE popup, and this pins the whole chain: page -> binding ->
-// tray thread -> TrackPopupMenu. It has to be native, not page-drawn: a menu inside the page
-// would have to fit inside the window's region, and the region is the one-visible-placeholder
-// slot that the panel, the bubble and the plugin surface already take turns in.
+// The pet's own menu is a CARD IN THE PAGE, and this pins the whole chain:
+// right-click -> App.OpenPetMenu -> a BubbleMenu card -> the grid in #bubble-menu ->
+// one delegated click listener -> PET_MENU_ACTIONS.
 //
-// The entries are deliberately NOT checked here: they are the tray's own list, and one list
-// with one command switch is the property being kept - re-listing them would be the second
-// definition this design avoids.
+// It used to be the tray's native popup, forwarded to the tray thread, and that is
+// exactly what it looked like: right-clicking the pet and right-clicking the tray
+// icon produced the same grey column of system text. The pet owns the gesture now.
+//
+// The card is a BUBBLE KIND, not a fourth placeholder in the region's slot: it
+// borrows the bubble's rectangle, its crop and the rule that anything else opening
+// in the slot folds it away (AGENTS.md 3.2). That is why there is no new geometry to
+// check here - app_pet_menu.go and app_pet_menu_test.go own that half, and the
+// region switch in app.go was deliberately left alone.
 const goTray = fs.readFileSync(path.join(root, 'internal/desktop/tray_windows.go'), 'utf8');
+const goPetMenu = fs.readFileSync(path.join(root, 'app_pet_menu.go'), 'utf8');
 check(
-  'right-clicking the pet reaches the host menu, end to end',
+  'right-clicking the pet opens the pet\'s own menu card, end to end',
   /els\.pet\.addEventListener\('contextmenu'/.test(mainJs) &&
-    /App\.OpenPetMenu\(\)/.test(mainJs) &&
-    /func \(a \*App\) OpenPetMenu\(\) error \{/.test(mainGo) &&
-    /a\.tray\.ShowMenuAtCursor\(\)/.test(mainGo) &&
-    /func \(t \*Tray\) ShowMenuAtCursor\(\) error \{/.test(goTray) &&
-    /wmShowPetMenu/.test(goTray),
-  'the pet menu is not wired end to end (page -> binding -> tray thread -> native popup)',
+    /function togglePetMenu\(\)/.test(mainJs) &&
+    /App\.OpenPetMenu\(\)\.then\(applyLayout\)/.test(mainJs) &&
+    /els\.bubbleMenu\.addEventListener\('click'/.test(mainJs) &&
+    /const PET_MENU_ACTIONS = \{/.test(mainJs) &&
+    htmlIds.has('bubble-menu') &&
+    /func \(a \*App\) OpenPetMenu\(\) \(Layout, error\) \{/.test(goPetMenu) &&
+    /BubbleView\{Kind: BubbleMenu\}/.test(goPetMenu),
+  'the pet menu is not wired end to end (page -> binding -> BubbleMenu card -> grid -> action map)',
 );
+// ...and the tray no longer lends it out. A leftover forward would be a second way
+// for the pet to ask for the tray's list, i.e. the bug this change fixed.
+//
+// Comments are stripped first, for the same reason the region check above strips
+// them: the tray file's own doc names the message and the method that were REMOVED
+// ("wmShowPetMenu is deliberately not defined any more"), and naming them there is
+// the point. This check is about what the code still does.
+const stripGoComments = (src) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+check(
+  'the pet no longer borrows the tray menu',
+  !/wmShowPetMenu/.test(stripGoComments(goTray)) &&
+    !/ShowMenuAtCursor/.test(stripGoComments(goTray)) &&
+    !/ShowMenuAtCursor/.test(stripGoComments(mainGo)) &&
+    !/OpenPetMenu\(\) error \{/.test(stripGoComments(mainGo)),
+  'the pet menu still goes through the tray thread',
+);
+// The menu is a bubble KIND, so it must be on the list every transition folds away:
+// a kind missing from clearAllBubblesLocked survives a focus starting and leaves the
+// window cropped around a launcher nobody asked for any more.
+// Every cell in the markup needs an action, and every action a cell: a cell whose
+// button quietly does nothing is the one failure a menu cannot survive, because the
+// click IS the interface.
+const menuCells = [...html.matchAll(/data-menu="([a-z]+)"/g)].map((m) => m[1]);
+const menuMapStart = mainJs.indexOf('const PET_MENU_ACTIONS = {');
+const menuMap = mainJs.slice(menuMapStart, mainJs.indexOf('\n};', menuMapStart));
+check(
+  'every menu cell has an action, and every action a cell',
+  menuCells.length === 9 &&
+    menuCells.every((name) => new RegExp(`\\n\\s{2}${name}: \\(\\)`).test(menuMap)) &&
+    (menuMap.match(/\n {2}[a-z]+: \(\)/g) || []).length === menuCells.length,
+  'a menu cell and PET_MENU_ACTIONS disagree: ' + JSON.stringify(menuCells),
+);
+// The grid fills the card Go sizes - the rows are fractions, not a pixel height of
+// their own. A grid that declared its own height would either come up short (a band
+// of empty card) or run over (clipped by the region, which reads as a torn edge).
+check(
+  'the menu grid fills the card it is drawn in',
+  /\.bubble-menu\s*\{[\s\S]{0,400}?display: grid;/.test(css) &&
+    /\.bubble-menu\s*\{[\s\S]{0,400}?grid-template-columns: repeat\(3, 1fr\);/.test(css) &&
+    /\.bubble-menu\s*\{[\s\S]{0,400}?grid-auto-rows: 1fr;/.test(css) &&
+    !/\.bubble-menu\s*\{[\s\S]{0,400}?height: \d+px/.test(css),
+  'the menu grid declares a size of its own instead of filling the bubble box',
+);
+
 
 // --- 4b. The settings page is GONE, and must stay gone ----------------------
 //
@@ -422,16 +487,14 @@ check(
 check(
   'the pet has no records tab any more',
   !html.includes('id="tab-records"') && !/data-tab="records"/.test(html),
-  'the records tab came back: the archive belongs in the 待办 tab as a folded section',
+  'the records tab came back: the archive belongs to the pomodoro plugin now',
 );
-// The archive itself survived that move, and the three ids main.js paints into are what
-// says so. Deleting the tab and deleting the capability are different changes, and only
-// one of them is wanted.
-check(
-  'the 记录 archive still exists inside the 待办 tab',
-  htmlIds.has('records-list') && htmlIds.has('records-total') && html.includes('id="records-fold"'),
-  'the archive went away with the tab it used to live in',
-);
+// The archive ITSELF is gone too, and that is a second, later change: it used to be
+// folded into the 待办 tab when its own tab retired, and it left with the host timer
+// (openspec/changes/todo-pomodoro-as-plugins). Section 13 below asserts the absence of
+// every id the host timer used to paint into; there is deliberately no "the archive
+// still exists" check here any more, because keeping one would mean keeping the
+// renderer, the store and the six bindings that fed it.
 // The way into the control center used to be a button on the settings page, and it was the
 // ONLY one - losing it would leave the user with a pet and no way to reach settings. It then
 // became a tray-menu item ALONE, which is not an entry point but a rumour: the tray icon can
@@ -607,64 +670,78 @@ check(
   'the event carries no direction',
 );
 
-// --- 6. Double click is detected in the pointer stream ---------------------
-// A `dblclick` listener would also be defensible, but the detection lives in
-// endDrag so the single- and double-click paths cannot disagree; these checks
-// pin that arrangement and, crucially, that the second click does NOT let the
-// pending single click fire.
+// --- 6. The conversation button: hover target inside the pet's box ----------
+//
+// The double click on the pet is gone. The conversation entry is a BUTTON the page
+// paints over the pet while the pointer is on it, and three things have to hold or
+// the gesture is invisible, unclickable, or in the wrong place:
+//
+//   1. the button is INSIDE #pet in the markup. The window is cropped to the pet's
+//      rectangle while nothing else is up (AGENTS.md 3.2), so a button hanging off
+//      the pet's edge would be sliced by the native region - and growing the region
+//      to fit it would expose a strip beside the pet that the page never paints;
+//   2. it is hidden AND `pointer-events: none` until :hover. A transparent button
+//      that still takes clicks would make the pet's upper-left corner open the
+//      conversation instead of the todo panel - a silent change to what clicking
+//      the pet does;
+//   3. a click asks Go for the slot plugin's surface, which is the call the double
+//      click used to make.
+const petChatAt = html.indexOf('id="pet-chat"');
 check(
-  'the double click is detected from the pointer stream',
-  /now - lastClickAt < DOUBLE_CLICK_MS/.test(mainJs),
-  'no double-click interval test',
+  'the conversation button lives inside the pet box',
+  petChatAt > html.indexOf('id="pet"') && petChatAt < html.indexOf('id="bubble"'),
+  'the button is outside #pet, where the window region does not reach',
 );
 check(
-  'a single click is deferred so a double click cannot flash the panel',
-  /pendingClick\s*=\s*setTimeout/.test(mainJs) && /clearTimeout\(pendingClick\)/.test(mainJs),
-  'the click/double-click split is missing',
+  'the pet wires the button to the conversation',
+  /chatButton: \$\('pet-chat'\)/.test(mainJs) &&
+    /els\.chatButton\.addEventListener\('click', \(\) => openChatPluginSurface\(\)\)/.test(mainJs),
+  'the button is not wired to the plugin surface',
 );
-// The double-click branch is one contiguous block, so the checks anchor on the
-// branch itself rather than on a character budget: a budget silently starts
-// passing once unrelated code is inserted between the two lines, and it fails
-// when a comment grows. Both of those happened while this feature was written.
-const dblStart = mainJs.indexOf('if (now - lastClickAt < DOUBLE_CLICK_MS)');
-let dbl = '';
-if (dblStart >= 0) {
-  // Up to the closing brace of the branch, which is the first line that starts
-  // with the branch's own indentation followed by "}".
-  const rest = mainJs.slice(dblStart);
-  const end = rest.indexOf('\n        }');
-  dbl = end < 0 ? rest : rest.slice(0, end);
-}
+// The press has to stop at the button: the pet's pointerdown starts a drag and
+// calls preventDefault, which would both book a phantom drag origin and eat the
+// click that follows.
 check(
-  'the double-click branch was found',
-  dbl.length > 0,
-  'the branch is no longer in main.js',
+  'pressing the button does not start a drag on the pet',
+  /els\.chatButton\.addEventListener\('pointerdown', \(e\) => e\.stopPropagation\(\)\)/.test(mainJs),
+  'the button press reaches the pet, so it starts a drag and swallows its own click',
 );
+// Hidden means inert. Both declarations are checked, in the button's own rule, so a
+// neighbouring rule cannot satisfy the assertion.
+const petChatRule = (() => {
+  const start = css.indexOf('.pet-chat {');
+  const end = start < 0 ? -1 : css.indexOf('}', start);
+  return start < 0 || end < 0 ? '' : css.slice(start, end);
+})();
 check(
-  'the second click cancels the pending single click before opening the surface',
-  /clearTimeout\(pendingClick\)/.test(dbl) && /openChatPluginSurface\(\)/.test(dbl) &&
-    dbl.indexOf('clearTimeout(pendingClick)') < dbl.indexOf('openChatPluginSurface()'),
-  'the double-click branch does not cancel the pending click first',
+  'the button is transparent and inert until the pointer is on the pet',
+  /visibility:\s*hidden/.test(petChatRule) && /pointer-events:\s*none/.test(petChatRule),
+  'a transparent button still takes the click, so the pet\'s corner would open the chat',
 );
 check(
-  'the double-click branch returns rather than scheduling a toggle',
-  /\breturn;/.test(dbl) && !/TogglePanel/.test(dbl),
-  'the double-click branch may also toggle the panel',
+  'hovering the pet is what reveals it, and an anchored pet hides it again',
+  /#pet:hover \.pet-chat[^{]*\{[^}]*pointer-events:\s*auto/.test(css) &&
+    /#pet\.anchored \.pet-chat[^{]*\{[^}]*visibility:\s*hidden/.test(css),
+  'the button is not tied to the pet\'s hover state',
 );
+// The click/double-click arbitration is gone with the double click. It cost every
+// click the system's double-click interval, and the only thing it bought was
+// keeping two clicks from unwinding as open-then-close.
 check(
-  'the deferred single click is what toggles the panel',
-  /pendingClick = setTimeout\([\s\S]{0,200}App\.TogglePanel\(\)/.test(mainJs),
-  'the single click no longer toggles the panel',
+  'a click on the pet toggles the panel without waiting for a second one',
+  /applyLayout\(await App\.TogglePanel\(\)\)/.test(mainJs) &&
+    !/DOUBLE_CLICK_MS|pendingClick|lastClickAt/.test(mainJs),
+  'the single click is still deferred for a double click that no longer exists',
 );
-// A double click asks the conversation plugin for its floating surface, which is
-// the whole point of the redesign: the pet's own live overlay is gone, and what
-// opens is the plugin's window. The call goes through Go rather than straight to
-// the surface binding, because the slot's owner has to be resolved from the
-// on-disk install list (and refused when a question owns the slot).
+// The click asks the conversation plugin for its floating surface, which is the
+// whole point of the redesign: the pet's own live overlay is gone, and what opens
+// is the plugin's window. The call goes through Go rather than straight to the
+// surface binding, because the slot's owner has to be resolved from the on-disk
+// install list (and refused when a question owns the slot).
 check(
-  'a double click asks the conversation plugin for its surface',
+  'the button asks the conversation plugin for its surface',
   /function openChatPluginSurface\(\)[\s\S]{0,400}App\.OpenChatPluginSurface\(\)/.test(mainJs),
-  'the double click does not reach the plugin surface',
+  'the button does not reach the plugin surface',
 );
 
 // --- 6b. The plugin surface obeys the region rules --------------------------
@@ -684,7 +761,11 @@ check(
 // shapes, so the page must branch on the flag rather than on the radius.
 check(
   'an elliptical surface block is drawn as a true ellipse',
-  /r\.ellipse === true \? '50%'/.test(pluginHostJs) &&
+  // The receiver is deliberately not pinned: it was `r` while the rect loop was a
+  // `forEach((r, i) => ...)`, and it became `rect` when the frames started being keyed by
+  // declaration index. What must hold is that the page branches on the FLAG (not on `r`,
+  // which Go zeroes for these blocks) and applies the result to all four corners.
+  /\.ellipse === true \? '50%'/.test(pluginHostJs) &&
     /borderTopLeftRadius\s*=\s*radius/.test(pluginHostJs) &&
     /borderBottomRightRadius\s*=\s*radius/.test(pluginHostJs),
   'the ellipse flag does not reach the drawn shape',
@@ -728,207 +809,27 @@ check(
   'saving an unrelated setting would erase the stored key',
 );
 
-// --- 9b. The rest is GATED on the record ------------------------------------
-// A finished focus phase parks the break until its record is answered, and the
-// prompt that asks for it cannot be waved away. Both halves are load-bearing:
-// without the gate an undescribed session banks a break, and without the
-// non-dismissable prompt the timer could be parked with nothing on screen
-// explaining why.
-check(
-  'a finished focus does not auto-start the rest',
-  /if ended == store\.PhaseFocus \{\s*\n\s*st\.RunState = store\.RunStopped/.test(goPomodoroEngine),
-  'the break starts before the record is answered',
-);
-check(
-  'answering the record is what starts the rest',
-  /st = a\.startParkedPhaseLocked\(st\)/.test(goAppPomodoro),
-  'the timer is parked with nothing that starts it',
-);
-check(
-  'the summary prompt cannot be dismissed',
-  // The guard is on the bubble kind AND on a record actually being pending, so an
-  // unrelated summary bubble (a stale view) cannot make the UI unresponsive.
-  /b\.Kind == BubbleSummary && pending/.test(goAppPomodoro),
-  'the prompt can be dismissed, so the gate can be bypassed',
-);
-check(
-  'the plan prompt cannot be dismissed either',
-  // The plan question is the gate on the FOCUS, the way the summary prompt is the
-  // gate on the break: waving it away would strand the timer behind a question
-  // nobody can see. Its own pending flag is read, so a plan bubble left over after
-  // the question was answered (by skipping, or by giving the session up) still
-  // closes like any other bubble.
-  /b\.Kind == BubblePlan && planPending/.test(goAppPomodoro) &&
-    /planPending := a\.pendingPlanWaiting\(\)/.test(goAppPomodoro) &&
-    /func \(a \*App\) pendingPlanWaiting\(\) bool \{[\s\S]{0,220}return a\.store\.Pomodoro\(\)\.PlanPending/.test(
-      goAppPomodoro,
-    ),
-  'the plan question can be dismissed, or its pending flag is read the wrong way',
-);
-check(
-  'the pending flags are read before the window lock is taken',
-  // setBubbleLocked and its friends need a.mu, while the pending flags live behind
-  // pomoMu (whose holder calls into the bubble helpers) - so reading them inside the
-  // a.mu section would invert the two locks and deadlock for real (design.md 2.2).
-  /pending := a\.pendingSummaryWaiting\(\)[\s\S]{0,220}planPending := a\.pendingPlanWaiting\(\)[\s\S]{0,220}a\.mu\.Lock\(\)/.test(
-    goAppPomodoro,
-  ),
-  'a pending flag is read while holding the window lock, which inverts the lock order',
-);
-check(
-  'the frontend does not dismiss the summary prompt either',
-  // Escape and dragging both reach DismissBubble; the backend refuses, but the
-  // frontend must not redraw a bubble that is still there. The guard names BOTH
-  // gated kinds (summary and plan) in both places, so this asserts the summary is
-  // still among them rather than pinning the whole expression.
-  /bubble\.kind !== 'summary'/.test(mainJs) &&
-    /if \(bubble && bubble\.kind !== 'summary' && bubble\.kind !== 'plan'\) \{/.test(mainJs),
-  'a drag or Escape closes the summary prompt from the frontend',
-);
-check(
-  'the frontend does not dismiss the plan prompt either',
-  // The plan prompt is protected by the same two guards, in both places Escape and
-  // dragging reach. Both kinds are spelled out rather than shared in a helper,
-  // because the guard is also what stops the panel fall-through in the Escape chain.
-  /bubble\.kind !== 'summary' && bubble\.kind !== 'plan'/.test(mainJs) &&
-    /if \(bubble && bubble\.kind !== 'summary' && bubble\.kind !== 'plan'\) \{/.test(mainJs) &&
-    /bubble\?\.kind === 'summary' \|\| bubble\?\.kind === 'pick' \|\| bubble\?\.kind === 'plan'/.test(
-      mainJs,
-    ),
-  'Escape or a drag closes the plan prompt from the frontend',
-);
+// --- 9b. Nothing on this page can refuse a dismissal any more ----------------
+//
+// This block used to hold six checks about the two GATED prompts: the summary prompt
+// parked the break until its record was answered and the plan prompt parked the focus,
+// so Escape, a drag and the plugin surface all had to refuse to destroy them - and
+// Enter had to answer them, because the card is not a <form>.
+//
+// Both prompts were the host timer's questions. The timer belongs to the pomodoro
+// plugin now (openspec/changes/todo-pomodoro-as-plugins) and the plugin asks them in
+// its own surface, whose keyboard and dismissal rules are its own business. So the six
+// checks are DELETED rather than loosened: there is no host-side gate left to protect,
+// and a check that kept naming one would only pass while the timer came back with it.
+//
+// What still matters is the other direction - that making the prompts stick never made
+// EVERY bubble stick. Only a reminder may auto-hide (scheduleBubbleHide's guard), and
+// every bubble stays dismissable.
 check(
   'a reminder bubble is still dismissable',
-  // Making the summary prompt stick must not make every bubble stick.
-  /if \(b\.kind !== 'reminder'\) return;/.test(mainJs),
-  'reminders no longer auto-hide',
-);
-// --- 9c. The plugin surface must not eat the question -----------------------
-//
-// The surface and the speech bubble share one slot, and OpenPluginSurface TAKES
-// the slot rather than sharing it, so opening the conversation over the summary
-// prompt deleted it - leaving the timer parked behind a question that was no
-// longer on screen. Both halves are needed: the backend must refuse, or a stale
-// or non-frontend caller still destroys the prompt; the frontend must check too,
-// or the refusal arrives as an error toast that cannot be seen, because the toast
-// lives inside the panel that is necessarily closed while the bubble is up.
-check(
-  'the backend refuses to open the surface over an unanswered question',
-  /func \(a \*App\) OpenPluginSurface\(pluginID string\) \(Layout, error\) \{[\s\S]{0,1400}if kind := a\.unansweredQuestionKind\(\); kind != BubbleNone \{/.test(
-    fs.readFileSync(path.join(root, 'app_plugin_surface.go'), 'utf8'),
-  ),
-  'OpenPluginSurface takes the slot from a question that is still waiting',
-);
-check(
-  'the refusal names which question is in the way',
-  // "choose a todo" and "write the summary" are not the same instruction, so one
-  // shared string would tell the user to do the wrong thing. The sentence lives in
-  // pluginSurfaceBlocked now - the surface's own wording, written in the style the
-  // retired overlay's questionOwnsTheSlot set.
-  /func pluginSurfaceBlocked\(kind string\) string \{/.test(
-    fs.readFileSync(path.join(root, 'app_plugin_surface.go'), 'utf8'),
-  ) &&
-    /BubblePick/.test(goAppPomodoro.slice(goAppPomodoro.indexOf('func questionOwnsTheSlot'))) &&
-    /unansweredQuestionKind/.test(goAppPomodoro),
-  'the refusal does not say which question is holding the slot',
-);
-check(
-  'the frontend turns the refused gesture into "go answer it"',
-  // A silent no-op would look like the pet ignoring a double click; the caret
-  // landing in the box is the explanation, and a toast would be invisible here.
-  /function bubbleAwaitingAnswer\(\)/.test(mainJs) &&
-    /if \(bubbleAwaitingAnswer\(\)\) \{\s*\n\s*focusAnswer\(\);/.test(mainJs) &&
-    /function focusAnswer\(\)/.test(mainJs) &&
-    /els\.bubbleInput\.focus\(\)/.test(mainJs),
-  'a double click on the pet silently does nothing while the summary prompt is up',
-);
-check(
-  'the surface still takes the slot from a notification and the panel',
-  // Deferring to a question must not make the surface defer to everything: a
-  // reminder asks nothing, and the panel is the record view. The guard is the one
-  // in OpenPluginSurface, and it is expressed as "a question kind is waiting" -
-  // BubbleReminder is not one, so it is still replaced.
-  /unansweredQuestionKind\(\); kind != BubbleNone/.test(
-    fs.readFileSync(path.join(root, 'app_plugin_surface.go'), 'utf8'),
-  ) &&
-    /func \(a \*App\) unansweredQuestionKind\(\) string \{/.test(goAppPomodoro) &&
-    /BubbleReminder/.test(
-      goAppPomodoro.slice(goAppPomodoro.indexOf('func (a *App) unansweredQuestionKind')),
-    ) === false,
-  'the surface now defers to reminders too, so the conversation can be blocked',
-);
-check(
-  'the picker cannot be eaten by the popup either',
-  // All three unanswered kinds are protected, not just the summary: the picker is
-  // the only way to start a focus phase, and the plan prompt is its continuation,
-  // so displacing either silently loses the user's half-made decision.
-  /func \(a \*App\) unansweredQuestionKind\(\) string \{/.test(goAppPomodoro) &&
-    /if a\.bubble\.Kind == BubblePick \|\| a\.bubble\.Kind == BubbleSummary \|\| a\.bubble\.Kind == BubblePlan \{/.test(
-      goAppPomodoro,
-    ),
-  'only the summary prompt is protected, so the picker can still be displaced',
-);
-check(
-  'the refusal names all three questions differently',
-  // "choose a todo", "write the summary" and "write the plan" are three different
-  // things to go and do, so one shared sentence would send the user to the wrong
-  // one. Go's own tests assert the three strings are pairwise distinct; what is
-  // checked here is that the plan branch exists at all.
-  /case BubblePlan:/.test(goAppPomodoro.slice(goAppPomodoro.indexOf('func questionOwnsTheSlot'))),
-  'the plan question has no explanation of its own for the refusal',
-);
-// --- 9d. Enter confirms the summary -----------------------------------------
-//
-// The bubble is not a <form>, so without an explicit handler Enter inserts a
-// newline and the user has to reach for the mouse to release the gate. The IME
-// check is the load-bearing part: typing Chinese, the Enter that commits a
-// candidate would otherwise save a half-finished summary.
-check(
-  'Enter confirms the summary',
-  /els\.bubbleInput\.onkeydown = \(e\) => \{/.test(mainJs) &&
-    /e\.key === 'Enter' && !e\.shiftKey && !e\.isComposing/.test(mainJs) &&
-    /saveSummary\(b\.recordId, els\.bubbleInput\.value\)/.test(mainJs),
-  'Enter does not confirm the summary, so the gate needs the mouse',
-);
-check(
-  'Enter confirms the plan too',
-  // The plan prompt is a second gate, and it must be answerable from the keyboard
-  // for the same reason: the bubble is not a <form>, so without this handler Enter
-  // would insert a newline and the timer would stay parked until the user reached
-  // for the mouse. Both buttons go through the same call, with the empty string as
-  // a real answer - "skip" is not a dismissal.
-  /startWithPlan\(els\.bubbleInput\.value\)/.test(mainJs) &&
-    /startWithPlan\(''\)/.test(mainJs) &&
-    /App\.StartPomodoroWithPlan\(plan\)/.test(mainJs),
-  'Enter does not answer the plan prompt, or "skip" cannot start the focus',
-);
-check(
-  'the plan prompt advertises Enter',
-  // Written at RUNTIME rather than in index.html: the textarea is shared with the
-  // summary prompt, whose own attribute is the one in the markup, so the plan
-  // branch has to set its hint when it renders.
-  /placeholder = '这件事是…（可留空，Enter 开始）'/.test(mainJs) &&
-    /placeholder="写点什么…（Enter 保存）"/.test(html),
-  'the plan placeholder does not say what Enter does, or the summary one was overwritten',
-);
-check(
-  'the summary prompt gets its own placeholder back',
-  // The two prompts share one textarea, so the summary branch must restore its hint
-  // whenever it renders after the plan branch.
-  /placeholder = '写点什么…（Enter 保存）'/.test(mainJs),
-  'the plan placeholder leaks into the summary prompt',
-);
-check(
-  'the summary prompt advertises Enter',
-  /（Enter 保存）/.test(html),
-  'the placeholder does not say what Enter does',
-);
-check(
-  'the Enter handler cannot leak into another bubble kind',
-  // It is installed per render, so a stale handler from the previous summary
-  // prompt must be cleared or Enter would save a record while the reminder is up.
-  /els\.bubbleInput\.onkeydown = null;/.test(mainJs),
-  'a stale Enter handler survives into the next bubble',
+  /if \(b\.kind !== 'reminder'\) return;/.test(mainJs) &&
+    /function closePetMenu\(\) \{[\s\S]{0,120}App\.DismissBubble\(\)\.then\(applyLayout\)/.test(mainJs),
+  'reminders no longer auto-hide, or the menu card cannot be dismissed',
 );
 
 // --- 9e. The global hide/show shortcuts --------------------------------------
@@ -1026,22 +927,6 @@ check(
   'hiding does not actually hide the window',
 );
 check(
-  'hiding is refused while a summary is waiting',
-  // The summary prompt is the gate on the break; hiding it would park the timer
-  // forever with nothing on screen explaining why.
-  /if a\.pendingSummaryWaiting\(\) \{[\s\S]{0,140}return errSummaryBlocksHiding/.test(goHotkey),
-  'the pet can be hidden behind the summary prompt, stranding the pomodoro',
-);
-check(
-  'hiding is refused while the plan is waiting',
-  // The plan prompt is the gate on the FOCUS, and it has one extra edge over the
-  // summary: the records tab can edit a summary, but NOTHING in the panel can
-  // answer a plan question - so hiding the pet would be a dead end, not a nuisance.
-  /var errPlanBlocksHiding = errors\.New\(/.test(goHotkey) &&
-    /if a\.pendingPlanWaiting\(\) \{[\s\S]{0,140}return errPlanBlocksHiding/.test(goHotkey),
-  'the pet can be hidden behind the plan prompt, stranding the pomodoro',
-);
-check(
   'the hidden state is runtime-only, not persisted',
   // A saved "hidden" would have to be undone by a shortcut that may be
   // unavailable (another program can own the combination). Every launch starts
@@ -1105,62 +990,6 @@ check(
 // speaks unprompted at all, so there is no path that could talk to a hidden
 // window. A plugin that wants to speak on its own does so through pet.bubble,
 // which the reminder path already suppresses while hidden - the check above.
-check(
-  'a parked record is re-offered after a restart',
-  // Otherwise the gate becomes a dead end after any relaunch: the record survives
-  // on disk but the bubble does not.
-  /PendingRecordID != "" \{\s*\n\s*a\.DebugLog\("pomodoro: a record is still waiting/.test(goAppPomodoro),
-  'a restart leaves the timer parked with no prompt',
-);
-check(
-  'a hidden pet is brought back for a question the timer is parked behind',
-  // Refusing to hide WHILE a question waits only covers one order. The other one
-  // - hide first, then let a phase run out - would draw the prompt into an
-  // SW_HIDEd window: the timer parked forever, no pixels explaining why, and the
-  // only way out a shortcut the user has to remember.
-  /func \(a \*App\) revealForQuestion\(\)/.test(goHotkey) &&
-    /a\.revealForQuestion\(\)[\s\S]{0,220}Title:     "这一个番茄做了什么？"/.test(goAppPomodoro) &&
-    /a\.revealForQuestion\(\)[\s\S]{0,220}Title:     "接下来想专注做什么？"/.test(goAppPomodoro),
-  'a question can be raised into a hidden window, stranding the timer invisibly',
-);
-check(
-  'the pet is revealed WITHOUT being activated',
-  // The prompts deliberately do not steal the keyboard (the user is very likely
-  // typing elsewhere), so the reveal must not either: an activated pet would
-  // swallow their next keystroke into its own input box.
-  /func ShowNoActivate\(w Window\) error \{\s*\n\s*const swShowNoActivate = 4/.test(
-    fs.readFileSync(path.join(root, 'internal/desktop/desktop_windows.go'), 'utf8'),
-  ) &&
-    /return desktop\.ShowNoActivate\(hwnd\)/.test(goHotkey) &&
-    !/desktop\.Show\(hwnd\)[\s\S]{0,200}question reveal/.test(goHotkey),
-  'the reveal activates the pet and steals the keyboard from whatever the user was typing in',
-);
-check(
-  'answering a question hides the pet again',
-  // The reveal is temporary by definition: the whole point of hiding is to be
-  // left alone, so the pet has to go back the moment the gate is released. Every
-  // path that clears a gate calls it - the summary, the plan, giving the session
-  // up and switching the feature off.
-  /func \(a \*App\) hideAfterQuestion\(\)/.test(goHotkey) &&
-    (goAppPomodoro.match(/a\.hideAfterQuestion\(\)/g) || []).length >= 4,
-  'the pet stays on screen after the question that brought it back is answered',
-);
-check(
-  'an explicit show is not undone by answering a question',
-  // "I asked for it back" must not be reversed later by a prompt being answered.
-  // Both routes back have to settle the debt: the shortcut/tray (ShowPet) and
-  // opening the panel, which is one of the documented ways back.
-  /a\.hidden = false\s*\n\s*a\.revealedForQuestion = false/.test(goHotkey) &&
-    /a\.hidden = false\s*\n\s*a\.revealedForQuestion = false/.test(mainGo),
-  'answering a prompt hides a pet the user deliberately brought back',
-);
-check(
-  'a failed reveal does not record a debt',
-  // Nothing changed on screen, so nothing may change in the state: recording the
-  // debt anyway would hide a pet that was never shown.
-  /if err := a\.setQuestionVisibility\(true\); err != nil \{[\s\S]{0,420}a\.revealedForQuestion = true/.test(goHotkey),
-  'a reveal that failed still claims the pet is on screen only for a question',
-);
 
 // --- 10. The fixed voice is wired ------------------------------------------
 //
@@ -1213,16 +1042,16 @@ check(
   'the plugin has no way to store or play the audio it renders',
 );
 check(
-  'the permission vocabulary is the expected seventeen, and by `net.ws` + `llm.borrow` + `process` + `net.credentials` + `plugin.share` + `timer.control`',
+  'the permission vocabulary is the expected fifteen, and by `net.ws` + `llm.borrow` + `process` + `net.credentials` + `plugin.share`',
   // The count is asserted so that adding a permission is a VISIBLE two-place edit here,
   // and so that the "no background permission" decision cannot be quietly undone.
   //
-  // Seventeen, not eighteen: a headless frame is a manifest FIELD gated on an existing
+  // Fifteen, not sixteen: a headless frame is a manifest FIELD gated on an existing
   // permission (`events` for host events, `net.ws` for a socket a plugin holds open,
   // `net.fetch` for a polling plugin) rather than a permission of its own. A permission
   // with no method behind it would be a switch the user is asked about that does
   // nothing, which is the invariant the pet's own TestCapabilityTableIsComplete
-  // enforces. The negative assertion below is the same decision stated from the other
+  // enforces. The negative assertions below are the same decision stated from the other
   // side.
   //
   // The five additions each have a METHOD behind them: `net.ws` gates ws.open/send/close/
@@ -1232,18 +1061,22 @@ check(
   // the SECOND gate of net.fetch (recorded in that entry's `also`, which the pet's
   // completeness test counts), and `plugin.share` gates share.set/get/remove - the tray
   // two plugins use to hand each other a job without either one calling the other.
-  // `timer.control` gates timer.start/pause/resume/stop: driving the timer, as opposed
-  // to watching it, which is what timer.read already covered.
+  //
+  // Fifteen rather than seventeen because `timer.read` and `timer.control` retired with
+  // timer.state/start/pause/resume/stop: the pomodoro plugin keeps its own state machine
+  // and records now, so the host has no plugin-facing timer left to watch or to drive.
+  // The retired pair is asserted ABSENT, because putting one back would be a switch that
+  // unlocks nothing and the count alone would not say which entry left.
   (() => {
     const list = capsGo.slice(capsGo.indexOf('var AllowedPermissions'), capsGo.indexOf('func IsAllowedPermission'));
     const entries = [...list.matchAll(/Perm[A-Za-z]+,/g)];
-    return entries.length === 17 && /PermAudio,/.test(list) && /PermNetWS,/.test(list) &&
+    return entries.length === 15 && /PermAudio,/.test(list) && /PermNetWS,/.test(list) &&
       /PermLLMBorrow,/.test(list) && /PermProcess,/.test(list) &&
       /PermNetCredentials,/.test(list) && /PermPluginShare,/.test(list) &&
-      /PermTimerControl,/.test(list) &&
+      !/PermTimer(Read|Control)/.test(capsGo) &&
       !/PermBackground/.test(capsGo);
   })(),
-  'the permission vocabulary is not the expected seventeen entries (net.ws + llm.borrow + process + net.credentials + plugin.share + timer.control appended, background deliberately not)',
+  'the permission vocabulary is not the expected fifteen entries (net.ws + llm.borrow + process + net.credentials + plugin.share appended, timer.read/timer.control retired, background deliberately not)',
 );
 check(
   'net.credentials is only ever declared together with net.fetch',
@@ -1481,7 +1314,7 @@ check(
   (() => {
     const playback = [
       goAppPlugins,
-      fs.readFileSync(path.join(root, 'app_pomodoro.go'), 'utf8'),
+      fs.readFileSync(path.join(root, 'app_bubble.go'), 'utf8'),
       fs.readFileSync(path.join(root, 'app_reminder.go'), 'utf8'),
     ].join('\n');
     return !/internal\/tts/.test(playback) && !/\btts\./.test(playback);
@@ -1503,157 +1336,88 @@ check(
   'a synthesis setting survived the removal',
 );
 
-// --- 13. The records archive is folded by day -------------------------------
-// A flat list of every session ever put the newest records - the only ones anyone
-// reads - on top of an unbounded history. The fix is only correct if ALL of it
-// holds: the grouping, the fold, and the fact that the fold survives a re-render
-// (every todo toggle pushes a whole new state snapshot through applyState).
+// --- 13. The host timer's UI is GONE, and must stay gone --------------------
+//
+// This block used to hold nine checks about the records archive: the day grouping,
+// the fold that survived a re-render, the plan/actual row, the editor that saved both
+// lines in one write, and the two bindings that made the plan editable. All of it
+// described the host's timer, and the timer is the pomodoro plugin's now
+// (openspec/changes/todo-pomodoro-as-plugins): the plugin keeps its own sessions and
+// draws them in its own surface.
+//
+// So the checks are DELETED, not loosened, and what replaces them is the ABSENCE
+// check - which is the failure mode that still matters. Half a timer is worse than
+// none: an element main.js still looks up resolves to the element but has no state
+// behind it, a strip whose bindings are gone fails on the first click, and a
+// stylesheet rule for a card nobody draws is a rule that can silently win a cascade
+// later.
 check(
-  'the records list is grouped into collapsible days',
-  // The rows are built in JS, not markup, so the class is asserted on main.js and
-  // the styling on the stylesheet.
-  /renderRecordDay\(/.test(mainJs) &&
-    /className = 'record-day'/.test(mainJs) &&
-    /\.record-day-list\s*\{/.test(css) &&
-    /\.record-day-head\s*\{/.test(css),
-  'the day grouping or its styles are missing',
+  'no pomodoro strip, records archive or timer badge is left in the markup',
+  ['pomo-strip', 'pomo-phase', 'pomo-toggle', 'pomo-reset', 'records-list', 'records-fold',
+    'records-empty', 'records-total', 'timer-badge', 'bubble-plan', 'bubble-todo', 'bubble-input']
+    .every((id) => !htmlIds.has(id)),
+  'a control the host timer owned survived the timer',
 );
 check(
-  'the newest day is the one that starts open',
-  // Opening every group would be the flat list again; opening none would hide the
-  // data behind a click on first use.
-  /openRecordDays = new Set\(groups\.length \? \[groups\[0\]\.key\] : \[\]\)/.test(mainJs),
-  'the first render does not open the newest day',
+  'main.js renders no timer state',
+  // The binding scan above already proves no dead App.* call survives; this is the
+  // other half. A renderer reading `state.pomodoro` would paint a timer the host has
+  // stopped sending - every field on it would be undefined, and the strip would be
+  // blank rather than absent.
+  !/state\??\.pomodoro/.test(mainJs) &&
+    !/renderPomodoro|renderRecords|renderTimerBadge|tickCountdown/.test(mainJs) &&
+    !/recordTotals/.test(mainJs),
+  'main.js still reads a snapshot the host no longer sends',
 );
 check(
-  'a day the user collapsed stays collapsed across re-renders',
-  // The set is module state, not the DOM: applyState re-renders records on every
-  // state push, so a fold kept in the DOM would spring back open constantly.
-  /let openRecordDays = null/.test(mainJs) &&
-    /seenRecordDays/.test(mainJs) &&
-    /openRecordDays\.has\(group\.key\)/.test(mainJs),
-  'the fold state is not remembered outside the DOM',
+  'the stylesheet carries no rules for the retired cards',
+  !/\.pomo-strip|\.pomo-phase|\.record-day|\.record-item|\.badge\.timer|\.bubble-plan|\.bubble-todo|\.bubble-choice/.test(
+    css,
+  ),
+  'a stylesheet rule outlived the card it styled',
 );
 check(
-  'a newly appeared day opens by itself',
-  // A session finishing while the app is open (or the first record of a new day)
-  // must not land inside a closed group where the user cannot see it.
-  /!seenRecordDays\.has\(group\.key\)[\s\S]{0,80}openRecordDays\.add\(group\.key\)/.test(mainJs),
-  'a day that appears later would stay folded, hiding the new record',
-);
-check(
-  'the per-session row no longer repeats the date',
-  // The date is on the group header, so a per-row "12鏈?1鏃?18:00" is noise. What
-  // is left must be the clock time.
-  /formatClock\(rec\.endedAt\)/.test(mainJs) && !/formatStamp/.test(mainJs),
-  'the row still carries the day, or the clock formatter is unused',
-);
-check(
-  'the plan bubble has its own hint element',
-  // The summary prompt shows what the user set out to do above the box where they
-  // type what happened. It needs an element of its own - reusing the todo line
-  // would make one of the two sentences disappear - and it must sit between the
-  // todo hint and the list so the card reads in order.
-  htmlIds.has('bubble-plan') &&
-    /bubblePlan: \$\('bubble-plan'\)/.test(mainJs) &&
-    /<p id="bubble-plan" class="bubble-plan hidden"><\/p>\s*\n\s*<ul id="bubble-list"/.test(html) &&
-    /<p id="bubble-todo"[^>]*><\/p>\s*\n\s*<p id="bubble-plan"/.test(html),
-  'the plan hint line is missing, or it is not between the todo line and the list',
-);
-check(
-  'the plan hint line is reset on every render',
-  // It is shared with the plan prompt (which shows no plan line), so a render that
-  // did not hide it would leave the previous summary's plan on screen.
-  /els\.bubblePlan\.classList\.add\('hidden'\)/.test(mainJs) &&
-    /els\.bubblePlan\.textContent = `计划：\$\{b\.plan\}`/.test(mainJs),
-  'the plan line is not reset, so it can leak between bubbles',
-);
-check(
-  'the records row shows the plan above the actual result',
-  // The two-line layout, in order: what was planned first, what happened second.
-  // Without a plan the first line falls back to the todo name, which is what keeps
-  // records written before this feature looked the way they always did.
-  /const planText = rec\.plan \|\| rec\.todoTitle \|\| '未关联待办'/.test(mainJs) &&
-    /`计划：\$\{planText\}`/.test(mainJs) &&
-    /`实际：\$\{rec\.summary\}`/.test(mainJs) &&
-    /'实际：（未填写）'/.test(mainJs),
-  'the record row is not the plan/actual pair, or the fallback for old records is gone',
-);
-check(
-  'the records editor edits both lines in one write',
-  // Two textareas (plan first, then actual) saved through ONE binding: saving them
-  // separately could leave a record half-edited if the second call failed.
-  /App\.EditPomodoroRecord\(rec\.id, planInput\.value, summaryInput\.value\)/.test(mainJs) &&
-    (mainJs.match(/className = 'record-input'/g) || []).length === 2 &&
-    /planInput\.value = rec\.plan \|\| ''/.test(mainJs) &&
-    /summaryInput\.value = rec\.summary \|\| ''/.test(mainJs),
-  'the editor does not offer both fields, or it saves them in two calls',
-);
-check(
-  'the two new bindings exist in the generated module and its types',
-  // The generated files are committed, so a binding added on the Go side but not
-  // regenerated here would fail at runtime as "App.StartPomodoroWithPlan is not a
-  // function" - with nothing in the panel to explain it.
-  //
-  // The record's plan is `plan?: string` rather than a required `plan: string`
-  // because the Go field carries `omitempty`, and that is exactly what the Wails
-  // generator does with every omittable string (the sibling todoId/todoTitle are
-  // optional the same way). Asserting the required form here would be asserting
-  // against the generator, not against the wiring.
-  /export function StartPomodoroWithPlan\(arg1\)/.test(appJs) &&
-    /export function EditPomodoroRecord\(arg1, arg2, arg3\)/.test(appJs) &&
-    /StartPomodoroWithPlan\(arg1:string\):Promise<main\.State>/.test(appDts) &&
-    /EditPomodoroRecord\(arg1:string,arg2:string,arg3:string\):Promise<main\.State>/.test(appDts) &&
-    /plan\?: string;/.test(modelsTs) &&
-    /planEditedAt\?: any;/.test(modelsTs) &&
-    // And the constructor really assigns them, or the model would type-check and
-    // still drop the fields when a record round-trips through the frontend.
-    /this\.plan = source\["plan"\]/.test(modelsTs) &&
-    /this\.planEditedAt = this\.convertValues\(source\["planEditedAt"\], null\)/.test(modelsTs),
-  'a new binding or model field is missing from the generated types',
-);
-check(
-  'the records tab still scrolls inside the panel',
-  // Same rule as the settings tab: the panel's rectangle comes from the layout and
-  // the native region is cut to it, so the records list must scroll, never grow.
-  /\.record-list\s*\{[^}]*overflow-y:\s*auto/.test(css) &&
-    !/recordsList\.style\.(width|height)\s*=/.test(mainJs),
-  'records sizes itself or grows the panel',
+  'the timer badge is not stacked above the todo badge any more',
+  // The pair was one layout: the countdown sat above the count, and the count dropped
+  // when the countdown appeared. With one badge left there is no second element and no
+  // sibling rule, so the surviving badge owns the corner on its own.
+  !/\.badge\.timer/.test(css) && !/timerBadge/.test(mainJs),
+  'the two-badge stack is still wired up',
 );
 
 // --- 14. One scrollbar style across the panel -------------------------------
-// The settings tab and the todo list had private scrollbar rules while the records
-// list and the chat log were left on WebView2's default opaque grey widget, which
-// on a dark 380px panel reads as a different application.
+// The settings tab and the todo list had private scrollbar rules while the chat log
+// was left on WebView2's default opaque grey widget, which on a dark 380px panel reads
+// as a different application.
 check(
   'the scrollable surfaces share one scrollbar rule',
-  // Three selectors NOW: #tab-settings left with the settings page (阶段 3), the same way
-  // #tab-plugins left with the plugin tab and .voice-scroll with the voice studio. The
-  // group is still ONE rule rather than three copies, which is what the two checks below
-  // pin - the list here is the membership, they are the shape.
-  /\.todo-list,\s*\n\.record-list,\s*\n\.chat-log\s*\{/.test(css),
+  // TWO selectors NOW: the records list left with the host timer (the pomodoro plugin
+  // scrolls its own surface), the same way #tab-settings left with the settings page,
+  // #tab-plugins with the plugin tab and .voice-scroll with the voice studio. The group
+  // is still ONE rule rather than two copies, which is what the two checks below pin -
+  // the list here is the membership, they are the shape.
+  /\.todo-list,\s*\n\.chat-log\s*\{/.test(css),
   'the scrollable surfaces do not share one scrollbar rule',
 );
 check(
-  'the records list and the chat log are on that rule',
-  // These two are the ones the user reported as still default-styled.
-  /\.record-list::-webkit-scrollbar-thumb/.test(css) &&
+  'the todo list and the chat log are on that rule',
+  /\.todo-list::-webkit-scrollbar-thumb/.test(css) &&
     /\.chat-log::-webkit-scrollbar-thumb/.test(css),
   'a surface is still on the native scrollbar',
 );
 check(
   'the private scrollbar copies are gone',
-  // Leaving them would mean two competing definitions of the same widget. The
-  // test is on the SHAPE of each scrollbar rule - a rule that names only one
-  // surface is a private copy - rather than on a regex, because `#tab-settings`
-  // legitimately appears as the last selector of the consolidated group.
+  // Leaving one would mean two competing definitions of the same widget. The test is
+  // on the SHAPE of each scrollbar rule - a rule that names only one surface is a
+  // private copy - rather than on a regex, because a selector legitimately appears
+  // alone in the group's sibling rules.
   (() => {
     const rules = [...css.matchAll(/([^{}]*?)\{/g)]
       .map((m) => m[1])
       .filter((sel) => sel.includes('-webkit-scrollbar'));
-    // Three surfaces share the rule now that #tab-settings is gone. A rule naming only
-    // one is still a private copy, which is what this shape test is for.
-    return rules.length > 0 && rules.every((sel) => sel.split(',').length >= 3);
+    // Two surfaces share the rule now that #tab-settings and .record-list are gone. A
+    // rule naming only one is still a private copy, which is what this shape test is for.
+    return rules.length > 0 && rules.every((sel) => sel.split(',').length >= 2);
   })(),
   'a per-element scrollbar copy survived the consolidation',
 );
@@ -1661,7 +1425,7 @@ check(
   'the scrollbar is translucent and trackless',
   // It should read as a position hint, not as a control: no opaque track, no
   // fixed light grey, and narrow enough not to eat the 380px panel.
-  /\.record-list::-webkit-scrollbar-track[\s\S]{0,400}background:\s*transparent/.test(css) &&
+  /\.chat-log::-webkit-scrollbar-track[\s\S]{0,400}background:\s*transparent/.test(css) &&
     /scrollbar-color:\s*rgba\(255,\s*255,\s*255,\s*0\.\d+\)\s*transparent/.test(css),
   'the scrollbar has an opaque track or a hard-coded colour',
 );
@@ -1815,14 +1579,19 @@ check(
   'the plugin tries to launch the synthesis engine, which no plugin may do',
 );
 
-// The plugin's own interface, hosted by the market.
+// The plugin's own interface, hosted by the market (now: the control center).
 check(
   'the market can host a plugin interface',
   // It serves the plugin's files and answers its requests through the SAME shared
   // implementations the pet uses, so the sandbox, the traversal defence and the gate
   // have one implementation rather than two that can drift.
   /plugins\.ServePluginAsset/.test(marketPluginHost) &&
-    /PluginRequest/.test(marketPluginHost),
+    /PluginRequest/.test(marketPluginHost) &&
+    // …and a page actually MOUNTS one. Without this the Go side can host an interface that
+    // no window ever loads - which is the regression this whole change exists to undo.
+    /mountPlugin\(/.test(ccPluginFrameHost) &&
+    /plugin-asset\//.test(ccPluginFrame) &&
+    /Market\.PluginRequest|PluginRequest/.test(ccPluginFrame),
   'the market cannot host a plugin interface, so the workshop has nowhere to run',
 );
 check(
@@ -1831,22 +1600,23 @@ check(
   // which is the one thing the sandbox exists to prevent. The negative assertion is on
   // the ATTRIBUTE VALUE rather than on the word, because the comment above the line
   // necessarily names the flag it must not have.
-  /setAttribute\('sandbox', 'allow-scripts'\)/.test(marketPluginUI) &&
-    !/sandbox',\s*'[^']*allow-same-origin/.test(marketPluginUI) &&
-    !/frame\.setAttribute\('sandbox'[^;]*allow-same-origin/.test(marketPluginUI),
+  /setAttribute\('sandbox', 'allow-scripts'\)/.test(ccPluginFrame) &&
+    !/sandbox',\s*'[^']*allow-same-origin/.test(ccPluginFrame) &&
+    !/frame\.setAttribute\('sandbox'[^;]*allow-same-origin/.test(ccPluginFrame),
   'the hosted plugin can reach the host page',
 );
 check(
   'the market mounts an interface only for an installed and ENABLED plugin',
   // Switching a plugin off must stop it RUNNING, not merely stop it being listed: an
   // interface left on screen would keep its document alive with its permissions intact.
-  // Round 7 made the gate a named condition, because the workspace BOX has to disappear
-  // with the frame - a caption strip over an empty area is furniture around nothing.
-  /const hasInterface = Boolean\(inst && inst\.Manifest && inst\.Enabled && inst\.Manifest\.entry\)/
-    .test(marketMainJs) &&
-    /if \(hasInterface\) \{\s*mountPluginUI\(inst, els\)/.test(marketMainJs) &&
-    /clearPluginUI\(els\)/.test(marketMainJs) &&
-    /show\(els\.panelInterface, hasInterface\)/.test(marketMainJs),
+  // Two places have to agree: the page decides whether to render the host at all, and the
+  // host itself refuses to mount without an entry.
+  /function mountable\(r: PluginRow \| null\): boolean \{\s*return Boolean\(r && r\.Manifest && r\.Enabled && r\.Manifest\.entry\);/
+    .test(ccPluginsPage) &&
+    /\{#if mountable\(selected\)\}/.test(ccPluginsPage) &&
+    /if \(!id \|\| !entry \|\| !inst\?\.Enabled\) return '';/.test(ccPluginFrameHost) &&
+    /if \(!target \|\| !mountKey\) return;/.test(ccPluginFrameHost) &&
+    /return \(\) => frame\.destroy\(\);/.test(ccPluginFrameHost),
   'a disabled plugin keeps a live interface in the market window',
 );
 
@@ -2111,12 +1881,15 @@ check(
       /case 'theme':/.test(p.js) &&
       /function applyTheme\(/.test(p.js),
   ) &&
-    // …and the host has to actually say it, on both channels.
-    /plugin-asset\/\$\{id\}\/\$\{entry\}\?theme=\$\{windowTheme\(\)\}/.test(marketPluginUI) &&
-    /theme: current \? current\.theme : windowTheme\(\)/.test(marketPluginUI) &&
-    /export function setFrameTheme\(/.test(marketPluginUI) &&
-    /setFrameTheme\(theme\)/.test(marketMainJs) &&
-    /\[data-theme="light"\]/.test(marketCss),
+    // …and the host has to actually say it, on both channels: the scheme on the frame URL
+    // (first paint, no flash) and the `theme` message (a switch while the document runs).
+    // Read from the CONTROL CENTER's frame host now - the old market frontend is not built
+    // any more, so assertions against it certified code no window could run.
+    /plugin-asset\/\$\{pluginId\}\/\$\{entry\}\?theme=\$\{theme\}/.test(ccPluginFrame) &&
+    /if \(initialised\) post\(\{ type: 'theme', theme: current \}\)/.test(ccPluginFrame) &&
+    /theme: current,/.test(ccPluginFrame) &&
+    /document\.documentElement\.dataset\.theme === 'light'/.test(ccPluginFrame) &&
+    /:root\[data-theme='light'\]/.test(ccTokens),
   'a plugin (or the host) does not carry the window’s scheme, so it stays dark in a light window',
 );
 check(
@@ -2150,19 +1923,26 @@ check(
 check(
   'the market explains every permission the backend allows',
   // Zero hits for a permission the user is asked to grant but that renders as a bare
-  // id in the install sheet. The two tables cannot be shared (the market is a
-  // separate program with its own bundle), so they are compared here: the Go const
-  // block's string values against the market's label map keys. This is what makes
-  // adding a permission a two-place edit instead of a consent prompt nobody can read.
+  // id. This check used to compare the Go const block against a map in the market's OLD
+  // frontend (`frontend/src/main.js` → `PERMISSION_LABELS`); that file is not built any
+  // more, so the copy it guarded is gone with it.
+  //
+  // What replaced it is BETTER than a second table: the shipping page renders the host's
+  // own wording (`Market.PermissionLabels()` → `main.LabelPair`), so "consent described two
+  // ways is consent to two things" cannot happen at all. The remaining duplicate is the
+  // DEV STUB in `cc/src/lib/bridge.ts`, which must stay complete - a browser that shows a
+  // bare `plugin.share` is a browser where nobody notices the label really was dropped.
+  //
+  // AGENTS.md §3.1 lists this as one of the seven places a new permission must be added.
   (() => {
     const consts = capsGo.slice(capsGo.indexOf('const ('), capsGo.indexOf('// AllowedPermissions'));
     const allowed = [...consts.matchAll(/Perm[A-Za-z]+\s*=\s*"([^"]+)"/g)].map((m) => m[1]);
-    const marketSrc = fs.readFileSync(
-      path.join(root, 'tools/plugin-market/frontend/src/main.js'), 'utf8');
-    const mapAt = marketSrc.indexOf('const PERMISSION_LABELS');
-    const mapBody = marketSrc.slice(mapAt, marketSrc.indexOf('};', mapAt));
-    const labelled = [...mapBody.matchAll(/^\s*'?([a-z][a-z.]*)'?:\s*'/gm)].map((m) => m[1]);
-    if (allowed.length === 0 || labelled.length === 0) return false;
+    const stubAt = ccBridge.indexOf('const LABELS');
+    const stubBody = ccBridge.slice(stubAt, ccBridge.indexOf('];', stubAt));
+    const labelled = [...stubBody.matchAll(/^\s*\['([a-z][a-z.]*)',/gm)].map((m) => m[1]);
+    // …and the real screen must ask the HOST, not a map of its own.
+    const asksHost = /PermissionLabels\(\)/.test(ccBridge) && /PermissionLabels\(/.test(ccPluginsPage);
+    if (allowed.length === 0 || labelled.length === 0 || !asksHost) return false;
     const missing = allowed.filter((name) => !labelled.includes(name));
     const extra = labelled.filter((name) => !allowed.includes(name));
     if (missing.length || extra.length) {

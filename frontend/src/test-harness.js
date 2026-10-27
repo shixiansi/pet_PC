@@ -50,20 +50,14 @@ function installBridge(handlers = {}) {
   // harness - T113 compares the two as sets.
   const methods = [
     'AddTodo', 'ChoosePetImage', 'ClearDone', 'ClosePluginSurface',
-    'ConfirmPomodoroStart', 'DebugLog', 'DeleteTodo', 'DismissBubble', 'DragTo',
-    'EditPomodoroRecord', 'EndDrag', 'GetLayout', 'GetState', 'HidePet',
+    'DebugLog', 'DeleteTodo', 'DismissBubble', 'DragTo',
+    'EndDrag', 'GetLayout', 'GetState', 'HidePet',
     'HidePetForUser', 'OpenChat', 'OpenChatPluginSurface', 'OpenPetMenu', 'OpenPluginMarket',
-    'OpenPluginSurface', 'OpenTodoPanelFromBubble', 'OpenTodoPanelFromChat',
-    'PausePomodoro', 'PetImageURL', 'PluginMarketCandidates',
-    'PluginMarketPath', 'PluginRequest', 'PluginsInstalled', 'PomodoroRecords',
-    'Quit', 'Ready', 'RemindNow', 'ResetPetImage', 'ResetPomodoro',
-    'ResetToDefaultPosition', 'ResumePomodoro',
-    'SaveHotkeySettings', 'SavePomodoroSettings', 'SavePomodoroSummary',
-    'SaveReminderSettings', 'SetAutostart', 'SetBubbleHover',
-    'SetPanelOpen', 'SetPomodoroEnabled', 'SetReminderEnabled', 'SetScale',
-    'SetSnapToEdge', 'ShowPet', 'ShowPetForUser', 'ShowPomodoroPicker', 'SkipPhase',
-    'SnapNow', 'StartDrag', 'StartPomodoro', 'StartPomodoroWithPlan', 'StopPomodoro',
-    'TogglePanel', 'ToggleTodo', 'UpdateTodo',
+    'OpenPluginSurface', 'OpenTodoPanelFromBubble', 'OpenTodoPanelFromChat', 'SetPluginSurfaceBlocks',
+    'PetImageURL', 'PluginMarketCandidates',
+    'PluginMarketPath', 'PluginRequest', 'PluginsInstalled', 'Quit', 'Ready', 'RemindNow', 'ResetPetImage', 'ResetToDefaultPosition', 'SaveHotkeySettings', 'SaveReminderSettings', 'SetAutostart', 'SetBubbleHover',
+    'SetPanelOpen', 'SetReminderEnabled', 'SetScale',
+    'SetSnapToEdge', 'ShowPet', 'ShowPetForUser', 'SnapNow', 'StartDrag', 'TogglePanel', 'ToggleTodo', 'UpdateTodo',
     'WindowReady',
   ];
   const app = {};
@@ -161,9 +155,10 @@ export function baseLayout(over = {}) {
 export function baseState(over = {}) {  return {
     config: {
       petScale: 1, snapToEdge: true, edgeMargin: 8,
-      pomodoroOnStartup: false, autoStartNextPhase: true, remindDuringBreak: true,
-      pomodoroSound: true, focusMinutes: 25, shortBreakMinutes: 5,
-      longBreakMinutes: 15, longBreakEvery: 4,
+      // No pomodoro* keys: the timer, its phase lengths and its "sound" switch belong
+      // to the pomodoro plugin's own config now, and the pet's GetState does not carry
+      // them. A fixture that still sent them would let a renderer reading
+      // config.focusMinutes pass in jsdom while the real snapshot has stopped sending it.
       reminderEnabled: false, reminderOnStartup: false, reminderIntervalMin: 30,
       reminderJitterMaxMin: 3, reminderFrom: '09:00', reminderTo: '22:00',
       reminderMaxItems: 3, reminderAutoHideSec: 12, remindWhenEmpty: false,
@@ -176,16 +171,9 @@ export function baseState(over = {}) {  return {
     todos: [], stats: { total: 0, open: 0, overdue: 0, dueSoon: 0 },
     petImageUrl: '', hasCustomImage: false, dataDir: 'C:\\data', autostart: false,
     now: new Date().toISOString(),
-    pomodoro: {
-      enabled: false, phase: 'idle', runState: 'idle', label: '番茄钟未开启',
-      remainingSec: 0, countdown: '', endsAtMs: 0, running: false, focusing: false,
-      completedCount: 0, longBreakEvery: 4, untilLongBreak: 0, pendingSummary: false,
-      ...(over.pomodoro || {}),
-    },
-    records: over.records || [],
-    recordTotals: over.recordTotals || { count: 0, focusMinutes: 0 },
-    reminder: { enabled: false },
-    voice: { enabled: false, pomodoro: true, reminder: false, lines: 0, dir: '', speaking: false },
+    // No pomodoro / records / recordTotals / voice block: State carries none of them
+    // (app.go's State comment says why). The timer's phase, its archive and its
+    // counters are the pomodoro plugin's, and speech is the voice plugin's.
     hotkeys: { enabled: false, show: '', hide: '', active: false, note: '' },
     petVisible: true,
   };
@@ -207,9 +195,17 @@ export function layout({ panelOpen = false, bubble = null, pluginSurface = null 
   };
 }
 
-/** A bubble payload with the geometry Go gives that kind. */
+/**
+ * A bubble payload with the geometry Go gives that kind.
+ *
+ * TWO kinds left (app_bubble.go): the reminder the host raises itself, and the pet's
+ * own menu. The picker, the summary prompt and the plan prompt were the host timer's
+ * questions and went with it; asking for one of them here would build a card the
+ * frontend no longer has a branch for, and the test would pass while asserting on a
+ * blank rectangle.
+ */
 export function bubbleView(kind, over = {}) {
-  const heights = { pick: 200, summary: 160, plan: 180, reminder: 140 };
+  const heights = { reminder: 140, menu: 226 };
   return {
     kind, title: '', x: 168, y: 180, w: 300, h: heights[kind] ?? 140,
     onRight: true, ...over,

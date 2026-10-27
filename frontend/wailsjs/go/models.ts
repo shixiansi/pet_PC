@@ -48,13 +48,8 @@ export namespace main {
 	export class BubbleView {
 	    kind: string;
 	    title: string;
-	    todoTitle?: string;
-	    plan?: string;
-	    recordId?: string;
 	    items?: BubbleItem[];
-	    selectedId?: string;
 	    more?: number;
-	    allowUnattached: boolean;
 	    x: number;
 	    y: number;
 	    w: number;
@@ -69,13 +64,8 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.kind = source["kind"];
 	        this.title = source["title"];
-	        this.todoTitle = source["todoTitle"];
-	        this.plan = source["plan"];
-	        this.recordId = source["recordId"];
 	        this.items = this.convertValues(source["items"], BubbleItem);
-	        this.selectedId = source["selectedId"];
 	        this.more = source["more"];
-	        this.allowUnattached = source["allowUnattached"];
 	        this.x = source["x"];
 	        this.y = source["y"];
 	        this.w = source["w"];
@@ -138,6 +128,8 @@ export namespace main {
 	    r: number;
 	    ellipse: boolean;
 	    tailX: number;
+	    hidden: boolean;
+	    room: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new PluginSurfaceRect(source);
@@ -153,6 +145,8 @@ export namespace main {
 	        this.r = source["r"];
 	        this.ellipse = source["ellipse"];
 	        this.tailX = source["tailX"];
+	        this.hidden = source["hidden"];
+	        this.room = source["room"];
 	    }
 	}
 	export class PluginSurfaceView {
@@ -291,96 +285,6 @@ export namespace main {
 	        this.error = source["error"];
 	    }
 	}
-	export class PomodoroSettingsInput {
-	    onStartup: boolean;
-	    autoStartNextPhase: boolean;
-	    remindDuringBreak: boolean;
-	    sound: boolean;
-	    focusMinutes: number;
-	    shortBreakMinutes: number;
-	    longBreakMinutes: number;
-	    longBreakEvery: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new PomodoroSettingsInput(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.onStartup = source["onStartup"];
-	        this.autoStartNextPhase = source["autoStartNextPhase"];
-	        this.remindDuringBreak = source["remindDuringBreak"];
-	        this.sound = source["sound"];
-	        this.focusMinutes = source["focusMinutes"];
-	        this.shortBreakMinutes = source["shortBreakMinutes"];
-	        this.longBreakMinutes = source["longBreakMinutes"];
-	        this.longBreakEvery = source["longBreakEvery"];
-	    }
-	}
-	export class PomodoroStartInput {
-	    todoId: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new PomodoroStartInput(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.todoId = source["todoId"];
-	    }
-	}
-	export class PomodoroView {
-	    enabled: boolean;
-	    phase: string;
-	    runState: string;
-	    label: string;
-	    remainingSec: number;
-	    countdown: string;
-	    endsAtMs: number;
-	    running: boolean;
-	    focusing: boolean;
-	    todoTitle?: string;
-	    completedCount: number;
-	    longBreakEvery: number;
-	    untilLongBreak: number;
-	    pendingSummary: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new PomodoroView(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.enabled = source["enabled"];
-	        this.phase = source["phase"];
-	        this.runState = source["runState"];
-	        this.label = source["label"];
-	        this.remainingSec = source["remainingSec"];
-	        this.countdown = source["countdown"];
-	        this.endsAtMs = source["endsAtMs"];
-	        this.running = source["running"];
-	        this.focusing = source["focusing"];
-	        this.todoTitle = source["todoTitle"];
-	        this.completedCount = source["completedCount"];
-	        this.longBreakEvery = source["longBreakEvery"];
-	        this.untilLongBreak = source["untilLongBreak"];
-	        this.pendingSummary = source["pendingSummary"];
-	    }
-	}
-	export class RecordTotals {
-	    count: number;
-	    focusMinutes: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new RecordTotals(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.count = source["count"];
-	        this.focusMinutes = source["focusMinutes"];
-	    }
-	}
 	export class ReminderSettingsInput {
 	    onStartup: boolean;
 	    enabled: boolean;
@@ -411,26 +315,6 @@ export namespace main {
 	        this.silentFullscreen = source["silentFullscreen"];
 	    }
 	}
-	export class ReminderView {
-	    enabled: boolean;
-	    nextAt?: string;
-	    nextInSec: number;
-	    suppressed?: string;
-	    missed: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new ReminderView(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.enabled = source["enabled"];
-	        this.nextAt = source["nextAt"];
-	        this.nextInSec = source["nextInSec"];
-	        this.suppressed = source["suppressed"];
-	        this.missed = source["missed"];
-	    }
-	}
 	export class State {
 	    config: store.Config;
 	    todos: store.Todo[];
@@ -440,10 +324,6 @@ export namespace main {
 	    dataDir: string;
 	    autostart: boolean;
 	    now: string;
-	    pomodoro: PomodoroView;
-	    records: store.PomodoroRecord[];
-	    recordTotals: RecordTotals;
-	    reminder: ReminderView;
 	    hotkeys: desktop.HotkeyView;
 	    petVisible: boolean;
 	    warnings?: string[];
@@ -462,10 +342,6 @@ export namespace main {
 	        this.dataDir = source["dataDir"];
 	        this.autostart = source["autostart"];
 	        this.now = source["now"];
-	        this.pomodoro = this.convertValues(source["pomodoro"], PomodoroView);
-	        this.records = this.convertValues(source["records"], store.PomodoroRecord);
-	        this.recordTotals = this.convertValues(source["recordTotals"], RecordTotals);
-	        this.reminder = this.convertValues(source["reminder"], ReminderView);
 	        this.hotkeys = this.convertValues(source["hotkeys"], desktop.HotkeyView);
 	        this.petVisible = source["petVisible"];
 	        this.warnings = source["warnings"];
@@ -536,14 +412,6 @@ export namespace store {
 	    autostart: boolean;
 	    marketBaseUrl: string;
 	    globalHotkeys: boolean;
-	    pomodoroOnStartup: boolean;
-	    autoStartNextPhase: boolean;
-	    remindDuringBreak: boolean;
-	    pomodoroSound: boolean;
-	    focusMinutes: number;
-	    shortBreakMinutes: number;
-	    longBreakMinutes: number;
-	    longBreakEvery: number;
 	    reminderOnStartup: boolean;
 	    reminderEnabled: boolean;
 	    reminderIntervalMin: number;
@@ -582,14 +450,6 @@ export namespace store {
 	        this.autostart = source["autostart"];
 	        this.marketBaseUrl = source["marketBaseUrl"];
 	        this.globalHotkeys = source["globalHotkeys"];
-	        this.pomodoroOnStartup = source["pomodoroOnStartup"];
-	        this.autoStartNextPhase = source["autoStartNextPhase"];
-	        this.remindDuringBreak = source["remindDuringBreak"];
-	        this.pomodoroSound = source["pomodoroSound"];
-	        this.focusMinutes = source["focusMinutes"];
-	        this.shortBreakMinutes = source["shortBreakMinutes"];
-	        this.longBreakMinutes = source["longBreakMinutes"];
-	        this.longBreakEvery = source["longBreakEvery"];
 	        this.reminderOnStartup = source["reminderOnStartup"];
 	        this.reminderEnabled = source["reminderEnabled"];
 	        this.reminderIntervalMin = source["reminderIntervalMin"];
@@ -612,58 +472,6 @@ export namespace store {
 	        this.llmProactive = source["llmProactive"];
 	        this.llmProactiveMinGapMin = source["llmProactiveMinGapMin"];
 	        this.llmDailyBudget = source["llmDailyBudget"];
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	export class PomodoroRecord {
-	    id: string;
-	    todoId?: string;
-	    todoTitle?: string;
-	    // Go type: time
-	    startedAt: any;
-	    // Go type: time
-	    endedAt: any;
-	    focusMinutes: number;
-	    summary: string;
-	    // Go type: time
-	    editedAt?: any;
-	    plan?: string;
-	    // Go type: time
-	    planEditedAt?: any;
-	
-	    static createFrom(source: any = {}) {
-	        return new PomodoroRecord(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.todoId = source["todoId"];
-	        this.todoTitle = source["todoTitle"];
-	        this.startedAt = this.convertValues(source["startedAt"], null);
-	        this.endedAt = this.convertValues(source["endedAt"], null);
-	        this.focusMinutes = source["focusMinutes"];
-	        this.summary = source["summary"];
-	        this.editedAt = this.convertValues(source["editedAt"], null);
-	        this.plan = source["plan"];
-	        this.planEditedAt = this.convertValues(source["planEditedAt"], null);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
