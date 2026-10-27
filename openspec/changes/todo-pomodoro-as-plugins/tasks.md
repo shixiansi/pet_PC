@@ -171,6 +171,36 @@
 `plugin-pomodoro` **2.0.0 已经发布并安装**（`market/dist/…-2.0.0.zip`、`index.json` 里的 sha256、
 `%APPDATA%` 里那五个文件与源逐字节相同，2026-10-27 复核）——之前那条"未发布"的记录是过期的。
 
+### 0.2 剩下的两批（拆开做，各自能回退；决定见 design.md §6b）
+
+**批次 A：`todos.*` 退休 + 待办数据搬进插件**（先做；做完不单独发布，紧接 B）
+
+- [ ] 待办插件：写操作后把列表发布到 `share` 的 `todo-list`（`{id,title,done,due}` JSON 数组）；
+      读也不再走 `todos.*`，改自己的 `storage`（`todos-v1`）
+- [ ] 宿主：首次启动把 `todos.json` 迁进待办插件的私有存储（幂等、写完才标记、原文件改名 `.bak`），
+      复用 `internal/plugins/privatestore.go` 的写入路径，别手拼路径
+- [ ] 番茄钟插件：`todos.read` → `shareRead: ["com.shixiansi.plugin-todo/todo-list"]`，
+      选待办的列表改读 `share.get`（一次读，落后一个 tick 无所谓）
+- [ ] 对话插件：删 `todo_list` / `todo_add` / `todo_complete` 三条工具与 `todos.*` 权限，版本 +1
+- [ ] 宿主：删五个 `todos.*` 方法与 `todos.changed`；退休 `todos.read` / `todos.write`
+      （§3.1 的七处 + README 表格与标题数字；`timer.*` 那次就是漏了控制中心那份 `LABELS`）
+- [ ] 宿主：`State.Todos` / `Stats`、五个待办绑定、`OpenTodoPanelFromBubble` / `OpenTodoPanelFromChat`
+      —— **和 B 一起删**（A 单独做时面板的数据源先变成插件，不先砍接口）
+- [ ] 三个插件打包 + 安装 + `index.json` 与内嵌 sample 同步（一次做完，否则用户那边的入口会断）
+
+**批次 B：面板退场**（A 之后，纯删）
+
+- [ ] 前端删面板：`#panel` 与它的全部子元素、`els.panel*`、`renderTodos` / `renderTodoItem` /
+      `renderSummary` / `renderBadge` / 表单接线、`switchTab` / `setChatTabAvailable` / `#chat-slot`
+- [ ] 左键解绑：`pressPet` 只保留拖动与右键菜单；`TogglePanel` / `SetPanelOpen` 两个绑定删除
+- [ ] `panelSlot` → `menuCell`（design.md §6b 决定 D2）：宿主校验、前端两处 `openSlotPluginSurface`、
+      三个官方插件的 manifest + 已发布的那份 manifest 同一次重打包
+- [ ] 三份假绑定（`App.js`/`App.d.ts` 由 `wails generate module` 重生成）、两份 harness 名单
+- [ ] `check-frontend.cjs`：删描述面板/待办 tab 的断言，新增"左键不再开面板"与
+      "九格每格都能打开东西"两条
+- [ ] 文档：README 的「使用」表（左键那一行、面板两行）、AGENTS §1 的立场（"待办/番茄钟/提醒是主角"
+      要改成"桌宠是入口，三件事都在插件里"）、`docs/reminder-pomodoro.md` 的 §8–§10 关于面板的那些句子
+
 ## 阶 1：待办插件接管数据与提醒
 
 - [x] 查清谁在用 `todos.read` / `todos.write`
