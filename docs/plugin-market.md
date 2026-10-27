@@ -343,6 +343,109 @@ jsdom 不做布局，这类问题只有像素门禁和截图能抓。
 
 ---
 
+### 2.8 界面重做（第八轮：换到 Svelte 之后，插件自己的界面丢了又接回来）
+
+`openspec/changes/ui-rebuild` 把本程序的界面搬到了 `cc/`（Svelte 5 + TypeScript），
+`tools/build-all.ps1` 的做法是「先 build cc，再用 `cc/dist` 覆盖 `frontend/dist`」——后者才是
+`//go:embed all:frontend/dist` 读的那棵树。于是**旧的那套 JS 页面（`frontend/`）不再出货**，
+而 `ui-rebuild` 的阶段 3 只写了「插件列表与权限勾选搬进控制中心」，**插件界面、市场目录与
+安装、配置编辑器三项从来没有被列进任务**，一起丢了。
+
+代价不是「少看一块界面」：`market/` 四个插件里，voice / qq / bilibili 三个是
+`panel: false`、`surface: []`、`background: true`——它们的 `entry` **只可能由本程序以
+`surface.slot = "workshop"` 挂起来**。本程序不挂，它们在任何程序里都没有可见界面，只剩桌宠里
+一个看不见的常驻帧。修复记在 `openspec/changes/plugin-page-workspace`。
+
+现在的插件页是**主从布局**：
+
+| 位置 | 是什么 | 为什么 |
+|---|---|---|
+| 左栏 | 已装插件列表（状态点 / 名字 / 版本） | 一屏扫得完；名字缺 ID 的行会把对象原样打出来 |
+| 右栏 | **这个插件自己的界面**（沙箱 iframe，`/plugin-asset/<id>/<entry>?theme=…`） | 见上：三个插件的界面只可能活在这里 |
+| 「权限 n/m」 | `<details>` 上挂的**绝对定位面板** | 沿用 §2.3 的结论：展开不能把工坊往下挤。关闭时**不占布局**，内容仍在 DOM 里（`render-smoke.mjs` 因此能断言文案来自宿主，而 jsdom 本来也不实现 `<details>` 的点击开关） |
+| 「设置」 | **弹窗**，只在插件声明了 `config[]` 时才出现 | 同一个结论的第三面：配置表单在流程里占高度、把工坊挤下去。表单区自己滚、`关闭/保存` 固定在底部（12 项的插件在 520px 高的窗口里会把 `保存` 顶到视口外，§2.3 记过这件事）。没有声明就没有按钮——一个打开空表单的齿轮和"什么都不做的开关"是同一类缺陷 |
+| 「展开界面」 | 收起左栏，界面拿到整页宽度 | 980−168（侧栏）−48（内边距）−232（左栏）≈ 510px，而语音工坊在 **720px** 就塌成单列；收起左栏正好过线。侧栏不动：再省 168px 要跨组件控制 `App.svelte`，不值 |
+
+**配置编辑器（`manifest.config`）的取舍**，与旧 JS 窗口一致，因为每一条都是被撞过的：
+
+- **五种控件**全部来自声明（`text` / `number` / `bool` / `secret` / `select[+multiple]`），
+  页面不认识任何插件的私有键名——`select` 的选项来自清单，多选的值仍是**逗号串**
+  （插件那边本来就是 `split`，不发明第二种编码）。
+- **`secret` 永远不回填**：宿主只给 `secretSet` 与 `secretMask`，输入框从空开始，
+  **留空 = 保持不变**，输入新值才替换。把掩码写回去会把密钥换成几个圆点。
+- **布尔总是发送**（`true`/`false`），因为"没勾"就是它的值；空字段保存时落回**声明的默认值**，
+  免得存的值和框里显示的东西对不上。
+- 保存成功后**关掉弹窗**并刷新（`usage` 这类行会变）；失败则**保持打开**——里面有东西要改。
+- 打开/保存都**不会移动插件的界面**：弹窗是 `position: fixed` 的浮层，实测帧的 y/高度前后一致
+  （见下面那张表）。
+
+
+三条实现上的硬约定（都在 `cc/src/lib/plugin-frame.ts` 与
+`cc/src/components/PluginFrame.svelte` 的注释里）：
+
+1. **iframe 归模块，不归 Svelte。** 模板里的条件块/`{#key}`/列表 diff 都会重建节点，
+   而重建一个 iframe 就是销毁那个正在按用户权限运行的文档。Svelte 只给一个稳定挂载点，
+   帧由 `$effect` 命令式建、命令式销毁。
+2. **重挂的判据是一个字符串键**：`id | version | entry | 排序后的 granted`。
+   `$derived` 只在值变化时通知下游，所以刷新列表、切标签都不会把工坊拆了。
+   `granted` 进键是**故意的**：改授权会重启界面（界面上写着这句话）——不发第二次 `init`，
+   因为四个随包插件的 `onInit` 都会重建视图、其中两个还会起定时器。
+3. **主题两条通道**：`?theme=` 管首帧（不闪），`theme` 消息管运行中切换（不重挂）。
+
+**第四条是踩出来的：过边界前把值复制成纯数据。**
+
+真机第一次跑就撞上：
+
+```
+Uncaught DataCloneError: Failed to execute 'postMessage' on 'Window':
+[object Object] could not be cloned.
+```
+
+Svelte 5 的 `$state` 会把**纯对象与数组**深度代理，而 Wails 的绑定返回的正是**纯 JSON**，
+于是 `inst.Manifest.permissions` / `inst.Granted` 是 Proxy；Proxy **过不了** `postMessage`
+的结构化克隆。异常发生在**消息监听器里面**——页面一切正常，插件永远收不到它那唯一一条
+`init`，界面停在「等待宿主初始化…」。修法是在 `mountPlugin` 入口把要重复使用的值读成局部
+副本（`[...req.permissions]`），并且在 `post()` 里 `try/catch` 说明「发给插件的是含不可
+结构化克隆的值」，因为**监听器里的异常本身不报错、也没有栈**。
+
+**为什么 jsdom 和 `npm run dev` 都复现不出来**：dev 桩的行是 `Installed.createFrom(...)`
+建的**类实例**，而 Svelte 只代理 prototype 是 `Object`/`Array` 的值——类实例被原样返回，
+Proxy 根本不存在。所以桩现在用 `.map(asHostSends)` 摊平成**纯数据**（字段名仍由
+`createFrom` 的类型把住），`render-smoke.mjs` 也因此能真的测到它：模拟一条 `ready`，
+捕获回来的 `init`，要求 `structuredClone` 能克隆它。**这条断言做过「把修复拿掉就必须变红」
+的验证**，不是摆设。
+
+**光栅尺没变，量到的东西变了**：`.dev/check-frontend.cjs` 里原先钉在
+`frontend/{index.html,src/main.js,src/plugin-ui.js}` 上的三条托管断言
+（`the market can host a plugin interface` / `… sandboxed to allow-scripts alone` /
+`… only for an installed and ENABLED plugin`）已重新指向 `cc/src/**`——对着一个不再被构建的
+文件报 PASS，比没有门禁更糟。权限文案那条也换了口径：生产界面直接读宿主的
+`PermissionLabels()`，唯一的重复副本是 `cc/src/lib/bridge.ts` 的 **dev 桩**，门禁改为比对
+它与 `AllowedPermissions`。
+
+**量出来的数字**（`scratch/layout-cc.cjs`：开发态包 + 无头 Edge，与 WebView2 同一引擎类，
+手法同 `.dev/layout-report.cjs`；980×700 与 720×520 两个尺寸全绿）：
+
+| | 980×700 | 720×520（最小） |
+|---|---|---|
+| 列表 / 详情 | 232 / 496 | 180 / 288 |
+| 帧（列表在时） | 494×394，正好等于详情减去边框 | 286×214 |
+| 权限浮层 | 不动帧（y141..537 前后一致），压到帧带上 | 同 |
+| 设置弹窗 | 720×397，居中；表单 243px 不需要滚；`保存` 在屏内（y434..462） | 同（`min(720px, 92vw)`） |
+| 展开后帧宽 | 740（> 语音工坊的 720 断点） | 480 |
+| 越过窗口右边缘的元素 | 无 | 无 |
+
+> **表里那两行宽度是修完一个真 bug 之后量的**：`min-width: auto` 让 iframe 的默认
+> 300×150 变成它的 min-content 宽度，于是 720 窗口里帧**伸出自己的列 110px**、顶到窗口边，
+> 而 980 下完全看不出来。三层都补了 `min-width: 0`（`.detail` / `.frame-area` / 帧元素的
+> 内联样式）。jsdom 不做布局，这条只能靠引擎量——理由和 §2.7 末尾那句一样。
+
+
+**还没搬回来的（阶段 3，见 tasks.md）**：市场目录与安装/更新/卸载、`Warnings()`。
+所以现在这个页面能「运行、授权、**改配置**、看界面」，还**不能**装。
+
+---
+
 ## 3. 两个程序的关系
 
 ```
@@ -470,9 +573,19 @@ jsdom 不做布局，这类问题只有像素门禁和截图能抓。
 ### 6.1 「界面改了但窗口没变」——`dist` 只是**输入**，不是产物
 
 `tools/plugin-market/main.go` 里是 `//go:embed all:frontend/dist`：市场的前端是**编译进 exe 的**。
-所以改了 `frontend/src/*` 并 `npm run build`（只更新 `frontend/dist`）之后，
+所以改了前端并 `npm run build`（只更新 `dist`）之后，
 `build\bin\PetPCPluginMarket.exe` **一个字节都没变**——它仍然是旧界面，而且在跑的那份进程里
-连新标记都搜不到（`detail-tabs`、`perm-toggle`、`ico-gear` 全为 0 命中）。
+连新标记都搜不到。
+
+**2026-10-27 又一次，而且换了个形状**：界面已经搬进 `cc/`（Svelte），`frontend/dist` 只是它的
+构建产物副本。于是「改了 `cc/src/*` → 忘了重建市场程序」的表现变成**功能消失**——插件页的主从
+布局与其宿主写完了、`frontend/dist` 也换了，用户打开的还是前一天那个二进制，看到的是**只有列表、
+没有任何插件界面**的那一版，于是报「插件页面又没有了」。同一天那个会话重建过**桌宠**，而
+**重建桌宠不会重建市场程序**（两个独立 module、两次 `wails build`、两次复制）。
+
+所以判据必须**在页面上**，而不是靠翻文件时间戳：控制中心插件页左上角是
+`已装插件 · v5`——这个数字变了，说明窗口里跑的是新构建；它不变就说明重建没落到这个 exe 上。
+（旧 JS 界面当年也有同样的标记，`已装插件 · v4`；Svelte 重写时把它丢了，这一轮补回来。）
 
 正确的顺序是**一条命令**：
 
@@ -480,19 +593,32 @@ jsdom 不做布局，这类问题只有像素门禁和截图能抓。
 pwsh -File tools\build-all.ps1
 ```
 
-它先 `npm run build` 两个前端，再 `wails build -s -skipbindings` 两个程序，
+它先 `npm run build` 控制中心（然后把 `cc/dist` 复制成 `frontend/dist`），
+再 `npm run build` 桌宠的前端，然后 `wails build -s -skipbindings` 两个程序，
 最后**把市场的 exe 复制到 `build\bin`**——桌宠的「打开插件市场」先找的就是那一份
 （`app_plugin_market.go` 的 `PluginMarketCandidates`），只编译不复制等于按钮启动的还是旧的。
+
+**只重建市场程序时**（例如只改了 `cc/`），顺序是三步，且 `-s` 不能省：
+
+```powershell
+cd tools\plugin-market\cc; npm run build
+# 把 cc\dist 覆盖到 tools\plugin-market\frontend\dist（embed 读的是这一棵）
+cd tools\plugin-market; & ..\..\.dev\bin\wails.exe build -s -skipbindings
+# 再把 build\bin\PetPCPluginMarket.exe 复制到仓库根的 build\bin
+```
+
+省掉 `-s` 就会踩第二个坑：`wails build` 会先去构建 `tools/plugin-market/frontend`
+（**旧的 JS 界面**，还在树里），把 `frontend/dist` 覆盖回去——于是你编出来的 exe 里是上一代界面。
 
 判据可以自己验：新 exe 里能搜到新界面独有的字符串，旧 exe 里搜不到。
 
 ```powershell
 $t = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes('build\bin\PetPCPluginMarket.exe'))
-@('detail-tabs','perm-toggle','ico-gear') | ForEach-Object { "$_=$([regex]::Matches($t,$_).Count)" }
+@('已装插件 · v5','展开界面','从左边选一个插件') | ForEach-Object { "$_=$([regex]::Matches($t,$_).Count)" }
 ```
 
 另外：**已经开着的窗口不会热更新**。市场是独立进程，重新构建后要把那个窗口关掉，
-再从桌宠设置页点一次「打开插件市场」。
+再从桌宠的 ⚙（或托盘菜单「打开控制中心」）打开一次。
 
 `.dev/verify-plugin-market.ps1` 在没有交互桌面的环境里会**说明情况并 `exit 0`**——
 这和 `verify-region.ps1` / `verify-live.ps1` / `verify-plugin-surface.ps1` 是同一个约定：
