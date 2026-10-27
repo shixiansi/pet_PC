@@ -40,18 +40,25 @@
 
 | 事件 | payload | 现在谁在发 |
 |---|---|---|
-| `timer.phaseEnded` | `{phase: "focus" \| "break"}` | **没有人发了**（见下面的补记） |
+| `timer.phaseEnded` | `{phase: "focus" \| "break"}` | **宿主不再发**：这条事实现在由 `plugin-pomodoro` 通过 `share` 发布（见下） |
 | `reminder.fired` | `{due, overdue, total}` | 宿主，手动「立刻提醒一次」 |
 
-> **2026-10-27 补记：`timer.phaseEnded` 目前没有发射方，前两句台词不会响。**
-> 它唯一的发射者是宿主计时器（`completePhaseLocked` → `notifyPluginPhaseEnded`），而计时器整块
-> 退休、归 `plugin-pomodoro` 了。事件名与 `SubscribableEvents` **保留**——直接删掉会让已装的
-> 语音插件 `events.subscribe` 报错，那比不响更糟。
-> 三条候选路（接受 / `plugin.share` 轮询 / 新增一条很窄的"插件声明事实"方法）都卡在同一处：
-> **"阶段结束"必须由一个一直在跑的代码产生**，而番茄钟插件只在它的浮层面打开时才有脚本在转。
-> 所以真正的修法是让番茄钟插件托管一个常驻帧，把计时循环搬进去——方案、代价（两个帧不能同时
-> 计时、记录 id 要按阶段结束时刻派生）与验收写在
-> `openspec/changes/pomodoro-headless-timer/`。在那之前这是**已知缺口**，不是回归。
+> **2026-10-28 补记（`pomodoro-headless-timer`）：番茄钟那两句重新会响，而且不再经过宿主。**
+> 事件名与 `SubscribableEvents` **保留**——直接删掉会让 1.0.1 及更早的语音插件 `events.subscribe`
+> 报错，那比不响更糟；语音插件也**同时**保留了事件订阅与 `share` 轮询，所以哪天宿主又有发射方，
+> 这条路径会自己恢复。
+>
+> 实际的通道是 `plugin.share`：`plugin-pomodoro` 2.1.0 在**常驻帧**里跑计时循环（manifest 的
+> `background: true`），阶段结束时写 `phase-ended = {phase, at}`；语音插件 1.0.2 在自己的常驻帧里
+> 每 2 秒 `share.get` 一次，`at` 比上次大才说话。`at` 是**阶段的截止时刻**而不是"发现它的时刻"，
+> 所以同一段结束只响一次，而唤醒晚了两分钟也知道那是几点结束的。
+>
+> 为什么必须这样而不是让宿主转发：宿主的计时器已经退休（阶 2），它读不到另一个插件的存储，
+> 也不该替第三个插件去读——那正是 `todos.read` 当初门控的那件事，而那个权限已经没有了。
+> 三条候选路里"新增一条很窄的『插件声明事实』方法"因此被否决：它是为一个调用方新开一项权限。
+>
+> 代价写在 `openspec/changes/pomodoro-headless-timer/proposal.md`：两个帧不能同时计时（只有常驻帧写
+> 状态，浮层面降级成视图 + 命令通道），记录 id 由阶段结束时刻派生去重。
 > `reminder.fired` 不受影响：提醒气泡仍由宿主发（排期在待办插件那边）。
 
 两者都是**边缘事件**，与 `timer.changed` 有本质区别：后者是**状态广播**（倒计时一动就发），
@@ -130,8 +137,8 @@ JSON），`audio` 是**二进制、几百 KB 量级**。只想记住一个设置
 
 | 程序 | 提供 | 不提供（以及为什么） |
 |---|---|---|
-| 桌宠 | `audio.*`、`storage.*`、`config.*`、`net.fetch`、`todos.*`、`bubble.say`、`surface.*`、`llm.chat`、`events.subscribe` | — |
-| 市场 | `audio.*`、`storage.*`、`config.*`、`net.fetch` | `todos.*`/`bubble.say`/`surface.*`/`llm.chat`/`events.subscribe`——市场没有待办文件、没有可以画气泡的宠物窗口 |
+| 桌宠 | `audio.*`、`storage.*`、`config.*`、`net.fetch`、`plugin.share`、`bubble.say`、`surface.*`、`llm.chat`、`events.subscribe` | — |
+| 市场 | `audio.*`、`storage.*`、`config.*`、`net.fetch` | `plugin.share`/`bubble.say`/`surface.*`/`llm.chat`/`events.subscribe`——市场没有中转台、没有可以画气泡的宠物窗口 |
 
 从市场调用后者会得到「本程序不支持该方法」。这比一张共享的表更诚实：共享表会宣称
 这些方法到处可用，然后在更深的地方以 nil dereference 的形式失败。

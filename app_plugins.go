@@ -2578,17 +2578,22 @@ func (a *App) emitPluginStateChange(name string, payload any) {
 
 // notifyPluginPhaseEnded tells subscribers a pomodoro phase just FINISHED.
 //
-// NOTHING IN THE HOST CALLS IT ANY MORE, and that is a known gap rather than an
-// oversight. The only emitter was the host's own timer, which is gone: the pomodoro
-// plugin counts its own phases, and a plugin cannot raise a host event. So a plugin
-// that subscribes to timer.phaseEnded today will never hear it - the voice plugin's
-// "番茄钟结束" line is silent.
+// NOTHING IN THE HOST CALLS IT, and after pomodoro-headless-timer that is now a DELIBERATE
+// retirement rather than a gap: the fact travels plugin-to-plugin, because the timer is a plugin's.
+// The pomodoro plugin runs its clock in the host's headless frame (manifest `background`) and
+// publishes `phase-ended` through `plugin.share`; the voice plugin polls that value from its own
+// headless frame. Neither needs the host in the middle, and the host has no way to be in the middle -
+// it cannot see another plugin's storage and must not read it on a third plugin's behalf.
 //
-// It is kept, with its event still in SubscribableEvents, because the real fix is a
-// headless timer inside the pomodoro plugin (then `plugin.share` carries the fact and the
-// voice plugin polls it) - see openspec/changes/pomodoro-headless-timer. Deleting the
-// pair now would also break every installed voice plugin's subscribe call, which
-// validates the name.
+// The NAME stays, here and in SubscribableEvents, for two reasons that outlive the emitter:
+//
+//   - an installed voice plugin's `events.subscribe` validates the name, and a subscribe that throws
+//     is a worse state than one that hears nothing. Deleting it would break installs that predate
+//     1.0.2;
+//   - if a future host ever owns a timer again (it should not), plugins already code to this name.
+//
+// The voice plugin keeps BOTH paths subscribed-and-polling for the same reason, so this becoming live
+// again would need no change on either side.
 //
 // The payload is a bare fact and no wording: which line to say, in which voice,
 // is the plugin's business.
