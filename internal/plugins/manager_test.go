@@ -46,7 +46,7 @@ func sampleZipFiles() map[string]string {
 		"version":     "1.0.0",
 		"author":      "tester",
 		"description": "用于测试的插件",
-		"permissions": []string{"todos.read", "pet.bubble"},
+		"permissions": []string{"pet.bubble", "storage"},
 		"panel":       true,
 		"entry":       "panel.html",
 	})
@@ -93,7 +93,7 @@ func TestIndexRoundTrip(t *testing.T) {
 		ID:          "com.example.demo",
 		Version:     "1.2.3",
 		Enabled:     true,
-		Granted:     []string{"todos.read"},
+		Granted:     []string{"pet.bubble"},
 		InstalledAt: at,
 	}
 	if err := m.saveIndex(Index{Version: 1, Plugins: []IndexEntry{entry}}); err != nil {
@@ -118,7 +118,7 @@ func TestIndexRoundTrip(t *testing.T) {
 	if !got.InstalledAt.Equal(at) {
 		t.Fatalf("installedAt: got %v want %v", got.InstalledAt, at)
 	}
-	if len(got.Granted) != 1 || got.Granted[0] != "todos.read" {
+	if len(got.Granted) != 1 || got.Granted[0] != "pet.bubble" {
 		t.Fatalf("granted: %v", got.Granted)
 	}
 
@@ -313,7 +313,7 @@ func TestInstallRejectsOversizedEntry(t *testing.T) {
 	entry := MarketEntry{
 		ID:          "com.example.demo",
 		Version:     "1.0.0",
-		Permissions: []string{"todos.read", "pet.bubble"},
+		Permissions: []string{"pet.bubble", "storage"},
 		Download:    fileURL(path),
 		SHA256:      digestOf(patched),
 	}
@@ -336,7 +336,7 @@ func TestInstallRejectsPermissionMismatch(t *testing.T) {
 	m := newTestManager(t)
 	before := m.Plugins()
 	entry, _ := testEntryFromFiles(t, sampleZipFiles(), func(e *MarketEntry) {
-		e.Permissions = []string{"todos.read", "pet.bubble", "llm.chat"}
+		e.Permissions = []string{"pet.bubble", "storage", "llm.chat"}
 	})
 	_, err := m.Install(entry)
 	if err == nil {
@@ -381,7 +381,7 @@ func TestSetEnabledPersists(t *testing.T) {
 	if _, err := m.Install(entry); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	if _, err := m.GrantPermissions(entry.ID, []string{"todos.read"}); err != nil {
+	if _, err := m.GrantPermissions(entry.ID, []string{"pet.bubble"}); err != nil {
 		t.Fatalf("GrantPermissions: %v", err)
 	}
 	if err := m.SetEnabled(entry.ID, true); err != nil {
@@ -400,7 +400,7 @@ func TestSetEnabledPersists(t *testing.T) {
 		t.Error("enabled did not persist")
 	}
 	// Enabling is not granting: the granted set must survive untouched.
-	if len(row.Granted) != 1 || row.Granted[0] != "todos.read" {
+	if len(row.Granted) != 1 || row.Granted[0] != "pet.bubble" {
 		t.Errorf("enabling changed the granted set: %v", row.Granted)
 	}
 }
@@ -476,7 +476,7 @@ func TestGrantUndeclaredPermission(t *testing.T) {
 	if _, err := m.Install(entry); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	if _, err := m.GrantPermissions(entry.ID, []string{"todos.read"}); err != nil {
+	if _, err := m.GrantPermissions(entry.ID, []string{"pet.bubble"}); err != nil {
 		t.Fatalf("GrantPermissions: %v", err)
 	}
 	before, _ := m.Get(entry.ID)

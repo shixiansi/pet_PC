@@ -60,7 +60,7 @@ func testManifest(t *testing.T, id string, extra map[string]any) string {
 		"version":     "1.0.0",
 		"author":      "tester",
 		"description": "用于测试",
-		"permissions": []string{"todos.read", "pet.bubble"},
+		"permissions": []string{"pet.bubble", "storage"},
 		"panel":       true,
 		"entry":       "panel.html",
 	}
@@ -126,7 +126,7 @@ func catalogueRow(id, download, sum string) map[string]any {
 		"version":     "1.0.0",
 		"author":      "tester",
 		"description": "用于测试",
-		"permissions": []string{"todos.read", "pet.bubble"},
+		"permissions": []string{"pet.bubble", "storage"},
 		"download":    download,
 		"sha256":      sum,
 	}
@@ -154,7 +154,7 @@ func TestInstalledProjectsTheIndexOnDisk(t *testing.T) {
 		t.Fatalf("write manifest: %v", err)
 	}
 	index := fmt.Sprintf(`{"version":1,"plugins":[{"id":%q,"version":"1.0.0","enabled":true,`+
-		`"granted":["todos.read"],"installedAt":"2026-01-01T00:00:00Z"}]}`, id)
+		`"granted":["pet.bubble"],"installedAt":"2026-01-01T00:00:00Z"}]}`, id)
 	if err := os.WriteFile(filepath.Join(m.dataDir, "plugins.json"), []byte(index), 0o644); err != nil {
 		t.Fatalf("write index: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestInstalledProjectsTheIndexOnDisk(t *testing.T) {
 	if rows[0].Manifest == nil {
 		t.Fatalf("the manifest was not loaded: %+v", rows[0])
 	}
-	if got := rows[0].Granted; len(got) != 1 || got[0] != "todos.read" {
+	if got := rows[0].Granted; len(got) != 1 || got[0] != "pet.bubble" {
 		t.Fatalf("granted = %v, want the on-disk list", got)
 	}
 }
@@ -238,7 +238,7 @@ func TestGrantRecordsExactlyTheDeclaredPermissions(t *testing.T) {
 	m := newTestMarket(t, "")
 	id := installDemo(t, m)
 
-	granted := []string{"todos.read", "pet.bubble"}
+	granted := []string{"pet.bubble", "storage"}
 	if err := m.Grant(id, granted); err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestGrantRecordsExactlyTheDeclaredPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	if err := m.Grant(id, []string{"todos.read", "net.fetch"}); err == nil {
+	if err := m.Grant(id, []string{"pet.bubble", "net.fetch"}); err == nil {
 		t.Fatal("granting an undeclared permission succeeded")
 	}
 	after, err := os.ReadFile(filepath.Join(m.dataDir, "plugins.json"))
@@ -560,7 +560,7 @@ func installDemoWith(t *testing.T, mgr *plugins.Manager, id string) string {
 		Version:     "1.0.0",
 		Author:      "tester",
 		Description: "用于测试",
-		Permissions: []string{"todos.read", "pet.bubble"},
+		Permissions: []string{"pet.bubble", "storage"},
 		Download:    url,
 		SHA256:      sum,
 	}

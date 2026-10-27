@@ -65,7 +65,7 @@ func testEntryFromFiles(t *testing.T, files map[string]string, mutate func(*Mark
 		Version:     "1.0.0",
 		Author:      "tester",
 		Description: "用于测试的插件",
-		Permissions: []string{"todos.read", "pet.bubble"},
+		Permissions: []string{"pet.bubble", "storage"},
 		Download:    testZipBytesURL(t, data),
 		SHA256:      sum,
 	}

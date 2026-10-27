@@ -146,9 +146,12 @@ type Config struct {
 	LLMSystemPrompt string `json:"llmSystemPrompt"`
 	// LLMHistoryTurns is how many past messages are replayed as context.
 	LLMHistoryTurns int `json:"llmHistoryTurns"`
-	// LLMContextTodos injects the todo list into the prompt.
-	// This is a privacy-relevant switch, so it is visible in the settings UI.
-	LLMContextTodos bool `json:"llmContextTodos"`
+	// No LLMContextTodos any more. It switched the todo list into the model's system
+	// prompt, and there is no list here to switch in: the todos belong to the todo
+	// plugin's own storage, and the host will not read another plugin's data on a third
+	// plugin's behalf (that is what `todos.read` used to gate, and the permission retired
+	// with the list). A switch that cannot change anything is the same lie as a
+	// permission with no method behind it.
 	// LLMProactive allows the pet to speak up on its own (docs 9). Off by
 	// default: an assistant that interrupts without being asked is worse than
 	// one that waits to be addressed.
@@ -269,7 +272,6 @@ func DefaultConfig() Config {
 		LLMTimeoutSec:         DefaultLLMTimeoutSec,
 		LLMSystemPrompt:       DefaultLLMSystemPrompt,
 		LLMHistoryTurns:       DefaultLLMHistoryTurns,
-		LLMContextTodos:       true,
 		LLMProactive:          false,
 		LLMProactiveMinGapMin: DefaultLLMProactiveMinGapMin,
 		LLMDailyBudget:        DefaultLLMDailyBudget,

@@ -182,77 +182,26 @@ func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool)
 
 // --- prompt context --------------------------------------------------------
 
-func TestPromptContextIncludesTodosAndPomodoro(t *testing.T) {
+// The snapshot is the persona and the clock, and the interesting half is what is NOT in
+// it: the host no longer owns the todo list or the timer, so nothing about the user's day
+// can reach the model through this path. Asserted from here rather than from internal/llm
+// because that package can only see the struct it is given - the leak this guards against
+// is a caller filling it back in.
+func TestPromptContextCarriesNoUserData(t *testing.T) {
 	a := newLLMTestApp(t)
-
 	if _, err := a.AddTodo(TodoInput{Title: "交周报"}); err != nil {
 		t.Fatalf("AddTodo: %v", err)
 	}
-	// Backdate it so it is overdue, which is the case the label logic exists for.
-	todos := a.store.Todos()
-	if len(todos) != 1 {
-		t.Fatalf("expected one todo, got %d", len(todos))
-	}
-	overdue := time.Now().Add(-2 * time.Hour)
-	todos[0].Due = &overdue
-	if err := a.store.SaveTodos(todos); err != nil {
-		t.Fatalf("SaveTodos: %v", err)
-	}
 
-	promptCfg := a.store.Config()
-	ctx := a.promptContext(promptCfg, promptCfg.LLMContextTodos)
-
-	if ctx.OpenCount != 1 || ctx.OverdueCount != 1 {
-		t.Errorf("counts = open %d overdue %d, want 1/1", ctx.OpenCount, ctx.OverdueCount)
+	prompt := promptFor(t, a.promptContext(a.store.Config()))
+	if strings.Contains(prompt, "交周报") {
+		t.Errorf("a todo reached the prompt: the host does not own the list any more:\n%s", prompt)
 	}
-	if len(ctx.Todos) != 1 || ctx.Todos[0].Title != "交周报" {
-		t.Fatalf("todos = %+v", ctx.Todos)
+	if !strings.Contains(prompt, "被问到就说自己看不到") {
+		t.Errorf("the prompt should say the list is not visible:\n%s", prompt)
 	}
-	if !ctx.Todos[0].Overdue {
-		t.Error("the overdue flag was not set")
-	}
-	if !strings.Contains(ctx.Todos[0].Due, "逾期") {
-		t.Errorf("due label = %q, want it to read as overdue", ctx.Todos[0].Due)
-	}
-
-	// The assembled prompt must carry it.
-	prompt := promptFor(t, ctx)
-	if !strings.Contains(prompt, "交周报") {
-		t.Errorf("prompt is missing the todo:\n%s", prompt)
-	}
-}
-
-// TestPromptContextIncludesPomodoroState used to prove the prompt snapshot carried the
-// timer's phase, its countdown, the attached todo and the day's finished-session count.
-// The snapshot has no pomodoro member any more: the timer and its archive belong to the
-// pomodoro plugin, which the host cannot read into.
-
-// TestPromptContextReplaysRecentSummaries used to prove the "what did I do today"
-// question could be answered from the session archive. The archive is the pomodoro
-// plugin's now, so the host's snapshot carries no summaries to replay.
-
-// TestPromptContextRespectsContextSwitch is about a config the plugin now owns:
-// the switch is read from whatever config the caller hands in, so the plugin's
-// own llmContextTodos value is what decides, not the pet's.
-func TestPromptContextRespectsContextSwitch(t *testing.T) {
-	a := newLLMTestApp(t)
-	if _, err := a.AddTodo(TodoInput{Title: "秘密任务"}); err != nil {
-		t.Fatalf("AddTodo: %v", err)
-	}
-	if _, err := a.store.UpdateConfig(func(c *store.Config) { c.LLMContextTodos = false }); err != nil {
-		t.Fatalf("UpdateConfig: %v", err)
-	}
-
-	promptCfg := a.store.Config()
-	ctx := a.promptContext(promptCfg, promptCfg.LLMContextTodos)
-	if ctx.IncludeTodos {
-		t.Fatal("the switch was not honoured")
-	}
-	if len(ctx.Todos) != 0 || ctx.OpenCount != 0 {
-		t.Errorf("todos leaked into the context: %+v", ctx.Todos)
-	}
-	if strings.Contains(promptFor(t, ctx), "秘密任务") {
-		t.Error("a todo reached the prompt with context injection switched off")
+	if !strings.Contains(prompt, "现在：") {
+		t.Errorf("the clock is not private data and should still be there:\n%s", prompt)
 	}
 }
 
@@ -264,30 +213,12 @@ func promptFor(t *testing.T, ctx llm.PromptContext) string {
 	return llm.BuildSystemPrompt(ctx)
 }
 
-func TestPromptDueLabel(t *testing.T) {
-	now := time.Date(2025, 3, 7, 14, 0, 0, 0, time.Local)
-	mk := func(d time.Time) store.Todo {
-		return store.Todo{Title: "t", Due: &d}
-	}
-	cases := []struct {
-		name string
-		todo store.Todo
-		want string
-	}{
-		{"no due", store.Todo{Title: "t"}, ""},
-		{"overdue", mk(now.Add(-2 * time.Hour)), "已逾期，03-07 12:00"},
-		{"today", mk(now.Add(3 * time.Hour)), "今天 17:00"},
-		{"tomorrow", mk(now.AddDate(0, 0, 1)), "明天 14:00"},
-		{"later", mk(now.AddDate(0, 0, 5)), "03-12 14:00"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := promptDueLabel(c.todo, now); got != c.want {
-				t.Errorf("promptDueLabel = %q, want %q", got, c.want)
-			}
-		})
-	}
-}
+// TestPromptContextIncludesTodosAndPomodoro, TestPromptContextRespectsContextSwitch and
+// TestPromptDueLabel used to live here. The first filled the snapshot from the host's
+// store, the second proved the privacy switch worked, and the third rendered a deadline
+// phrase for the prompt. All three described data the host no longer has: the list is the
+// todo plugin's own storage, the switch could no longer change anything, and the label
+// helper went with it.
 
 // --- window ----------------------------------------------------------------
 

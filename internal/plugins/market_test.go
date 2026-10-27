@@ -54,7 +54,7 @@ func TestInstallRejectsNonHTTPSDownload(t *testing.T) {
 	entry := MarketEntry{
 		ID:          "com.example.demo",
 		Version:     "1.0.0",
-		Permissions: []string{"todos.read", "pet.bubble"},
+		Permissions: []string{"pet.bubble", "storage"},
 		Download:    "file:///x.zip",
 		SHA256:      strings.Repeat("0", 64),
 	}
@@ -105,7 +105,7 @@ func row(id, version string, over map[string]any) map[string]any {
 		"version":     version,
 		"author":      "tester",
 		"description": "描述",
-		"permissions": []string{"todos.read"},
+		"permissions": []string{"pet.bubble"},
 		"download":    "dist/" + id + "-" + version + ".zip",
 		"sha256":      strings.Repeat("a", 64),
 	}

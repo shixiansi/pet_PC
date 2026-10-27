@@ -1042,11 +1042,11 @@ check(
   'the plugin has no way to store or play the audio it renders',
 );
 check(
-  'the permission vocabulary is the expected fifteen, and by `net.ws` + `llm.borrow` + `process` + `net.credentials` + `plugin.share`',
+  'the permission vocabulary is the expected thirteen, and by `net.ws` + `llm.borrow` + `process` + `net.credentials` + `plugin.share`',
   // The count is asserted so that adding a permission is a VISIBLE two-place edit here,
   // and so that the "no background permission" decision cannot be quietly undone.
   //
-  // Fifteen, not sixteen: a headless frame is a manifest FIELD gated on an existing
+  // Thirteen, not fourteen: a headless frame is a manifest FIELD gated on an existing
   // permission (`events` for host events, `net.ws` for a socket a plugin holds open,
   // `net.fetch` for a polling plugin) rather than a permission of its own. A permission
   // with no method behind it would be a switch the user is asked about that does
@@ -1065,18 +1065,23 @@ check(
   // Fifteen rather than seventeen because `timer.read` and `timer.control` retired with
   // timer.state/start/pause/resume/stop: the pomodoro plugin keeps its own state machine
   // and records now, so the host has no plugin-facing timer left to watch or to drive.
-  // The retired pair is asserted ABSENT, because putting one back would be a switch that
-  // unlocks nothing and the count alone would not say which entry left.
+  //
+  // Thirteen rather than fifteen because `todos.read` / `todos.write` retired with the
+  // five `todos.*` methods: the list is the todo plugin's own storage, the pomodoro reads
+  // the snapshot published through `plugin.share`, and the chat plugin's three todo tools
+  // were deleted rather than re-pointed. The four retired words are asserted ABSENT - the
+  // count alone would not say which entries left.
   (() => {
     const list = capsGo.slice(capsGo.indexOf('var AllowedPermissions'), capsGo.indexOf('func IsAllowedPermission'));
     const entries = [...list.matchAll(/Perm[A-Za-z]+,/g)];
-    return entries.length === 15 && /PermAudio,/.test(list) && /PermNetWS,/.test(list) &&
+    return entries.length === 13 && /PermAudio,/.test(list) && /PermNetWS,/.test(list) &&
       /PermLLMBorrow,/.test(list) && /PermProcess,/.test(list) &&
       /PermNetCredentials,/.test(list) && /PermPluginShare,/.test(list) &&
       !/PermTimer(Read|Control)/.test(capsGo) &&
+      !/PermTodos(Read|Write)/.test(capsGo) &&
       !/PermBackground/.test(capsGo);
   })(),
-  'the permission vocabulary is not the expected fifteen entries (net.ws + llm.borrow + process + net.credentials + plugin.share appended, timer.read/timer.control retired, background deliberately not)',
+  'the permission vocabulary is not the expected thirteen entries (net.ws + llm.borrow + process + net.credentials + plugin.share appended, timer.read/timer.control and todos.read/todos.write retired, background deliberately not)',
 );
 check(
   'net.credentials is only ever declared together with net.fetch',

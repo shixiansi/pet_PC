@@ -348,7 +348,7 @@ const checksJs = `
     {
       id: 'com.example.other', name: '别的插件', version: '0.9.0', author: 'someone',
       description: '启用了但没有认领对话槽位', enabled: true,
-      permissions: ['todos.read'], granted: ['todos.read'], pending: [], netHosts: [],
+      permissions: ['pet.bubble'], granted: ['pet.bubble'], pending: [], netHosts: [],
       panel: false, panelSlot: '', surface: false, background: false,
       entry: '', dir: pluginDir('com.example.other'), error: '',
     },

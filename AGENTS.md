@@ -62,13 +62,13 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 这就是「你拒绝了这项权限」能成立的原因，而不是一句事后打印的话。
 
 - 权限词表：[internal/plugins/capability.go](internal/plugins/capability.go) 的
-  `AllowedPermissions`，**现在 15 项**，顺序就是安装对话框的绘制顺序。
+  `AllowedPermissions`，**现在 13 项**，顺序就是安装对话框的绘制顺序。
 - **加一项权限要同步七处**（`timer.control` 那次实测就是七处，漏一处就红）：
   1. `capability.go` 的常量——注释里写清它 gates 什么、**不** gates 什么
   2. `AllowedPermissions`（顺序就是安装对话框的绘制顺序）
   3. `PermissionLabels`（Go 侧的唯一权威文案）
   4. 至少一个注册了它的方法（否则 `TestCapabilityTableIsComplete` 红）
-  5. `manifest_test.go` 的 `want` 列表 + 测试名里的数字（`…IsTheFifteen`）
+  5. `manifest_test.go` 的 `want` 列表 + 测试名里的数字（`…IsTheThirteen`）
   6. `.dev/check-frontend.cjs` 里那份**硬编码**的期望词表 —— 它故意不自动跟随
      `AllowedPermissions`，因为它的职责正是发现那张表被改了
   7. `tools/plugin-market/cc/src/lib/bridge.ts` 的 **dev 桩** `LABELS` —— 控制中心的
@@ -80,7 +80,7 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
   `internal/plugins` 里，改完 Go 侧全绿，静态接线检查才红。
   故意没有 `background` 权限——常驻帧由 `events` / `net.ws` / `net.fetch` 门控。
 - 没有方法支撑的权限是一个"用户被问了一个什么也不做的开关"，
-  `TestCapabilityTableIsComplete` 和 `TestAllowedPermissionsIsTheFifteen` 就是拦它的。
+  `TestCapabilityTableIsComplete` 和 `TestAllowedPermissionsIsTheThirteen` 就是拦它的。
 - **退休一项权限走的是同一张清单的镜像**：删常量、删 `AllowedPermissions`、
   删 `PermissionLabels`、删或改注册它的方法（否则 `TestCapabilityTableIsComplete` 红）、
   改 `manifest_test.go` 的 `want` 与测试名、改 `.dev/check-frontend.cjs` 的期望词表、

@@ -9,16 +9,12 @@ import (
 // dispatcher refuses any call whose permission the user has not granted.
 //
 // The count is deliberately NOT asserted by this comment alone: manifest_test.go's
-// TestAllowedPermissionsIsTheFifteen pins the exact list, and app_plugins_test.go's
+// TestAllowedPermissionsIsTheThirteen pins the exact list, and app_plugins_test.go's
 // TestCapabilityTableIsComplete requires every permission here to be used by at
 // least one method. A permission with no method behind it would be a switch the user
 // is asked about that does nothing - which is why there is no separate `background`
 // permission (a headless frame is gated on `events`; see validateBackground).
 const (
-	// PermTodosRead lets a plugin list the todo items.
-	PermTodosRead = "todos.read"
-	// PermTodosWrite lets a plugin add, edit, complete and delete todos.
-	PermTodosWrite = "todos.write"
 	// PermBubble lets a plugin make the pet say a line in a bubble.
 	PermBubble = "pet.bubble"
 	// There are no timer.* permissions any more. timer.read and timer.control gated
@@ -27,11 +23,19 @@ const (
 	// own state machine, counts its own phases and writes its own records, so it calls
 	// nothing here. A permission whose methods are gone is exactly the "switch the user
 	// is asked about that does nothing" this list exists to prevent, and
-	// TestCapabilityTableIsComplete refuses it. The host's remaining timer is internal
-	// to the pet (its own panel tab and tray entries) and is retired separately in the
-	// same openspec change.
+	// TestCapabilityTableIsComplete refuses it.
 	//
-	// PermEvents lets a plugin subscribe to todos.changed / timer.changed.
+	// Nor are there todos.read / todos.write any more, and for the same reason one step
+	// further along: the LIST is the todo plugin's own now (its `storage`), and the two
+	// other readers moved to `plugin.share` - the pomodoro reads the snapshot the todo
+	// plugin publishes, and the chat plugin stopped reading the list at all. With no
+	// method left in the table, both permission words are gone (17 → 15 → 13).
+	//
+	// PermEvents lets a plugin subscribe to the host's state-change events. What is
+	// left of them is in SubscribableEvents: the two edge events the host still
+	// produces itself (`reminder.fired`) or keeps for compatibility
+	// (`timer.phaseEnded`). The two broadcasts, timer.changed and todos.changed, went
+	// with the host's timer and the host's todo store.
 	PermEvents = "events"
 	// PermNetFetch lets a plugin make HTTP requests, but only to the hosts its
 	// manifest declares in netHosts.
@@ -157,8 +161,6 @@ const (
 // background plugin actually wants: something delivered to it while nobody is
 // looking.
 var AllowedPermissions = []string{
-	PermTodosRead,
-	PermTodosWrite,
 	PermBubble,
 	PermEvents,
 	PermNetFetch,
@@ -188,8 +190,6 @@ func IsAllowedPermission(name string) bool {
 // dialog, so the user is deciding about "读取待办列表" rather than about
 // "todos.read".
 var PermissionLabels = map[string]string{
-	PermTodosRead:      "读取待办列表",
-	PermTodosWrite:     "新增、修改、完成与删除待办",
 	PermBubble:         "让桌宠弹出一句话的气泡",
 	PermEvents:         "订阅待办与番茄钟的变化事件（关闭界面后也会送达）",
 	PermNetFetch:       "访问网络（仅限插件声明的域名）",
@@ -221,16 +221,18 @@ func sortedPermissions(names []string) []string {
 // llm.* frames are not here - they belong to the llm.chat call that produced
 // them and are delivered to the caller, not to subscribers.
 //
-// The two "*Ended"/"fired" entries are EDGE events, not state broadcasts, and
-// that distinction is why they exist alongside timer.changed. timer.changed says
-// "the countdown moved", so a subscriber that wants "the focus just finished"
-// would have to keep the previous phase itself and detect the transition - i.e.
-// every plugin re-implementing a conclusion the host has already reached. These
-// two carry the host's own conclusion, with a payload of plain facts and no
-// wording: what to SAY about a finished phase is the plugin's business.
+// Both remaining entries are EDGE events ("this just happened"), not state
+// broadcasts. The two broadcasts that used to sit here - timer.changed and
+// todos.changed - are gone with the state they described: the timer is the pomodoro
+// plugin's and the list is the todo plugin's, so the host has nothing to broadcast. A
+// plugin that needs one of those now watches its neighbour through `plugin.share`.
+//
+// timer.phaseEnded is kept WITHOUT an emitter on purpose: it is a promise the host
+// currently cannot keep, and the honest fix is a plugin-side timer that keeps running
+// headless (openspec/changes/pomodoro-headless-timer). Deleting the name would break
+// every installed voice plugin's subscribe call, which validates against this list -
+// and a plugin whose subscribe throws is in a worse state than one that hears nothing.
 var SubscribableEvents = []string{
-	"timer.changed",
-	"todos.changed",
 	"timer.phaseEnded",
 	"reminder.fired",
 }

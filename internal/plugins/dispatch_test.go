@@ -11,7 +11,7 @@ import "testing"
 // and the exact-match requirement (a substring check would make net.fetch look like
 // net.credentials and vice versa).
 func TestHasGranted(t *testing.T) {
-	granted := []string{PermTodosRead, PermNetWS, PermAudio}
+	granted := []string{PermPluginShare, PermNetWS, PermAudio}
 
 	for _, perm := range granted {
 		if !HasGranted(granted, perm) {
@@ -22,18 +22,18 @@ func TestHasGranted(t *testing.T) {
 	// PermNetCredentials is NOT in the list while PermNetWS is; a prefix or substring
 	// match would confuse "the network" with "your saved credentials".
 	for _, perm := range []string{
-		PermTodosWrite, PermNetFetch, PermNetCredentials, PermPluginShare,
-		"net", "net.ws ", "", " ",
+		PermStorage, PermNetFetch, PermNetCredentials, PermBubble,
+		"plugin", "net.ws ", "", " ",
 	} {
 		if HasGranted(granted, perm) {
 			t.Errorf("%q must not be reported as granted", perm)
 		}
 	}
 
-	if HasGranted(nil, PermTodosRead) {
+	if HasGranted(nil, PermPluginShare) {
 		t.Error("an empty grant list must grant nothing")
 	}
-	if HasGranted([]string{}, PermTodosRead) {
+	if HasGranted([]string{}, PermPluginShare) {
 		t.Error("an empty grant list must grant nothing")
 	}
 }

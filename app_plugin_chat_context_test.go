@@ -49,42 +49,37 @@ func textOf(msgs []map[string]any) string {
 	return b.String()
 }
 
-// TestPluginChatSeesTheDayOnlyWithTheReadGrant covers the two gates on the snapshot.
+// TestPluginChatNeverSeesTheDay covers what replaced the two snapshot gates.
 //
-// The bug this pins was live and invisible: a plugin's config starts from zero, so
-// reading "include the user's day" off it answered false for EVERY plugin request. Every
-// plugin conversation therefore told the model 用户关闭了日程上下文 - it never saw a
-// todo. Nobody noticed while the answer was just text. Once tools existed the model held
-// todo_add in one hand and a sentence saying it could not add anything in the other, and
-// it refused - which looks exactly like the permission system being broken.
-func TestPluginChatSeesTheDayOnlyWithTheReadGrant(t *testing.T) {
-	const turnedOff = "关闭了日程上下文"
-
-	// With todos.read: the snapshot is real, so the refusal line must be gone.
+// There used to be two of them - the user's switch AND the plugin's todos.read - and the
+// bug they pinned was live: a plugin's config starts from zero, so reading "include the
+// user's day" off it answered false for every request. Both gates are gone with the data
+// they gated: the list is the todo plugin's `storage`, and the host will not read another
+// plugin's data on a third plugin's behalf. So the honest assertion is now the opposite
+// one - a plugin conversation must NOT carry the user's tasks, whichever permissions it
+// holds, and the model must be told why.
+func TestPluginChatNeverSeesTheDay(t *testing.T) {
 	stub := newChatStub(t)
 	a := pluginApp(t)
-	withRead := installToolPlugin(t, a, "llm.chat", "plugin.config", "storage", "todos.read")
-	setPluginConfig(t, a, withRead, map[string]string{"llmBaseUrl": stub.URL(), "llmModel": "m"})
-	if _, err := a.PluginRequest(withRead, "llm.chat", `{"text":"我今天要做什么"}`); err != nil {
-		t.Fatalf("llm.chat: %v", err)
+	if _, err := a.AddTodo(TodoInput{Title: "机密待办"}); err != nil {
+		t.Fatalf("AddTodo: %v", err)
 	}
-	if got := textOf(chatMessages(t, stub)); strings.Contains(got, turnedOff) {
-		t.Errorf("a plugin holding todos.read was still told the day context is off:\n%s", got)
-	}
+	// Deliberately generous: everything a plugin could hold, including the snapshot's
+	// old permission name if it were still valid.
+	id := installToolPlugin(t, a, "llm.chat", "plugin.config", "storage", "pet.bubble")
+	setPluginConfig(t, a, id, map[string]string{"llmBaseUrl": stub.URL(), "llmModel": "m"})
 
-	// Without it: the refusal is the honest answer, and it must be there.
-	bare := newChatStub(t)
-	a2 := pluginApp(t)
-	noRead := installToolPlugin(t, a2, "llm.chat", "plugin.config", "storage")
-	setPluginConfig(t, a2, noRead, map[string]string{"llmBaseUrl": bare.URL(), "llmModel": "m"})
-	if _, err := a2.PluginRequest(noRead, "llm.chat", `{"text":"我今天要做什么"}`); err != nil {
+	if _, err := a.PluginRequest(id, "llm.chat", `{"text":"我今天要做什么"}`); err != nil {
 		t.Fatalf("llm.chat: %v", err)
 	}
-	if got := textOf(chatMessages(t, bare)); !strings.Contains(got, turnedOff) {
-		t.Errorf("a plugin WITHOUT todos.read was shown the user's day:\n%s", got)
+	got := textOf(chatMessages(t, stub))
+	if strings.Contains(got, "机密待办") {
+		t.Errorf("the user's todo reached a plugin conversation:\n%s", got)
+	}
+	if !strings.Contains(got, "被问到就说自己看不到") {
+		t.Errorf("the model was not told the day is not visible:\n%s", got)
 	}
 }
-
 // TestLLMChatReplaysHistory pins multi-turn context: the replayed turns arrive in
 // order, before the new message, and the new message is last.
 //

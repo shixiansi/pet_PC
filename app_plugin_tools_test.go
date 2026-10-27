@@ -113,19 +113,25 @@ func textScript(text string) []string {
 	return []string{string(body), string(b)}
 }
 
-// TestToolLoopRunsTheToolAndReturnsTheFinalText is the whole feature in one test:
-// the model asks for todo_add, the host runs it for real (the todo exists afterwards),
-// the result goes back to the model, and the user gets the second round's text.
+// TestToolLoopRunsTheToolAndReturnsTheFinalText is the whole feature in one test: the
+// model asks for pet_say, the host runs it for real (the pet is saying something
+// afterwards), the result goes back to the model, and the user gets the second round's
+// text.
+//
+// The tool used to be `todo_add`, which made the effect trivially observable ("the todo
+// exists"). With the three todo tools gone (the list is another plugin's data now), the
+// surviving pair is pet_say and memory_*; pet_say is the one with a visible effect that
+// needs no file to be read back.
 func TestToolLoopRunsTheToolAndReturnsTheFinalText(t *testing.T) {
 	stub := newToolStub(t,
-		toolCallScript("call_1", "todo_add", `{"title":"写周报"}`),
-		textScript("加好了"),
+		toolCallScript("call_1", "pet_say", `{"text":"写完了"}`),
+		textScript("说过了"),
 	)
 	a := pluginApp(t)
-	id := installToolPlugin(t, a, "llm.chat", "plugin.config", "todos.read", "todos.write")
+	id := installToolPlugin(t, a, "llm.chat", "plugin.config", "pet.bubble")
 	setPluginConfig(t, a, id, map[string]string{"llmBaseUrl": stub.URL(), "llmModel": "m"})
 
-	out, err := a.PluginRequest(id, "llm.chat", `{"text":"帮我加一条","tools":["todo_add"]}`)
+	out, err := a.PluginRequest(id, "llm.chat", `{"text":"跟他说一句","tools":["pet_say"]}`)
 	if err != nil {
 		t.Fatalf("llm.chat: %v", err)
 	}
@@ -139,8 +145,8 @@ func TestToolLoopRunsTheToolAndReturnsTheFinalText(t *testing.T) {
 	if !ok || len(tools) != 1 {
 		t.Fatalf("the first request carries no tools: %+v", first["tools"])
 	}
-	if name := tools[0].(map[string]any)["function"].(map[string]any)["name"]; name != "todo_add" {
-		t.Errorf("the offered tool is %v, want todo_add", name)
+	if name := tools[0].(map[string]any)["function"].(map[string]any)["name"]; name != "pet_say" {
+		t.Errorf("the offered tool is %v, want pet_say", name)
 	}
 
 	// The second round replays the assistant turn and the tool result.
@@ -166,15 +172,15 @@ func TestToolLoopRunsTheToolAndReturnsTheFinalText(t *testing.T) {
 		t.Error("the second round does not carry the tool result")
 	}
 
-	// The tool really ran.
-	found := false
-	for _, todo := range a.store.Todos() {
-		if todo.Title == "写周报" {
-			found = true
-		}
+	// The tool really ran: the pet is saying the line the model asked for.
+	a.mu.Lock()
+	bubble := a.bubble
+	a.mu.Unlock()
+	if bubble == nil {
+		t.Fatal("pet_say left no bubble: the tool did not run")
 	}
-	if !found {
-		t.Errorf("the todo was not created: %+v", a.store.Todos())
+	if bubble.Title != "写完了" {
+		t.Errorf("bubble title = %q, want the text the model passed", bubble.Title)
 	}
 
 	var reply struct {
@@ -183,8 +189,8 @@ func TestToolLoopRunsTheToolAndReturnsTheFinalText(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &reply); err != nil {
 		t.Fatalf("decode the reply: %v", err)
 	}
-	if reply.Text != "加好了" {
-		t.Errorf("text = %q, want 加好了", reply.Text)
+	if reply.Text != "说过了" {
+		t.Errorf("text = %q, want 说过了", reply.Text)
 	}
 }
 
@@ -197,10 +203,10 @@ func TestToolLoopRunsTheToolAndReturnsTheFinalText(t *testing.T) {
 func TestToolNotGrantedIsNeverOffered(t *testing.T) {
 	stub := newToolStub(t, textScript("好"))
 	a := pluginApp(t)
-	id := installToolPlugin(t, a, "llm.chat", "plugin.config") // no todos.write
+	id := installToolPlugin(t, a, "llm.chat", "plugin.config") // no pet.bubble
 	setPluginConfig(t, a, id, map[string]string{"llmBaseUrl": stub.URL(), "llmModel": "m"})
 
-	if _, err := a.PluginRequest(id, "llm.chat", `{"text":"帮我加一条","tools":["todo_add"]}`); err != nil {
+	if _, err := a.PluginRequest(id, "llm.chat", `{"text":"帮我说一句","tools":["pet_say"]}`); err != nil {
 		t.Fatalf("llm.chat: %v", err)
 	}
 	if stub.Hits() != 1 {
@@ -215,14 +221,17 @@ func TestToolNotGrantedIsNeverOffered(t *testing.T) {
 // not fail the request. The model gets the error as the tool result and can answer.
 func TestFailingToolGoesBackToTheModel(t *testing.T) {
 	stub := newToolStub(t,
-		toolCallScript("call_1", "todo_complete", `{"id":"nope"}`),
-		textScript("没找到那条待办"),
+		// pet_say with no text is refused by the capability itself, so the failure comes
+		// from the tool rather than from a missing permission - which is the case this
+		// test is about.
+		toolCallScript("call_1", "pet_say", `{}`),
+		textScript("没说出什么"),
 	)
 	a := pluginApp(t)
-	id := installToolPlugin(t, a, "llm.chat", "plugin.config", "todos.read", "todos.write")
+	id := installToolPlugin(t, a, "llm.chat", "plugin.config", "pet.bubble")
 	setPluginConfig(t, a, id, map[string]string{"llmBaseUrl": stub.URL(), "llmModel": "m"})
 
-	out, err := a.PluginRequest(id, "llm.chat", `{"text":"把那条划掉","tools":["todo_complete"]}`)
+	out, err := a.PluginRequest(id, "llm.chat", `{"text":"说点什么","tools":["pet_say"]}`)
 	if err != nil {
 		t.Fatalf("a failing tool must not fail the request: %v", err)
 	}
@@ -232,7 +241,7 @@ func TestFailingToolGoesBackToTheModel(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &reply); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if reply.Text != "没找到那条待办" {
+	if reply.Text != "没说出什么" {
 		t.Errorf("text = %q", reply.Text)
 	}
 
@@ -263,20 +272,20 @@ func TestFailingToolGoesBackToTheModel(t *testing.T) {
 // TestToolFrameCarriesNoArguments pins the boundary: the plugin is told WHICH tool ran,
 // not what it was given.
 //
-// The arguments can hold the user's todo text, and reading that requires todos.read -
-// which receiving events does not imply. A frame with the arguments in it would be a
-// way around the permission.
+// The arguments can hold the user's own words - the line the pet is asked to say, or a
+// memory note - and receiving an event does not imply permission to read them. A frame
+// with the arguments in it would be a way around that.
 func TestToolFrameCarriesNoArguments(t *testing.T) {
 	stub := newToolStub(t,
-		toolCallScript("call_1", "todo_add", `{"title":"秘密的待办标题"}`),
+		toolCallScript("call_1", "pet_say", `{"text":"秘密要说的话"}`),
 		textScript("好"),
 	)
 	a := pluginApp(t)
 	collected := collectPluginEvents(a)
-	id := installToolPlugin(t, a, "llm.chat", "plugin.config", "todos.read", "todos.write")
+	id := installToolPlugin(t, a, "llm.chat", "plugin.config", "pet.bubble")
 	setPluginConfig(t, a, id, map[string]string{"llmBaseUrl": stub.URL(), "llmModel": "m"})
 
-	if _, err := a.PluginRequest(id, "llm.chat", `{"text":"加一条","tools":["todo_add"]}`); err != nil {
+	if _, err := a.PluginRequest(id, "llm.chat", `{"text":"说一句","tools":["pet_say"]}`); err != nil {
 		t.Fatalf("llm.chat: %v", err)
 	}
 
@@ -288,15 +297,15 @@ func TestToolFrameCarriesNoArguments(t *testing.T) {
 	if !ok {
 		t.Fatalf("the payload is %T", frames[0].Payload)
 	}
-	if payload["name"] != "todo_add" {
-		t.Errorf("name = %v, want todo_add", payload["name"])
+	if payload["name"] != "pet_say" {
+		t.Errorf("name = %v, want pet_say", payload["name"])
 	}
 	if payload["ok"] != true {
 		t.Errorf("ok = %v, want true", payload["ok"])
 	}
 	// The assertion that matters: nothing resembling the arguments.
 	encoded, _ := json.Marshal(payload)
-	for _, forbidden := range []string{"秘密的待办标题", "arguments", "args", "title"} {
+	for _, forbidden := range []string{"秘密要说的话", "arguments", "args", "text"} {
 		if strings.Contains(string(encoded), forbidden) {
 			t.Errorf("the frame leaks %q: %s", forbidden, encoded)
 		}
@@ -338,12 +347,12 @@ func TestUnknownToolIsSkippedNotFatal(t *testing.T) {
 // TestToolLoopStopsAtTheRoundLimit covers the cap. The model that keeps asking for
 // tools instead of answering must not be able to keep the request alive forever.
 func TestToolLoopStopsAtTheRoundLimit(t *testing.T) {
-	stub := newToolStub(t, toolCallScript("call_1", "todo_list", `{}`))
+	stub := newToolStub(t, toolCallScript("call_1", "memory_read", `{}`))
 	a := pluginApp(t)
-	id := installToolPlugin(t, a, "llm.chat", "plugin.config", "todos.read")
+	id := installToolPlugin(t, a, "llm.chat", "plugin.config", "storage")
 	setPluginConfig(t, a, id, map[string]string{"llmBaseUrl": stub.URL(), "llmModel": "m"})
 
-	if _, err := a.PluginRequest(id, "llm.chat", `{"text":"一直调","tools":["todo_list"]}`); err == nil {
+	if _, err := a.PluginRequest(id, "llm.chat", `{"text":"一直调","tools":["memory_read"]}`); err == nil {
 		t.Fatal("a model that only ever asks for tools must eventually fail")
 	}
 	if stub.Hits() != maxToolRounds {

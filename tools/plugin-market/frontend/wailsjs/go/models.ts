@@ -740,7 +740,6 @@ export namespace store {
 	    llmTimeoutSec: number;
 	    llmSystemPrompt: string;
 	    llmHistoryTurns: number;
-	    llmContextTodos: boolean;
 	    llmProactive: boolean;
 	    llmProactiveMinGapMin: number;
 	    llmDailyBudget: number;
@@ -778,7 +777,6 @@ export namespace store {
 	        this.llmTimeoutSec = source["llmTimeoutSec"];
 	        this.llmSystemPrompt = source["llmSystemPrompt"];
 	        this.llmHistoryTurns = source["llmHistoryTurns"];
-	        this.llmContextTodos = source["llmContextTodos"];
 	        this.llmProactive = source["llmProactive"];
 	        this.llmProactiveMinGapMin = source["llmProactiveMinGapMin"];
 	        this.llmDailyBudget = source["llmDailyBudget"];

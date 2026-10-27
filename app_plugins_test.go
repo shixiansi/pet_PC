@@ -192,7 +192,7 @@ func installTestPlugin(t *testing.T, a *App, over map[string]any) string {
 		"version":     "1.0.0",
 		"author":      "tester",
 		"description": "用于测试的插件",
-		"permissions": []string{"todos.read"},
+		"permissions": []string{"pet.bubble"},
 		"panel":       true,
 		"entry":       "panel.html",
 	}
@@ -314,7 +314,7 @@ func TestPluginRequestDisabledOrMissing(t *testing.T) {
 
 	for _, target := range []string{id, "com.example.never-installed"} {
 		before := len(a.store.Todos())
-		_, err := a.PluginRequest(target, "todos.list", "")
+		_, err := a.PluginRequest(target, "storage.get", `{}`)
 		if err == nil {
 			t.Fatalf("%s must be refused", target)
 		}
@@ -351,14 +351,13 @@ func TestUnauthorisedCallsChangeNothing(t *testing.T) {
 	layoutBefore := a.currentLayout()
 
 	methods := []string{
-		"todos.list", "todos.add", "todos.update", "todos.toggle", "todos.remove",
 		"events.subscribe", "bubble.say", "net.fetch",
 		"storage.get", "storage.set", "storage.remove",
 		"surface.show", "surface.hide", "llm.chat",
 		"config.get", "config.set",
 	}
 	for _, method := range methods {
-		_, err := a.PluginRequest(id, method, `{"title":"x","id":"y","key":"k","value":"v","text":"hi","names":["todos.changed"],"url":"http://127.0.0.1/","method":"GET","values":{"llmBaseUrl":"https://evil.example.com"}}`)
+		_, err := a.PluginRequest(id, method, `{"title":"x","id":"y","key":"k","value":"v","text":"hi","names":["reminder.fired"],"url":"http://127.0.0.1/","method":"GET","values":{"llmBaseUrl":"https://evil.example.com"}}`)
 		if err == nil {
 			t.Fatalf("%s must be refused without a grant", method)
 		}
@@ -398,104 +397,30 @@ func TestUnauthorisedCallsChangeNothing(t *testing.T) {
 	}
 }
 
-// --- T36-T40: todos capabilities -------------------------------------------
+// --- T36-T40: the todos capabilities are GONE -------------------------------
 
-// TestTodosReadCapability covers T36.
-func TestTodosReadCapability(t *testing.T) {
+// TestTodosCapabilitiesAreGone pins the retirement from the plugin's side: the five
+// `todos.*` methods were the host's todo store handed to plugins, and the store is the
+// todo plugin's own `storage` now (openspec/changes/todo-pomodoro-as-plugins). A plugin
+// that still asks gets the dispatcher's "no such method" - NOT a permission error - which
+// is the distinction worth pinning: the method is absent, not gated.
+//
+// The tests that used to live here proved the read and the four writes worked. They are
+// deleted rather than rewritten because there is nothing left to call: the data moved,
+// and the pomodoro reads the snapshot the todo plugin publishes through `plugin.share`
+// (covered by market/tests/plugin-todo.test.js on the publishing side).
+func TestTodosCapabilitiesAreGone(t *testing.T) {
 	a := pluginApp(t)
-	id := installSampleWith(t, a, map[string]any{"permissions": []string{"todos.read"}})
-	if err := a.store.SaveTodos([]store.Todo{
-		{ID: "t1", Title: "第一件", CreatedAt: time.Now()},
-		{ID: "t2", Title: "第二件", CreatedAt: time.Now()},
-	}); err != nil {
-		t.Fatalf("SaveTodos: %v", err)
-	}
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"pet.bubble"}})
 
-	out, err := a.PluginRequest(id, "todos.list", "")
-	if err != nil {
-		t.Fatalf("todos.list: %v", err)
-	}
-	var got []struct {
-		ID    string `json:"id"`
-		Title string `json:"title"`
-	}
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatalf("decode: %v (raw %s)", err, out)
-	}
-	live := a.store.Todos()
-	if len(got) != len(live) {
-		t.Fatalf("got %d todos, want %d", len(got), len(live))
-	}
-	for i := range got {
-		if got[i].ID != live[i].ID || got[i].Title != live[i].Title {
-			t.Errorf("entry %d: got %+v want %+v", i, got[i], live[i])
+	for _, method := range []string{"todos.list", "todos.add", "todos.update", "todos.toggle", "todos.remove"} {
+		if _, err := a.PluginRequest(id, method, `{"title":"x","id":"y"}`); err == nil {
+			t.Fatalf("%s must not exist any more", method)
+		} else if strings.Contains(err.Error(), "未获权限") {
+			t.Errorf("%s: refused for the wrong reason (%v) - the method is gone, not gated", method, err)
 		}
 	}
 }
-
-// TestTodosWriteCapabilities covers T37-T40 in one pass, because they are one
-// rule (todos.write) applied to four operations.
-func TestTodosWriteCapabilities(t *testing.T) {
-	a := pluginApp(t)
-	id := installSampleWith(t, a, map[string]any{"permissions": []string{"todos.write"}})
-
-	// add
-	if _, err := a.PluginRequest(id, "todos.add", `{"title":"插件加的"}`); err != nil {
-		t.Fatalf("todos.add: %v", err)
-	}
-	found := false
-	var addedID string
-	for _, todo := range a.store.Todos() {
-		if todo.Title == "插件加的" {
-			found = true
-			addedID = todo.ID
-		}
-	}
-	if !found {
-		t.Fatal("todos.add did not create the entry")
-	}
-
-	// update
-	if _, err := a.PluginRequest(id, "todos.update", `{"id":"`+addedID+`","title":"改过了","notes":"备注"}`); err != nil {
-		t.Fatalf("todos.update: %v", err)
-	}
-	var updated bool
-	for _, todo := range a.store.Todos() {
-		if todo.ID == addedID {
-			updated = todo.Title == "改过了" && todo.Notes == "备注"
-		}
-	}
-	if !updated {
-		t.Fatal("todos.update did not apply")
-	}
-
-	// toggle
-	if _, err := a.PluginRequest(id, "todos.toggle", `{"id":"`+addedID+`"}`); err != nil {
-		t.Fatalf("todos.toggle: %v", err)
-	}
-	var toggled bool
-	for _, todo := range a.store.Todos() {
-		if todo.ID == addedID {
-			toggled = todo.Done
-		}
-	}
-	if !toggled {
-		t.Fatal("todos.toggle did not flip the flag")
-	}
-
-	// remove
-	before := len(a.store.Todos())
-	if _, err := a.PluginRequest(id, "todos.remove", `{"id":"`+addedID+`"}`); err != nil {
-		t.Fatalf("todos.remove: %v", err)
-	}
-	if got := len(a.store.Todos()); got != before-1 {
-		t.Fatalf("todos.remove left %d entries, want %d", got, before-1)
-	}
-	if _, err := a.PluginRequest(id, "todos.remove", `{"id":"`+addedID+`"}`); err != nil {
-		t.Fatalf("removing an absent id must not fail: %v", err)
-	}
-}
-
 // --- T42-T44: storage ------------------------------------------------------
 
 // TestStorageRoundTrip covers T42 and T43: a value is written inside the
@@ -1721,15 +1646,21 @@ func TestConfigWhitelistCannotWidenArbitraryHosts(t *testing.T) {
 
 // --- T47/T48/T50b: events ---------------------------------------------------
 
-// TestEventsSubscribeAndEmit covers T47 and the Go half of T50b: a subscription
-// is recorded, and a state change reaches the subscriber as ONE
-// pet:plugin-event carrying the right plugin and event name.
+// TestEventsSubscribeAndEmit covers T47 and the Go half of T50b: a subscription is
+// recorded, and a state change reaches the subscriber as ONE pet:plugin-event carrying
+// the right plugin and event name.
+//
+// The trigger used to be `todos.add` (the todo bindings emitted `todos.changed`). Both
+// that event and those bindings are gone - the list is the todo plugin's own storage, so
+// the host has nothing to broadcast about it. What the host still emits by itself is
+// `reminder.fired` (the manual RemindNow), and the mechanism it exercises - subscription
+// set → one frame per subscriber - is the same one, so the trigger is now internal.
 func TestEventsSubscribeAndEmit(t *testing.T) {
 	a := pluginApp(t)
 	collected := collectPluginEvents(a)
-	id := installSampleWith(t, a, map[string]any{"permissions": []string{"events", "todos.write"}})
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"events"}})
 
-	out, err := a.PluginRequest(id, "events.subscribe", `{"names":["timer.changed","todos.changed"]}`)
+	out, err := a.PluginRequest(id, "events.subscribe", `{"names":["reminder.fired","timer.phaseEnded"]}`)
 	if err != nil {
 		t.Fatalf("events.subscribe: %v", err)
 	}
@@ -1741,16 +1672,21 @@ func TestEventsSubscribeAndEmit(t *testing.T) {
 		t.Fatalf("the subscription set is %v, want both events", names)
 	}
 
-	// A todo change made from the plugin's own call must reach it.
-	if _, err := a.PluginRequest(id, "todos.add", `{"title":"触发事件"}`); err != nil {
-		t.Fatalf("todos.add: %v", err)
-	}
-	events := collected("todos.changed")
+	a.notifyPluginReminderFired(1, 0, 2)
+	events := collected("reminder.fired")
 	if len(events) != 1 {
-		t.Fatalf("want exactly 1 todos.changed event, got %d (%+v)", len(events), events)
+		t.Fatalf("want exactly 1 reminder.fired event, got %d (%+v)", len(events), events)
 	}
 	if events[0].PluginID != id {
 		t.Fatalf("the event names %q, want %q", events[0].PluginID, id)
+	}
+
+	// And the edge event the host keeps for compatibility still travels: it has no
+	// emitter left (see notifyPluginPhaseEnded), but the transition the voice plugin
+	// depends on must keep working the day one comes back.
+	a.notifyPluginPhaseEnded("focus")
+	if got := collected("timer.phaseEnded"); len(got) != 1 {
+		t.Fatalf("want 1 timer.phaseEnded, got %d", len(got))
 	}
 }
 
@@ -1759,26 +1695,28 @@ func TestEventsSubscribeAndEmit(t *testing.T) {
 func TestEventsRejectUnknownName(t *testing.T) {
 	a := pluginApp(t)
 	id := installSampleWith(t, a, map[string]any{"permissions": []string{"events"}})
-	if _, err := a.PluginRequest(id, "events.subscribe", `{"names":["todos.changed"]}`); err != nil {
+	if _, err := a.PluginRequest(id, "events.subscribe", `{"names":["reminder.fired"]}`); err != nil {
 		t.Fatalf("events.subscribe: %v", err)
 	}
 
-	_, err := a.PluginRequest(id, "events.subscribe", `{"names":["todos.changed","no.such.event"]}`)
+	// `todos.changed` is a name that USED to be valid and is now exactly as unknown as
+	// any typo - which is what makes it a useful negative: a retired event must not linger
+	// in the list just because it once worked.
+	_, err := a.PluginRequest(id, "events.subscribe", `{"names":["reminder.fired","todos.changed"]}`)
 	if err == nil {
-		t.Fatal("an unknown event name must be refused")
+		t.Fatal("a retired event name must be refused")
 	}
-	if !strings.Contains(err.Error(), "no.such.event") {
+	if !strings.Contains(err.Error(), "todos.changed") {
 		t.Fatalf("error %q must name the bad event", err)
 	}
 
 	a.pluginHost.mu.Lock()
 	set := a.pluginHost.subs[id]
 	a.pluginHost.mu.Unlock()
-	if len(set) != 1 || !set["todos.changed"] {
+	if len(set) != 1 || !set["reminder.fired"] {
 		t.Fatalf("a refused subscribe changed the set: %v", set)
 	}
 }
-
 // --- T72–T77: llm.chat ------------------------------------------------------
 
 // ssePieces is the reply the stub endpoint streams, in the order it sends it.
@@ -2377,7 +2315,7 @@ func TestProcessLaunchStartsAndReturnsAPid(t *testing.T) {
 // `process` cannot use a malformed call as a probe for what the host would accept.
 func TestProcessLaunchNeedsThePermission(t *testing.T) {
 	a := pluginApp(t)
-	id := installSampleWith(t, a, map[string]any{"permissions": []string{"todos.read"}})
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"pet.bubble"}})
 	_, err := a.PluginRequest(id, "process.launch", `{"path":"C:\\x.exe"}`)
 	if err == nil || !strings.Contains(err.Error(), plugins.PermProcess) {
 		t.Fatalf("error = %v, want a refusal naming %s", err, plugins.PermProcess)

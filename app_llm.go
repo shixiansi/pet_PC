@@ -119,84 +119,22 @@ func describeChatError(err error) (message, kind string) {
 
 // promptContext snapshots the pet's world for the system message.
 //
-// includeTodos is a PARAMETER rather than cfg.LLMContextTodos because the two callers
-// answer it differently, and reading it off `cfg` gave the wrong answer for one of
-// them. A plugin's config starts from zero, so cfg.LLMContextTodos was always false -
-// which made EVERY plugin conversation tell the model "用户关闭了日程上下文". The model
-// therefore never saw a todo in a plugin chat, and once tools existed it held todo_add
-// in one hand and a sentence saying it could not add anything in the other. That is the
-// reply the user got.
+// That is the persona and the clock, and nothing else - and the empty half is the point.
+// The todo list and the timer used to be filled in here; both are plugins' data now (the
+// todo plugin's `storage`, the pomodoro plugin's own state), and the host must not read
+// another plugin's data on a third plugin's behalf. Doing so would be exactly the
+// "here is the user's todo list" leak that `todos.read` used to gate, with nobody left to
+// ask. So llm.BuildSystemPrompt states plainly that the list and the timer are not
+// visible, which is true and is what stops the model inventing them.
 //
-// So the caller decides: the pet's own settings for a pet-side request, and
-// "the user's global switch AND this plugin may read todos" for a plugin's.
-func (a *App) promptContext(cfg store.Config, includeTodos bool) llm.PromptContext {
-	now := time.Now()
-	ctx := llm.PromptContext{
-		Persona:      cfg.LLMSystemPrompt,
-		Now:          now,
-		IncludeTodos: includeTodos,
+// `promptDueLabel` and `promptStamp` went with the snapshot: the first rendered a todo's
+// deadline, the second a session's timestamp, and there are no deadlines or sessions left
+// on this side to render.
+func (a *App) promptContext(cfg store.Config) llm.PromptContext {
+	return llm.PromptContext{
+		Persona: cfg.LLMSystemPrompt,
+		Now:     time.Now(),
 	}
-	if !includeTodos {
-		return ctx
-	}
-
-	stats := a.store.Stats()
-	ctx.OpenCount = stats.Open
-	ctx.OverdueCount = stats.Overdue
-	ctx.DueSoonCount = stats.DueSoon
-
-	// OpenTodos already returns the panel's order: soonest due first, undated
-	// last.
-	for i, t := range a.store.OpenTodos() {
-		if i == llm.MaxPromptTodos() {
-			break
-		}
-		ctx.Todos = append(ctx.Todos, llm.PromptTodo{
-			Title:   t.Title,
-			Due:     promptDueLabel(t, now),
-			Overdue: t.Overdue(now),
-		})
-	}
-
-	// The timer is deliberately absent from this snapshot.
-	//
-	// It used to carry the phase, the countdown, the attached todo and the day's
-	// finished-session count. All four belong to the pomodoro plugin now, which
-	// keeps its own state machine and its own archive - the host has no timer to
-	// describe, and inventing an empty one would tell the model "nothing is running"
-	// with the authority of a fact it cannot check.
-	return ctx
-}
-
-// promptDueLabel renders a deadline the way a person would say it.
-//
-// It is computed here rather than in the llm package so that package needs no
-// locale rules; the model only ever sees the finished phrase.
-func promptDueLabel(t store.Todo, now time.Time) string {
-	if t.Due == nil {
-		return ""
-	}
-	due := t.Due.In(now.Location())
-	label := due.Format("01-02 15:04")
-	switch {
-	case due.Before(now):
-		return "已逾期，" + label
-	case due.Format("2006-01-02") == now.Format("2006-01-02"):
-		return "今天 " + due.Format("15:04")
-	case due.Format("2006-01-02") == now.AddDate(0, 0, 1).Format("2006-01-02"):
-		return "明天 " + due.Format("15:04")
-	default:
-		return label
-	}
-}
-
-// promptStamp renders a past moment relative to today.
-func promptStamp(at, now time.Time) string {
-	at = at.In(now.Location())
-	if at.Format("2006-01-02") == now.Format("2006-01-02") {
-		return "今天 " + at.Format("15:04")
-	}
-	return at.Format("01-02 15:04")
 }
 
 // --- window ----------------------------------------------------------------

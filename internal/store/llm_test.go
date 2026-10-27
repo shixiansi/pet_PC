@@ -22,9 +22,9 @@ func TestDefaultConfigLLM(t *testing.T) {
 		t.Errorf("default endpoint = %q/%q, want %q/%q",
 			cfg.LLMBaseURL, cfg.LLMModel, DefaultLLMBaseURL, DefaultLLMModel)
 	}
-	if !cfg.LLMContextTodos {
-		t.Error("context injection should default on: without it the pet cannot answer anything about the user's day")
-	}
+	// There is no LLMContextTodos to assert on any more. It switched the todo list into
+	// the prompt, and the list is the todo plugin's own storage now - a switch that
+	// cannot change anything is worse than no switch, so it went with the data.
 }
 
 // TestConfigUpgradeFromPreLLMFile is the compatibility guarantee that matters:

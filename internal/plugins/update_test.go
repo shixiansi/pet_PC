@@ -61,7 +61,7 @@ func TestUpdateKeepsEnabledStateAndGrants(t *testing.T) {
 	if err := m.SetEnabled(id, true); err != nil {
 		t.Fatalf("SetEnabled: %v", err)
 	}
-	if _, err := m.GrantPermissions(id, []string{"todos.read"}); err != nil {
+	if _, err := m.GrantPermissions(id, []string{"pet.bubble"}); err != nil {
 		t.Fatalf("GrantPermissions: %v", err)
 	}
 
@@ -78,7 +78,7 @@ func TestUpdateKeepsEnabledStateAndGrants(t *testing.T) {
 	if !row.Enabled {
 		t.Fatal("the update switched the plugin off")
 	}
-	if len(row.Granted) != 1 || row.Granted[0] != "todos.read" {
+	if len(row.Granted) != 1 || row.Granted[0] != "pet.bubble" {
 		t.Fatalf("granted after update = %v, want the previous grant preserved", row.Granted)
 	}
 
@@ -177,7 +177,7 @@ func testManifestFor(t *testing.T, id, version string) string {
   "version": "` + version + `",
   "author": "tester",
   "description": "用于测试更新路径",
-  "permissions": ["todos.read", "pet.bubble"],
+  "permissions": ["pet.bubble", "storage"],
   "panel": true,
   "entry": "panel.html"
 }`

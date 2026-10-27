@@ -247,6 +247,18 @@ func (a *App) startup(ctx context.Context) {
 			// next launch retries because no marker was written.
 			log.Printf("pet: 迁移语音数据失败: %v", err)
 		}
+		// The LIST moved the same way, one step later: `todos.*` retired, the todo
+		// plugin owns its own `storage` now, and this copies the host's todos.json into
+		// it once. Same three properties as the voice migration - source only read,
+		// data written before the marker, marker ends it - and the same two no-op
+		// cases: the plugin is not installed, or it already has a list of its own.
+		if err := plugins.MigrateTodoData(a.store.Dir()); err != nil {
+			// Not fatal for the same reason: no marker was written, so the next launch
+			// retries, and a pet that refused to appear over a plugin's data would be
+			// the worse bug. It IS worth a log line, because the visible symptom is an
+			// empty list in the plugin while todos.json still has the entries.
+			log.Printf("pet: 迁移待办数据失败: %v", err)
+		}
 		// There is no timer loop to start: the pomodoro plugin counts its own phases
 		// (market/plugins/com.shixiansi.plugin-pomodoro), so the host has neither a
 		// state machine to tick nor a startup preference to apply.

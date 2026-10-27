@@ -325,11 +325,12 @@ type pluginMethod struct {
 // permission with no method behind it would be a switch the user is asked about
 // that does nothing, and a method absent from here is simply not callable.
 var pluginMethods = map[string]pluginMethod{
-	"todos.list":   {perm: plugins.PermTodosRead, run: pluginTodosList},
-	"todos.add":    {perm: plugins.PermTodosWrite, run: pluginTodosAdd},
-	"todos.update": {perm: plugins.PermTodosWrite, run: pluginTodosUpdate},
-	"todos.toggle": {perm: plugins.PermTodosWrite, run: pluginTodosToggle},
-	"todos.remove": {perm: plugins.PermTodosWrite, run: pluginTodosRemove},
+	// There are no todos.* methods any more either, and for the same reason as the
+	// timer.* five below: the list is the todo plugin's own `storage`, and the two
+	// other readers went to `plugin.share` (the pomodoro) or stopped reading it (the
+	// chat plugin). A `todos.list` left here would gate a permission whose owner is
+	// another plugin's file.
+	//
 	// There are no timer.* methods any more: timer.state / start / pause / resume /
 	// stop drove the HOST's timer, and the pomodoro plugin counts its own phases in
 	// its own state machine now (market/plugins/com.shixiansi.plugin-pomodoro, whose
@@ -470,148 +471,20 @@ func hasPermission(granted []string, perm string) bool {
 
 // --- capability implementations --------------------------------------------
 
-// pluginTodosList returns the todo list.
-func pluginTodosList(a *App, _ string, _ []byte) (any, error) {
-	return a.store.Todos(), nil
-}
-
-// pluginTodosAdd appends an entry.
-func pluginTodosAdd(a *App, _ string, payload []byte) (any, error) {
-	var in struct {
-		Title string `json:"title"`
-		Notes string `json:"notes"`
-		Due   string `json:"due"`
-	}
-	if err := decodePayload(payload, &in); err != nil {
-		return nil, err
-	}
-	title := strings.TrimSpace(in.Title)
-	if title == "" {
-		return nil, errors.New("todos.add 需要 title")
-	}
-	due, err := parseDue(in.Due)
-	if err != nil {
-		return nil, err
-	}
-	todos := a.store.Todos()
-	todos = append(todos, store.Todo{
-		ID:        newID(),
-		Title:     title,
-		Notes:     strings.TrimSpace(in.Notes),
-		Due:       due,
-		CreatedAt: time.Now(),
-	})
-	if err := a.store.SaveTodos(todos); err != nil {
-		return nil, err
-	}
-	a.emitPluginStateChange("todos.changed", nil)
-	return a.store.Todos(), nil
-}
-
-// pluginTodosUpdate edits an entry.
-func pluginTodosUpdate(a *App, _ string, payload []byte) (any, error) {
-	var in struct {
-		ID    string `json:"id"`
-		Title string `json:"title"`
-		Notes string `json:"notes"`
-		Due   string `json:"due"`
-	}
-	if err := decodePayload(payload, &in); err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(in.ID) == "" {
-		return nil, errors.New("todos.update 需要 id")
-	}
-	due, err := parseDue(in.Due)
-	if err != nil {
-		return nil, err
-	}
-	todos := a.store.Todos()
-	found := false
-	for i := range todos {
-		if todos[i].ID != in.ID {
-			continue
-		}
-		if t := strings.TrimSpace(in.Title); t != "" {
-			todos[i].Title = t
-		}
-		todos[i].Notes = strings.TrimSpace(in.Notes)
-		todos[i].Due = due
-		found = true
-		break
-	}
-	if !found {
-		return nil, errors.New("未找到该待办")
-	}
-	if err := a.store.SaveTodos(todos); err != nil {
-		return nil, err
-	}
-	a.emitPluginStateChange("todos.changed", nil)
-	return a.store.Todos(), nil
-}
-
-// pluginTodosToggle flips the done flag.
-func pluginTodosToggle(a *App, _ string, payload []byte) (any, error) {
-	var in struct {
-		ID string `json:"id"`
-	}
-	if err := decodePayload(payload, &in); err != nil {
-		return nil, err
-	}
-	todos := a.store.Todos()
-	found := false
-	for i := range todos {
-		if todos[i].ID != in.ID {
-			continue
-		}
-		todos[i].Done = !todos[i].Done
-		if todos[i].Done {
-			now := time.Now()
-			todos[i].DoneAt = &now
-		} else {
-			todos[i].DoneAt = nil
-		}
-		found = true
-		break
-	}
-	if !found {
-		return nil, errors.New("未找到该待办")
-	}
-	if err := a.store.SaveTodos(todos); err != nil {
-		return nil, err
-	}
-	a.emitPluginStateChange("todos.changed", nil)
-	return a.store.Todos(), nil
-}
-
-// pluginTodosRemove deletes an entry.
-func pluginTodosRemove(a *App, _ string, payload []byte) (any, error) {
-	var in struct {
-		ID string `json:"id"`
-	}
-	if err := decodePayload(payload, &in); err != nil {
-		return nil, err
-	}
-	todos := a.store.Todos()
-	out := make([]store.Todo, 0, len(todos))
-	for _, t := range todos {
-		if t.ID != in.ID {
-			out = append(out, t)
-		}
-	}
-	if err := a.store.SaveTodos(out); err != nil {
-		return nil, err
-	}
-	a.emitPluginStateChange("todos.changed", nil)
-	return a.store.Todos(), nil
-}
+// No todo capabilities here any more. `todos.list/add/update/toggle/remove` were the
+// host's todo store handed to plugins, and that store is the todo plugin's own now
+// (its `storage`, key `todos-v1`): the last two readers moved off it - the pomodoro
+// reads the snapshot published through `plugin.share`, and the chat plugin's three todo
+// tools were deleted rather than re-pointed, because "the model may read the list but
+// not change it" is the worse half of both features. With no method left, both
+// permission words retired too (17 → 15 → 13); see capability.go.
 
 // pluginTimerState and the four driving methods (timer.start/pause/resume/stop) used
 // to live here. They are gone with the timer.* permissions: the pomodoro plugin owns
-// its own state machine and records, so the host has no timer to hand out. What the
-// host still emits is the CONCLUSION - timer.changed and timer.phaseEnded - because
-// the voice plugin says something when a phase ends, and that stays true whichever
-// side counts the seconds.
+// its own state machine and records, so the host has no timer to hand out. Of the two
+// conclusions the host used to publish, timer.changed is gone as well (nothing to
+// broadcast); timer.phaseEnded stays as a name without an emitter - see
+// notifyPluginPhaseEnded and openspec/changes/pomodoro-headless-timer.
 
 // pluginMemoryRead returns the caller's memory document, or "" when it has none.
 //
@@ -1846,17 +1719,16 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 		requestID = newID()
 	}
 
-	// The snapshot is included only when BOTH gates agree: the user has not turned the
-	// schedule context off globally, AND this plugin holds todos.read.
+	// There is no todo snapshot to offer any more, so there is no second gate here.
 	//
-	// The second gate is what makes the tools consistent with the prompt. Without it a
-	// plugin could hold todo_add and still be told "用户关闭了日程上下文" - the model then
-	// has a tool in one hand and a sentence saying it cannot do anything in the other,
-	// and it answers by refusing. That is not hypothetical: reading the flag off the
-	// plugin's zero-valued config made it false every time.
-	includeTodos := a.store.Config().LLMContextTodos &&
-		plugins.HasGranted(row.Granted, plugins.PermTodosRead)
-	msgs := buildPluginChatMessages(a, cfg, in.System, in.History, text, includeTodos)
+	// It used to be `cfg.LLMContextTodos && hasPermission(row.Granted, todos.read)`: the
+	// user's global switch AND this plugin's permission, because the snapshot was the
+	// user's own list and "any plugin with llm.chat may see your tasks" is not a
+	// permission model. Both halves are gone - the list moved into the todo plugin, and
+	// with no method behind `todos.read` the permission itself retired. A plugin's
+	// system prompt is now the only context a plugin conversation gets, and the world
+	// snapshot says plainly that the list and the timer are not visible from here.
+	msgs := buildPluginChatMessages(a, cfg, in.System, in.History, text)
 	if len(images) > 0 {
 		// The pictures belong to the question, i.e. the LAST message. Attaching them
 		// to an earlier turn would ask the model to look at them "again" and some
@@ -2007,7 +1879,6 @@ func pluginChatConfig(man plugins.Manifest, values map[string]string) store.Conf
 	cfg.LLMTimeoutSec = num("llmTimeoutSec")
 	cfg.LLMSystemPrompt = raw("llmSystemPrompt")
 	cfg.LLMHistoryTurns = num("llmHistoryTurns")
-	cfg.LLMContextTodos = strings.EqualFold(raw("llmContextTodos"), "true")
 	cfg.LLMDailyBudget = num("llmDailyBudget")
 	return cfg
 }
@@ -2113,7 +1984,7 @@ func sanitizePluginHistory(turns []pluginTurn) []llm.Message {
 //     pomodoro state to everyone in the room. A plugin that asks for its own
 //     system prompt is saying "I know what context belongs here"; the host does
 //     not second-guess that, it just refuses to add the user's day to it.
-func buildPluginChatMessages(a *App, cfg store.Config, system string, history []pluginTurn, text string, includeTodos bool) []llm.Message {
+func buildPluginChatMessages(a *App, cfg store.Config, system string, history []pluginTurn, text string) []llm.Message {
 	turns := sanitizePluginHistory(history)
 	system = clampPluginText(strings.TrimSpace(system), maxPluginChatSystem)
 	if system != "" {
@@ -2123,7 +1994,7 @@ func buildPluginChatMessages(a *App, cfg store.Config, system string, history []
 		msgs = append(msgs, llm.Message{Role: "user", Content: text})
 		return msgs
 	}
-	return llm.BuildMessages(a.promptContext(cfg, includeTodos), append(turns, llm.Message{Role: "user", Content: text}))
+	return llm.BuildMessages(a.promptContext(cfg), append(turns, llm.Message{Role: "user", Content: text}))
 }
 
 // pluginChatCredential is the model settings ONE llm.chat call runs with, plus
@@ -2700,31 +2571,19 @@ func (a *App) emitPluginStateChange(name string, payload any) {
 	}
 }
 
-// notifyPluginTodosChanged is called by the todo bindings so a plugin hears
-// about a change the USER made, not only about the ones it made itself.
-func (a *App) notifyPluginTodosChanged() {
-	a.emitPluginStateChange("todos.changed", nil)
-}
-
-// notifyPluginTimerChanged is called wherever the pomodoro state is published.
-func (a *App) notifyPluginTimerChanged() {
-	a.emitPluginStateChange("timer.changed", nil)
-}
-
 // notifyPluginPhaseEnded tells subscribers a pomodoro phase just FINISHED.
 //
 // NOTHING IN THE HOST CALLS IT ANY MORE, and that is a known gap rather than an
 // oversight. The only emitter was the host's own timer, which is gone: the pomodoro
 // plugin counts its own phases, and a plugin cannot raise a host event. So a plugin
 // that subscribes to timer.phaseEnded today will never hear it - the voice plugin's
-// "番茄钟结束" line is silent, and the pomodoro plugin says the same thing in a text
-// bubble instead (it holds pet.bubble for exactly that).
+// "番茄钟结束" line is silent.
 //
-// It is kept, with its event still in SubscribableEvents, because the fix is a
-// plugin-to-plugin notification path (plugin.share polling, or a narrow
-// "announce a fact" method) and that is a design decision, not a deletion. Deleting
-// the pair now would also break every installed voice plugin's subscribe call, which
-// validates the name. See tasks.md §0.1.
+// It is kept, with its event still in SubscribableEvents, because the real fix is a
+// headless timer inside the pomodoro plugin (then `plugin.share` carries the fact and the
+// voice plugin polls it) - see openspec/changes/pomodoro-headless-timer. Deleting the
+// pair now would also break every installed voice plugin's subscribe call, which
+// validates the name.
 //
 // The payload is a bare fact and no wording: which line to say, in which voice,
 // is the plugin's business.

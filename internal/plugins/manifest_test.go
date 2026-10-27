@@ -17,7 +17,7 @@ func validManifestMap() map[string]any {
 		"version":     "1.0.0",
 		"author":      "tester",
 		"description": "一个用于测试的插件",
-		"permissions": []string{"todos.read"},
+		"permissions": []string{"pet.bubble"},
 		"panel":       true,
 		"entry":       "panel.html",
 	}
@@ -56,7 +56,7 @@ func TestValidManifestParses(t *testing.T) {
 	if !m.Panel || m.Entry != "panel.html" {
 		t.Fatalf("panel/entry not preserved: %+v", m)
 	}
-	if len(m.Permissions) != 1 || m.Permissions[0] != PermTodosRead {
+	if len(m.Permissions) != 1 || m.Permissions[0] != PermBubble {
 		t.Fatalf("permissions not preserved: %v", m.Permissions)
 	}
 }
@@ -178,9 +178,15 @@ func TestManifestVersionFormat(t *testing.T) {
 // Back down to fifteen when both timer permissions retired: the timer those five
 // methods drove belongs to the pomodoro plugin now, so the host has no plugin-facing
 // timer surface left to gate (openspec/changes/todo-pomodoro-as-plugins).
-func TestAllowedPermissionsIsTheFifteen(t *testing.T) {
+//
+// And down to THIRTEEN when todos.read / todos.write retired: the list is the todo
+// plugin's own storage, the pomodoro reads the snapshot it publishes through
+// `plugin.share`, and the chat plugin's three todo tools were deleted rather than
+// re-pointed (the model chats; the list is edited where it lives). A permission with no
+// method behind it is the "switch that does nothing" this list exists to forbid.
+func TestAllowedPermissionsIsTheThirteen(t *testing.T) {
 	want := []string{
-		"todos.read", "todos.write", "pet.bubble",
+		"pet.bubble",
 		"events", "net.fetch", "net.credentials", "storage", "pet.surface", "llm.chat",
 		"plugin.config", "audio", "net.ws", "llm.borrow", "process", "plugin.share",
 	}
@@ -229,11 +235,11 @@ func TestManifestPermissions(t *testing.T) {
 	if !strings.Contains(err.Error(), "fs.read") || !strings.Contains(err.Error(), "permissions") {
 		t.Fatalf("error %q must name both the permission and the field", err)
 	}
-	_, err = ParseManifest(manifestJSON(t, map[string]any{"permissions": []string{"todos.read", "todos.read"}}))
+	_, err = ParseManifest(manifestJSON(t, map[string]any{"permissions": []string{"pet.bubble", "pet.bubble"}}))
 	if err == nil {
 		t.Fatal("a duplicate permission must be rejected")
 	}
-	if !strings.Contains(err.Error(), "todos.read") {
+	if !strings.Contains(err.Error(), "pet.bubble") {
 		t.Fatalf("error %q must name the duplicate", err)
 	}
 }

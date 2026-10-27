@@ -2,14 +2,12 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
 
 	"PetPC/internal/llm"
 	"PetPC/internal/plugins"
-	"PetPC/internal/store"
 )
 
 // The tools a plugin may let the MODEL call.
@@ -82,30 +80,13 @@ var (
 func pluginToolCatalog() map[string]pluginTool {
 	toolCatalogOnce.Do(func() {
 		toolCatalog = map[string]pluginTool{
-			"todo_list": {
-				perm:        plugins.PermTodosRead,
-				description: "列出用户当前的待办（id、标题、截止时间、是否已完成）。要完成某条待办或谈论具体某条时，先用它拿到 id。",
-				parameters:  `{"type":"object","properties":{},"additionalProperties":false}`,
-				impl:        pluginTodosList,
-			},
-			"todo_add": {
-				perm:        plugins.PermTodosWrite,
-				description: "给用户新增一条待办。只在用户确实要记住一件事时调用；不要替他发明他没提过要做的事。",
-				parameters: `{"type":"object","properties":{` +
-					`"title":{"type":"string","description":"待办标题，一句话"},` +
-					`"notes":{"type":"string","description":"补充说明，可选"},` +
-					`"due":{"type":"string","description":"截止时间，可选，用界面上那种说法，例如「今天 18:00」「明天」「周五」"}` +
-					`},"required":["title"]}`,
-				impl: pluginTodosAdd,
-			},
-			"todo_complete": {
-				perm:        plugins.PermTodosWrite,
-				description: "把某条待办标记为已完成，需要它的 id（先调 todo_list）。已经是完成状态时什么也不会发生。",
-				parameters: `{"type":"object","properties":{` +
-					`"id":{"type":"string","description":"待办的 id，来自 todo_list"}` +
-					`},"required":["id"]}`,
-				runTool: completeTodoTool,
-			},
+			// The three todo tools (todo_list / todo_add / todo_complete) are gone.
+			// They were thin forwards onto the host's todo store, and that store is the
+			// todo plugin's own now: there is no host method left to forward to, and
+			// re-pointing them at the other plugin's shared snapshot would have given
+			// the model a READ of the list with no way to write it - the worse half of
+			// both features. "The model chats; the list is edited where it lives" is
+			// the cost of stage 1 that was accepted up front (see the change's §4.5).
 			"pet_say": {
 				perm:        plugins.PermBubble,
 				description: "让桌宠弹出一句话气泡。用于用户该被主动告知的短句；长回复不要塞进来，那是对话面板的事。",
@@ -133,59 +114,11 @@ func pluginToolCatalog() map[string]pluginTool {
 	return toolCatalog
 }
 
-// completeTodoTool implements todo_complete.
-//
-// It cannot simply forward: todos.toggle FLIPS the flag, so calling it on an entry
-// that is already done would UN-complete it - the exact opposite of what the tool is
-// named. So it looks the entry up first and answers "已经完成了" instead of flipping.
-func completeTodoTool(a *App, id string, args json.RawMessage) (string, error) {
-	var in struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(args, &in); err != nil {
-		return "", fmt.Errorf("todo_complete 的参数不是合法 JSON：%w", err)
-	}
-	if strings.TrimSpace(in.ID) == "" {
-		return "", errors.New("todo_complete 需要 id")
-	}
-
-	listed, err := pluginTodosList(a, id, nil)
-	if err != nil {
-		return "", err
-	}
-	encoded, err := json.Marshal(listed)
-	if err != nil {
-		return "", err
-	}
-	var todos []store.Todo
-	if err := json.Unmarshal(encoded, &todos); err != nil {
-		return "", fmt.Errorf("读取待办列表失败：%w", err)
-	}
-	for _, t := range todos {
-		if t.ID != in.ID {
-			continue
-		}
-		if t.Done {
-			return `{"ok":true,"alreadyDone":true}`, nil
-		}
-		// Built with json.Marshal rather than string concatenation, so an id can
-		// never break out of the JSON string it sits in.
-		payload, mErr := json.Marshal(map[string]string{"id": in.ID})
-		if mErr != nil {
-			return "", mErr
-		}
-		out, tErr := pluginTodosToggle(a, id, payload)
-		if tErr != nil {
-			return "", tErr
-		}
-		done, mErr := json.Marshal(out)
-		if mErr != nil {
-			return "", mErr
-		}
-		return string(done), nil
-	}
-	return "", fmt.Errorf("没有 id 为 %s 的待办（先调 todo_list 确认）", in.ID)
-}
+// completeTodoTool used to live here: todo_complete could not simply forward, because
+// todos.toggle FLIPS the flag and calling it on an entry that was already done would
+// un-complete it. The tool went with the rest of the todo tools (see the catalog above) -
+// it is kept in this note only so the next person does not re-add a "complete" tool as a
+// thin wrapper over a toggle.
 
 // runPluginTool executes one tool call the model asked for, and tells the plugin
 // that it happened.
