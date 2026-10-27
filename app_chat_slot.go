@@ -11,11 +11,15 @@ import (
 // button on the pet opens.
 //
 // The slot is a DECLARATION, not a reserved id. A plugin says `panelSlot: "chat"`
-// in its manifest and the host hands it the panel's 对话 tab; nothing in this
-// file knows the name of any particular plugin - including the one shipped in
-// the market. That is deliberate: a built-in id would be a back door in an
+// in its manifest and the host asks it for the conversation surface; nothing in
+// this file knows the name of any particular plugin - including the one shipped
+// in the market. That is deliberate: a built-in id would be a back door in an
 // architecture whose whole promise is that the pet is generic and the plugin is
 // the thing that knows about LLMs.
+//
+// (The name `panelSlot` is older than this behaviour: it named the panel tab the
+// claimant used to fill, and the panel retired in stage 3. The field still says
+// "which slot do I answer for", which is what the menu and this resolver need.)
 //
 // The floating surface is NOT re-derived here. Opening the conversation surface
 // goes through the existing OpenPluginSurface, so there is exactly one place
@@ -24,7 +28,7 @@ import (
 // first, and the drift would show up as the window being cropped to a rectangle
 // nothing is painted in.
 
-// chatSlotPlugin resolves the plugin that owns the conversation panel slot.
+// chatSlotPlugin resolves the plugin that answers for the 对话 slot.
 //
 // The rule is "the first installed plugin in plugins.json order that is enabled,
 // has been granted pet.surface, and declares panelSlot == chat". Each clause is

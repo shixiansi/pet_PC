@@ -65,9 +65,14 @@ type PluginView struct {
 	Pending     []string `json:"pending"`
 	NetHosts    []string `json:"netHosts,omitempty"`
 	Panel       bool     `json:"panel"`
-	// PanelSlot is which panel slot the manifest claims, "" for none. The chat
-	// slot is resolved from this field, so it has to travel with the row: the
-	// frontend must not have to fetch a manifest to know who owns its own tab.
+	// PanelSlot is which SLOT the manifest claims, "" for none: `chat`, `todos` or
+	// `pomodoro`, and each names one cell of the pet's right-click menu now that the panel
+	// is gone. It travels with the row because the frontend resolves the menu's target from
+	// it: fetching a manifest per cell would make "who opens this" a second lookup.
+	//
+	// The JSON name still says "panel" because manifests are read FROM DISK: renaming the
+	// field would turn every plugin already installed on a user's machine into an illegal
+	// manifest on the next launch.
 	PanelSlot string `json:"panelSlot,omitempty"`
 	Surface   bool   `json:"surface"`
 	// Background is the headless-frame declaration. The page reads it to decide
