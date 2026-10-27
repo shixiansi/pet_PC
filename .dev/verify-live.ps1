@@ -1,7 +1,7 @@
 ﻿# Verifies the CONVERSATION PLUGIN'S floating surface against the REAL window.
 #
 # The surface is the third occupant of the slot beside the pet, and like the panel
-# and the speech bubble it is not one box: the plugin declares two rectangles, and
+# and the speech bubble it is not one box: the plugin declares several rectangles, and
 # Go crops the window to their union plus the pet. That crop is the only thing that
 # decides which of those pixels the user can see, so it cannot be verified from the
 # frontend alone - a mismatch shows up as either a clipped card or a pale glass
@@ -19,8 +19,8 @@
 # What this checks, against a running PetPC.exe:
 #   * opening the surface does NOT move or resize the window or the pet
 #     (the whole reason the region is cropped rather than the window resized)
-#   * the reply card is painted ABOVE the pet and the input bar BELOW it, both
-#     exactly as wide as the pet and sharing its column - the user's layout
+#   * the question box and the answer bubble are painted ABOVE the pet and the input
+#     pill BELOW it, all 300 wide and sharing the pet's column - the user's layout
 #   * closing it puts the desktop back
 #
 # Run:  pwsh -File .dev\verify-live.ps1
@@ -56,7 +56,7 @@ if (-not (Test-Path $manifestPath)) {
 $manifest = [System.IO.File]::ReadAllText($manifestPath, (New-Object System.Text.UTF8Encoding($false))) | ConvertFrom-Json
 $surface = @($manifest.surface)
 if ($surface.Count -lt 2) {
-    "MANIFEST HAS $($surface.Count) SURFACE BLOCKS: expected at least 2 (the reply card and the input bar)."
+    "MANIFEST HAS $($surface.Count) SURFACE BLOCKS: expected at least 2 (a box on the pet's head and the input pill)."
     exit 1
 }
 
@@ -65,13 +65,15 @@ if ($surface.Count -lt 2) {
 # that reorders its blocks does not silently make this script measure the wrong
 # rectangle.
 #
-#   * the card is the TALLER rectangle - it sits ABOVE the pet
-#   * the input bar is the shorter one   - it hangs BELOW the pet
+#   * the card is the rectangle whose bottom edge lands ON the pet's head - it is the
+#     one that carries the tail, and the reason it is taller than the bubble it draws
+#   * the input bar is the rectangle that hangs BELOW the pet (a positive dy)
+#   * anything else declared above the pet is measured too (1.6.0 added the question box)
 #
-# Both are rounded rectangles. There used to be a third role here - the thinking
+# They are all rounded rectangles. There used to be a third role here - the thinking
 # puffs, ellipse blocks whose bounding-box corner proved the elliptical crop - and
-# it is gone with the three ellipses themselves: the plugin now declares exactly
-# two blocks, both of them directly above and below the pet. The `ellipse` flag is
+# it is gone with the three ellipses themselves: the plugin now declares three rounded
+# blocks (question above, answer on the pet's head, input under it). The `ellipse` flag is
 # still a supported manifest feature (an ellipse is the one shape a rounded
 # rectangle cannot approximate), but this plugin no longer exercises it, so the
 # elliptical-crop check that used to live at the bottom of this file is deleted
@@ -79,19 +81,40 @@ if ($surface.Count -lt 2) {
 $rounded = @($surface | Where-Object { -not $_.ellipse })
 if ($rounded.Count -lt 2) {
     "MANIFEST SURFACE SHAPE NOT RECOGNISED: $($rounded.Count) rounded rectangles;"
-    "this gate needs at least a reply card and an input bar."
+    "this gate needs at least the two boxes around the pet."
     exit 1
 }
 $ellipses = @($surface | Where-Object { $_.ellipse })
-# The card is above the bar in the plugin's coordinate space (dy measures downward
-# from the pet's top-left, and the card sits at a smaller dy than the bar's), and it
-# is the taller of the two.
-$card = $rounded | Sort-Object -Property dy | Select-Object -First 1
-$bar  = $rounded | Sort-Object -Property dy | Select-Object -Last 1
+# WHICH block is which is read off the DECLARATION, not assumed from the sort order:
+#
+#   * the TAIL block is the one whose bottom edge lands exactly on the pet's top edge
+#     (dy + h = 0). It is the only block that points at the pet, and the only one that
+#     needs the extra 10px band its tail is drawn in.
+#   * the block BELOW the pet starts at a positive dy (dy is measured downward from the
+#     pet's top-left, so anything at or past the pet's own height is under its feet).
+#   * whatever is left sits ABOVE the pet.
+#
+# 1.6.0 changed the shape: the question box and the answer box both sit above the pet now
+# and the composer pill moved back UNDER it (it had been on the pet's head, where it was
+# also the box that changed job mid-conversation). Selecting by these rules rather than by
+# "smallest dy / largest dy" is what lets that reshape happen without this gate having to
+# be re-tuned for one particular manifest.
+$card = @($rounded | Where-Object { ([int]$_.dy + [int]$_.h) -eq 0 }) | Select-Object -First 1
+$bar  = @($rounded | Where-Object { [int]$_.dy -gt 0 }) | Select-Object -First 1
+$question = @($rounded | Where-Object { $_ -ne $card -and $_ -ne $bar }) | Select-Object -First 1
+if ($null -eq $card -or $null -eq $bar) {
+    "MANIFEST SURFACE SHAPE NOT RECOGNISED: no block ends on the pet's top edge"
+    "(the one that carries the tail) and/or no block sits below the pet."
+    "  dy/h pairs: " + (($rounded | ForEach-Object { "$([int]$_.dy)/$([int]$_.h)" }) -join ', ')
+    exit 1
+}
 
 "=== geometry declared by $($manifest.id) ==="
 "  card  dx=$($card.dx) dy=$($card.dy) $($card.w)x$($card.h) r=$($card.radius)"
 "  bar   dx=$($bar.dx) dy=$($bar.dy) $($bar.w)x$($bar.h) r=$($bar.radius)"
+if ($null -ne $question) {
+    "  above dx=$($question.dx) dy=$($question.dy) $($question.w)x$($question.h) r=$($question.radius)"
+}
 if ($ellipses.Count -gt 0) {
     "  (plus $($ellipses.Count) ellipse block(s), not measured by this gate)"
 }
@@ -129,7 +152,7 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 
 # --- install the chat plugin --------------------------------------------------
 #
-# The double click opens the CONVERSATION PLUGIN's surface now, not a host overlay:
+# The conversation button opens the CONVERSATION PLUGIN's surface now, not a host overlay:
 # `App.OpenChatPluginSurface()` resolves the installed plugin whose manifest claims
 # the chat slot and holds pet.surface, and refuses with a bubble when there is none.
 # So the plugin has to be INSTALLED in the seeded data directory, or the gesture this
@@ -260,14 +283,6 @@ public class LV {
 
   public static void Click(int x,int y){ SetCursorPos(x,y); System.Threading.Thread.Sleep(120);
     mouse_event(LEFTDOWN,0,0,0,IntPtr.Zero); System.Threading.Thread.Sleep(60); mouse_event(LEFTUP,0,0,0,IntPtr.Zero); }
-  public static void DoubleClick(int x,int y){
-    SetCursorPos(x,y); System.Threading.Thread.Sleep(120);
-    for (int i=0;i<2;i++){
-      mouse_event(LEFTDOWN,0,0,0,IntPtr.Zero); System.Threading.Thread.Sleep(40);
-      mouse_event(LEFTUP,0,0,0,IntPtr.Zero); System.Threading.Thread.Sleep(60);
-    }
-  }
-
   // Captures the window's rectangle from the screen.
   public static Bitmap Shot(out RECT r) {
     IntPtr hwnd = Find(Pid);
@@ -428,7 +443,7 @@ $shot0 = [LV]::Shot([ref]$r0)
 # can be measured anywhere in between. A shot taken while the pet was still painting -
 # the SVG fading in, or the crop not yet applied - put the warm pixels near x=274 of a
 # window whose midpoint is 270, and that single sample flipped the answer: the manifest
-# was mirrored, the click point was computed for the other side, the double click landed
+# was mirrored, the click point was computed for the other side, the click landed
 # where the window is transparent (so it never reached the pet at all), and the gate
 # reported "card only 0% dark" for a surface that simply had not been opened.
 #
@@ -475,19 +490,29 @@ $mirrored = $petLeft -gt 0
 "  pet origin = ($petLeft,$petTop); manifest coordinates are relative to it"
 "  declaration is $(if ($mirrored) { 'MIRRORED (pet on the right, panel on its left)' } else { 'used as written (pet on the left)' })"
 
-# The click point is derived from the pet's side of the window rather than pinned to
+# The hover point is derived from the pet's side of the window rather than pinned to
 # the right, because this gate seeds the pet into the LEFT half (see the config
 # seeding above). Aiming at "the right edge minus 75" would then land on the surface
-# column instead of the pet, and the double click would never reach the pet at all -
-# the gate would measure an unmoved desktop and report a surface that never opened.
+# column instead of the pet, and the cursor would never be over the pet at all -
+# the gate would measure an unmoved desktop and report a button that never appeared.
 $petClickX = $r0.Left + $petLeft + [int]($petW/2)
 $petClickY = [int](($r0.Top + $r0.Bottom)/2)
 
-# The surface opens on a DOUBLE click (the single click is the panel). This is
+# The surface opens on the CONVERSATION BUTTON: hovering the pet paints a 24x24 round
+# button in the pet box's top-left corner (style.css .pet-chat) and a click on it is
 # App.OpenChatPluginSurface(), which resolves the chat plugin and delegates to
-# OpenPluginSurface - the host's own overlay toggle is gone with app_live.go.
-"=== open the plugin surface (double click) ==="
-[LV]::DoubleClick($petClickX, $petClickY)
+# OpenPluginSurface. The double click that used to do this is gone, so a double click
+# here would toggle the panel twice and leave the surface shut.
+#
+# The cursor is parked on the pet and left there first: :hover is a browser state only
+# a real pointer produces, and until it holds the button is visibility:hidden with
+# pointer-events:none - so a click on its coordinates would land on the pet itself.
+$chatButtonX = $r0.Left + $petLeft + 16
+$chatButtonY = $r0.Top + $petTop + 16
+[LV]::SetCursorPos($petClickX, $petClickY)
+Start-Sleep -Milliseconds 400
+"=== open the plugin surface (hover the pet, click the conversation button) ==="
+[LV]::Click($chatButtonX, $chatButtonY)
 Start-Sleep -Seconds 3
 $r1 = New-Object LV+RECT
 $shot1 = [LV]::Shot([ref]$r1)
@@ -530,7 +555,13 @@ function RectOf($block) {
     $dx = [int]$block.dx
     if ($mirrored) { $dx = $petW - $dx - $bw }
     $bx = $petLeft + $dx
-    $by = $petTop  + [int]$block.dy
+    # `anchor: bottom` measures dy from the pet's FEET, because the pet's size is the user's
+    # (桌宠大小): an offset from the top would land a block under the pet on its legs at 1.5x.
+    $by = if ($block.anchor -eq 'bottom') {
+        $petTop + $petH + [int]$block.dy
+    } else {
+        $petTop + [int]$block.dy
+    }
     if ($bx -gt $W - $bw) { $bx = $W - $bw }
     if ($bx -lt 0) { $bx = 0 }
     if ($by -gt $H - $bh) { $by = $H - $bh }
@@ -540,75 +571,113 @@ function RectOf($block) {
 
 $cardRect  = RectOf $card
 $barRect   = RectOf $bar
+$questionRect = if ($null -ne $question) { RectOf $question } else { $null }
 
 "  card  rect ($($cardRect.X),$($cardRect.Y)) $($cardRect.W)x$($cardRect.H)"
 "  bar   rect ($($barRect.X),$($barRect.Y)) $($barRect.W)x$($barRect.H)"
+if ($null -ne $questionRect) {
+    "  above rect ($($questionRect.X),$($questionRect.Y)) $($questionRect.W)x$($questionRect.H)"
+}
 
 $cardDark = [double]([LV]::DarkFraction($shot1, $cardRect.X, $cardRect.Y, $cardRect.W, $cardRect.H))
 $barDark  = [double]([LV]::DarkFraction($shot1, $barRect.X, $barRect.Y, $barRect.W, $barRect.H))
 "  card dark = $([Math]::Round($cardDark,1))%"
 "  bar  dark = $([Math]::Round($barDark,1))%"
 
-Check "the reply card is painted" ($cardDark -gt 60) `
+Check "the answer bubble (the block with the tail) is painted" ($cardDark -gt 60) `
     "card only $([Math]::Round($cardDark,1))% dark at ($($cardRect.X),$($cardRect.Y))"
-Check "the input bar is painted" ($barDark -gt 60) `
+Check "the input pill is painted" ($barDark -gt 60) `
     "input only $([Math]::Round($barDark,1))% dark at ($($barRect.X),$($barRect.Y))"
+if ($null -ne $questionRect) {
+    # Every declared block has to be BOTH in the region and painted: a block that is in
+    # one but not the other is the glass band this whole design exists to avoid. The probe
+    # page paints all of them the same colour, so this is a region/paint check, not a
+    # check of the plugin's design.
+    $questionDark = [double]([LV]::DarkFraction($shot1, $questionRect.X, $questionRect.Y, $questionRect.W, $questionRect.H))
+    "  above dark = $([Math]::Round($questionDark,1))%"
+    Check "the question box is painted" ($questionDark -gt 60) `
+        "above only $([Math]::Round($questionDark,1))% dark at ($($questionRect.X),$($questionRect.Y))"
+}
 
 # The relationships below are read off the MANIFEST, not off the host constants that
-# used to compute this layout. That distinction is the point of the change: the
-# geometry is the plugin's declaration now, and `app_live.go` - the file the old
-# numbers lived in - is deleted. Re-imposing its constants here would mean this gate
-# could only ever pass for one particular manifest, which is the opposite of what it
-# is for.
+# used to compute this layout: the geometry is the plugin's declaration now, and
+# `app_live.go` - the file the old numbers lived in - is deleted. Re-imposing its
+# constants here would mean this gate could only ever pass for one particular manifest,
+# which is the opposite of what it is for.
 #
 # What must hold for ANY sensible manifest is the STRUCTURE the plugin declared:
-# BOTH floating blocks hang above the pet, in its own column, and the one nearest the pet
-# (the input pill) touches it with its tail band. That is the shape the plugin draws now -
-# the input used to sit BELOW the pet, which put a text field in the middle of whatever the
-# user was working on.
 #
-# The tail is why the pill's declared height is larger than the visible pill: it lives
-# inside the bottom band of the rectangle, because the host crops the window to exactly
-# these rectangles and anything drawn outside them is cut away.
-$barBottomGap = [int]$bar.dy + [int]$bar.h
-$cardAbove = -([int]$card.dy + [int]$card.h)
+#   * the TAIL block ends exactly ON the pet's top edge (dy + h = 0). Anywhere else and
+#     its apex either floats above the pet's head or is buried in it.
+#   * that block is the one the plugin RESIZES: its declared h is a FLOOR (the tail lives in
+#     the bottom 10px of it), so it must declare a `maxH` the host can grow it to - and that
+#     ceiling still has to fit in the band above the pet.
+#   * every block above the pet clears its head, and the whole stack above fits in the
+#     band the window has there (`$petTop`, the pet is vertically centred). A stack that
+#     does not fit is silently clipped by the window's own top edge: 1.5.x's card was
+#     declared at dy -166 against 160px of room and lost exactly six pixels that way.
+#   * the block below the pet starts at or past its feet.
+$cardBottomGap = [int]$card.dy + [int]$card.h
+$cardAbove = -$cardBottomGap
+# How far BELOW the pet's feet the block under the pet starts. A bottom-anchored block says so
+# directly; a top-anchored one is measured against the pet's height.
+$barUnder = if ($bar.anchor -eq 'bottom') { [int]$bar.dy } else { [int]$bar.dy - $petH }
+$cardCeilingTop = $cardBottomGap - [int]$card.maxH
+$aboveBlocks = @($rounded | Where-Object { [int]$_.dy -lt 0 })
+$stackTop = [int](($aboveBlocks | ForEach-Object { [int]$_.dy } | Measure-Object -Minimum).Minimum)
+$stackBottom = [int](($aboveBlocks | ForEach-Object { [int]$_.dy + [int]$_.h } | Measure-Object -Maximum).Maximum)
 "=== declared structure ==="
-"  card dy=$($card.dy) h=$($card.h)  -> its bottom edge is $cardAbove px above the pet's top edge"
-"  bar  dy=$($bar.dy)  h=$($bar.h)  -> its bottom edge is $barBottomGap px from the pet's top edge (0 = the tail touches it)"
+"  card dy=$($card.dy) h=$($card.h) maxH=$($card.maxH)  -> its bottom edge is $cardAbove px above the pet's top edge (0 = the tail touches it)"
+"  bar  dy=$($bar.dy)  h=$($bar.h)  -> it starts $barUnder px below the pet's feet"
+"  stack above: $($aboveBlocks.Count) block(s), top edge $stackTop, lowest bottom edge $stackBottom, band available -$petTop..0"
+"  card at its ceiling would reach $cardCeilingTop (must stay at or below 0)"
 
-Check "the reply strip is declared entirely above the pet" `
-    ($cardAbove -ge 0) `
-    "the card's dy is $($card.dy) with height $($card.h), so its bottom edge is $cardAbove px above the pet's top edge (a negative value means it overlaps the pet)"
-Check "the input pill is declared directly above the pet, tail touching it" `
-    ($barBottomGap -eq 0) `
-    "the bar's bottom edge is $barBottomGap px from the pet's top edge; the tail band must end exactly at it"
-Check "the reply strip clears the pill above it" `
-    ($cardAbove -ge [int]$bar.h) `
-    "the card's bottom edge is only $cardAbove px above the pet's top edge, and the pill alone is $($bar.h) tall in that band"
+Check "the block with the tail ends exactly on the pet's top edge" `
+    ($cardBottomGap -eq 0) `
+    "the card's dy=$($card.dy) plus h=$($card.h) is $cardBottomGap; the tail band must end exactly at the pet's top edge (0)"
+Check "that block declares a ceiling it can grow into" `
+    ([int]$card.maxH -gt [int]$card.h) `
+    "the card declares h=$($card.h) but maxH=$($card.maxH); without a larger ceiling the host ignores every height request and the answer can only ever be $($card.h) tall"
+Check "the ceiling still fits above the pet" `
+    ($cardCeilingTop -le 0 -and $cardCeilingTop -ge (-$petTop)) `
+    "at maxH=$($card.maxH) the card's top edge would be at $cardCeilingTop, outside the band -$petTop..0 above the pet"
+Check "every block above the pet clears its head" `
+    ($stackBottom -le 0) `
+    "the lowest bottom edge of the blocks above is $stackBottom (a positive value means one of them overlaps the pet)"
+Check "the block below the pet starts at or past its feet" `
+    ($barUnder -ge 0) `
+    "the bar starts at dy $($bar.dy) but the pet is $petH tall, so it would sit on the pet"
+Check "the stack above fits in the band the window has above the pet" `
+    ($stackTop -ge (-$petTop)) `
+    "the topmost block is declared at dy $stackTop, but only $petTop px are available above the pet - anything past that is clipped by the window's own top edge"
 
-# Both boxes must be CENTRED ON THE PET and share one column. That is what makes
-# the pair read as one unit hanging directly off the pet - the reply strip on top, the
-# input pill under it with its tail on the pet's head - rather than as two unrelated
-# boxes somewhere in the window.
+# EVERY declared block must be CENTRED ON THE PET and share one column. That is what makes
+# the stack read as one unit hanging off the pet - the question on top, the answer on its
+# head with the tail, the composer under its feet - rather than as unrelated boxes
+# somewhere in the window.
 #
-# They are 300 wide and the pet is 150, so a centred block necessarily overhangs
-# the pet's own column by 75px on each side, toward the free side of the window.
-# That is the requested shape ("拉长到300"): the earlier version of this gate
-# asserted the boxes were exactly as wide as the pet, which was the previous
-# design and is now the opposite of what ships.
+# They are 300 wide and the pet is 150, so a centred block necessarily overhangs the pet's
+# own column by 75px on each side, toward the free side of the window. That is the
+# requested shape ("拉长到300"): an earlier version of this gate asserted the boxes were
+# exactly as wide as the pet, which was the design before that.
 #
-# It is read off the manifest, so a plugin that declared the bar half a card wide,
-# offset from the card, or off-centre from the pet fails here.
-$sameColumn = ($cardRect.X -eq $barRect.X) -and ($cardRect.W -eq $barRect.W)
-"  card x=$($cardRect.X) w=$($cardRect.W)   bar x=$($barRect.X) w=$($barRect.W)   pet w=$petW"
-Check "the card and the input bar share one column" $sameColumn `
-    "the card is at x=$($cardRect.X) w=$($cardRect.W) but the bar is at x=$($barRect.X) w=$($barRect.W)"
-Check "both floating boxes are 300 wide (twice the pet)" `
-    ([int]$card.w -eq 300 -and [int]$bar.w -eq 300) `
-    "the card is $($card.w) wide and the bar $($bar.w), expected 300 each"
-Check "the declaration centres both boxes on the pet" `
-    (([int]$card.dx + [int]$card.w/2) -eq [int]($petW/2) -and ([int]$bar.dx + [int]$bar.w/2) -eq [int]($petW/2)) `
-    "the card's declared centre offset is $([int]$card.dx + [int]$card.w/2) and the bar's $([int]$bar.dx + [int]$bar.w/2), but the pet's centre is $([int]($petW/2))"
+# It is read off the manifest, so a plugin that declared one block half the width of
+# another, offset from it, or off-centre from the pet fails here.
+$allRects = @($cardRect, $barRect)
+if ($null -ne $questionRect) { $allRects = @($questionRect) + $allRects }
+$cols = ($allRects | ForEach-Object { "x=$($_.X) w=$($_.W)" }) -join ', '
+$widths = ($rounded | ForEach-Object { [int]$_.w }) -join ', '
+$centres = ($rounded | ForEach-Object { [int]$_.dx + [int]$_.w/2 }) -join ', '
+$sameColumn = @($allRects | Where-Object { $_.X -ne $cardRect.X -or $_.W -ne $cardRect.W }).Count -eq 0
+"  columns: $cols   pet w=$petW"
+Check "every floating box sits in the same column" $sameColumn `
+    "the blocks are placed at $cols"
+Check "every floating box is at least the pet-centred 300 wide" `
+    (@($rounded | Where-Object { [int]$_.w -lt 300 }).Count -eq 0) `
+    "declared widths $widths (expected 300 or more: the bubble is 300 and a 4px shadow band may sit on each side of it)"
+Check "the declaration centres every box on the pet" `
+    (@($rounded | Where-Object { ([int]$_.dx + [int]$_.w/2) -ne [int]($petW/2) }).Count -eq 0) `
+    "declared centre offsets $centres, but the pet's centre is $([int]($petW/2))"
 # NOTE on the check above: it reads the DECLARATION, not the clamped rectangle.
 #
 # A 300-wide box centred on a 150-wide pet overhangs it by 75px on each side, so
@@ -616,8 +685,8 @@ Check "the declaration centres both boxes on the pet" `
 # inside - and the visible box ends up flush with the pet's outer edge instead of
 # straddling it. That is the correct outcome rather than a failure: the alternative
 # is drawing past the window, where the region crop cannot reach. What this gate can
-# insist on is that the plugin ASKED for a centred layout, and that both boxes ask
-# for the same one; `$sameColumn` above is what pins the two together.
+# insist on is that the plugin ASKED for a centred layout, and that every box asks
+# for the same one; `$sameColumn` above is what pins them together.
 
 # NOTE: there is deliberately NO elliptical-crop check here any more.
 #
@@ -628,8 +697,9 @@ Check "the declaration centres both boxes on the pet" `
 # `CreateEllipticRgn` was used rather than a rounded rectangle, and it needs a block
 # to point at.
 #
-# The conversation plugin no longer declares any ellipse block - its two floating
-# boxes are the rounded card above the pet and the rounded input bar below it - so
+# The conversation plugin no longer declares any ellipse block - its floating boxes are
+# the rounded question strip above the pet, the rounded answer bubble on its head and the
+# rounded input pill below it - so
 # the check is DELETED rather than re-aimed. Re-aiming it would mean either asserting
 # a rounded rectangle's corner lies OUTSIDE the region (it does not; that is the
 # whole difference between the two shapes) or seeding an ellipse block this plugin
@@ -642,12 +712,12 @@ Check "the declaration centres both boxes on the pet" `
 #
 # NOTE: there is deliberately NO "closing the surface collapses the region" check.
 #
-# An earlier version of this script had one, on the assumption that the double click
-# toggles. It does not: `openChatPluginSurface` in main.js calls
+# An earlier version of this script had one, on the assumption that the conversation
+# gesture toggles. It does not: `openChatPluginSurface` in main.js calls
 # `App.OpenChatPluginSurface()`, which only ever OPENS - it resolves the chat plugin
 # and delegates to OpenPluginSurface. Dismissing the surface is `ClosePluginSurface`,
-# which the plugin's own interface calls, so a second double click leaves the surface
-# up and the check then measures the very region it was trying to prove had collapsed.
+# which the plugin's own interface calls, so a second click leaves the surface up and
+# the check then measures the very region it was trying to prove had collapsed.
 # The close path is covered where it belongs: the behaviour harness drives
 # ClosePluginSurface through the plugin protocol, and the plugin-surface gate asserts
 # the closed state directly.

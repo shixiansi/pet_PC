@@ -75,7 +75,7 @@ func TestPluginSurfaceMirrorsWhenThePetIsOnTheRight(t *testing.T) {
 
 	// Pet on the LEFT: the declaration is used verbatim, so the card sits in the
 	// column to the pet's right.
-	_, left := computePluginSurface(testPetX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1, rects)
+	_, left := computePluginSurface(testPetX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1, rects, nil)
 	if len(left.Rects) != 1 {
 		t.Fatalf("pet on the left produced %d rects", len(left.Rects))
 	}
@@ -88,7 +88,7 @@ func TestPluginSurfaceMirrorsWhenThePetIsOnTheRight(t *testing.T) {
 	// rather than being clamped back over the pet.
 	petX := panelW + gap
 	mirrored := mirrorDeclaredRects(rects, testPetW)
-	_, right := computePluginSurface(petX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1, mirrored)
+	_, right := computePluginSurface(petX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1, mirrored, nil)
 	if len(right.Rects) != 1 {
 		t.Fatalf("pet on the right produced %d rects", len(right.Rects))
 	}

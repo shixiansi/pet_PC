@@ -6,15 +6,12 @@ import (
 	"testing"
 
 	"PetPC/internal/plugins"
-	"PetPC/internal/store"
 )
 
-// Phase and run-state literals, aliased so the test reads in the same vocabulary
-// the domain does without importing every constant by name.
-const (
-	storePhaseShortBreak = store.PhaseShortBreak
-	storeRunRunning      = store.RunRunning
-)
+// The phase and run-state literals used to be aliased here so the test read in the
+// domain's own vocabulary. Both constants were the pomodoro state machine's, and they
+// went with it: the host has no phases any more, and a surface's state test has no
+// business naming them.
 
 // --- T57: the layout field and its JSON shape ------------------------------
 
@@ -306,46 +303,33 @@ func TestOpenPluginSurfaceRefusedWithoutPermission(t *testing.T) {
 	}
 }
 
-// TestOpenPluginSurfaceRefusesOverAQuestion covers T65, mirroring OpenLive: a
-// surface TAKES the slot rather than sharing it, so opening it over the plan
-// prompt would not cover the question - it would delete it, and the timer would
-// stay parked with nothing on screen explaining why.
-func TestOpenPluginSurfaceRefusesOverAQuestion(t *testing.T) {
+// TestOpenPluginSurfaceFoldsTheReminderAway covers T65 in its current form: a surface
+// TAKES the slot rather than sharing it, so a bubble cannot stay on screen beside it -
+// the region can only describe one occupant, and a card the page no longer paints
+// would show as a band of desktop.
+//
+// T65 used to be "refuse over a question". The host raises no questions any more: the
+// picker went with its timer, and both pomodoro prompts belong to the pomodoro plugin
+// (openspec/changes/todo-pomodoro-as-plugins, design.md §4.1). A reminder is a
+// notification, so the surface replaces it.
+func TestOpenPluginSurfaceFoldsTheReminderAway(t *testing.T) {
 	a, id := surfaceApp(t)
 
-	// Put the plan question on screen. PlanPending only survives on a timer that
-	// is not idle (an idle state drops it, by design), so the phase is made a
-	// running break - which is exactly the state the plan gate is raised in.
-	pomo := a.store.Pomodoro()
-	pomo.Enabled = true
-	pomo.Phase = storePhaseShortBreak
-	pomo.RunState = storeRunRunning
-	pomo.PlanPending = true
-	if err := a.store.SavePomodoro(pomo); err != nil {
-		t.Fatalf("SavePomodoro: %v", err)
-	}
-	if _, err := a.showBubble(&BubbleView{Kind: BubblePlan, Title: "这个番茄做了什么"}); err != nil {
+	if _, err := a.showBubble(&BubbleView{Kind: BubbleReminder, Title: "今天要做的事"}); err != nil {
 		a.DebugLog("showBubble (no window): " + err.Error())
 	}
 
-	_, err := a.OpenPluginSurface(id)
-	if err == nil {
-		t.Fatal("opening a surface over an unanswered question must be refused")
-	}
-	if !strings.Contains(err.Error(), "plan") {
-		t.Fatalf("error %q must name the question in the way", err.Error())
+	if _, err := a.OpenPluginSurface(id); err != nil {
+		t.Fatalf("the surface was refused: %v", err)
 	}
 	a.mu.Lock()
 	state, bubble := a.pluginSurface, a.bubble
 	a.mu.Unlock()
-	if state != nil {
-		t.Error("a refusal left the surface showing")
+	if state == nil {
+		t.Error("no surface was recorded, so the slot is empty")
 	}
-	if bubble == nil || bubble.Kind != BubblePlan {
-		t.Fatalf("the question was displaced: %+v", bubble)
-	}
-	if !a.store.Pomodoro().PlanPending {
-		t.Error("the plan question was answered by a refusal")
+	if bubble != nil {
+		t.Fatalf("the reminder survived the surface: %+v", bubble)
 	}
 }
 
@@ -473,4 +457,55 @@ func TestPluginSurfaceRegionsUsesTheSameRectanglesAsTheRegion(t *testing.T) {
 		t.Fatalf("the width changed between the declaration and the view: %v vs %v", got, declared[0].W)
 	}
 	_ = plugins.PermPetSurface
+}
+
+// TestReopeningASurfaceKeepsWhatThePluginAskedFor pins the difference between a FRESH open and a
+// RE-open of the surface that is already up.
+//
+// A fresh open starts from the manifest's defaults ("nothing hidden", "the declared heights"), so a
+// plugin that hid a block last time does not come back with it missing. A re-open must NOT do that:
+// the page reuses the frames (same plugin, same version, same blocks), so the plugin gets no second
+// `init` and nothing would ask for its blocks and heights again.
+//
+// This is not hypothetical - clicking the conversation button over the pet while the surface is open
+// comes through here. Before this test, that gesture stranded the surface on the defaults: an EMPTY
+// question strip appeared on screen and the answer box shrank back to its declared height, cutting
+// off the answer the user was reading.
+func TestReopeningASurfaceKeepsWhatThePluginAskedFor(t *testing.T) {
+	a := pluginApp(t)
+	id := installSlotPlugin(t, a, "com.example.chat", true, []string{"pet.surface"}, surfaceRectsManifest())
+	if _, err := a.OpenPluginSurface(id); err != nil {
+		t.Fatalf("OpenPluginSurface: %v", err)
+	}
+
+	// What the plugin has asked for, set through the same fields `surface.blocks` writes.
+	a.surfaceHiddenMu.Lock()
+	a.surfaceHiddenBlocks = map[int]bool{0: true}
+	a.surfaceBlockSizes = map[int]int{1: 120}
+	a.surfaceHiddenMu.Unlock()
+
+	// The conversation button, pressed while the surface is already up.
+	if _, err := a.OpenPluginSurface(id); err != nil {
+		t.Fatalf("re-open: %v", err)
+	}
+	if got := a.hiddenSurfaceBlocks(); !got[0] {
+		t.Fatalf("the re-open forgot the hidden block: %+v (an empty question strip is what that looks like)", got)
+	}
+	if got := a.requestedSurfaceSizes(); got[1] != 120 {
+		t.Fatalf("the re-open forgot the requested height: %+v (the answer box snapping back to its floor is what that looks like)", got)
+	}
+
+	// Closing and opening again IS a fresh open, and it does reset both.
+	if _, err := a.ClosePluginSurface(); err != nil {
+		t.Fatalf("ClosePluginSurface: %v", err)
+	}
+	if _, err := a.OpenPluginSurface(id); err != nil {
+		t.Fatalf("fresh open: %v", err)
+	}
+	if got := a.hiddenSurfaceBlocks(); len(got) != 0 {
+		t.Fatalf("a fresh open must start with nothing hidden, got %+v", got)
+	}
+	if got := a.requestedSurfaceSizes(); len(got) != 0 {
+		t.Fatalf("a fresh open must start at the declared heights, got %+v", got)
+	}
 }

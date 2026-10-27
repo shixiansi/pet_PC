@@ -37,7 +37,7 @@ const (
 func TestComputePluginSurfaceMapsAndRounds(t *testing.T) {
 	rects := []plugins.Rect{{DX: 160, DY: 10, W: 300, H: 220, Radius: 14}}
 
-	regions, view := computePluginSurface(testPetX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1, rects)
+	regions, view := computePluginSurface(testPetX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1, rects, nil)
 	if len(regions) != 1 {
 		t.Fatalf("want 1 region, got %d", len(regions))
 	}
@@ -65,7 +65,7 @@ func TestComputePluginSurfaceMapsAndRounds(t *testing.T) {
 // rectangle lands at the same relative place.
 func TestComputePluginSurfaceAtScaleTwo(t *testing.T) {
 	rects := []plugins.Rect{{DX: 160, DY: 10, W: 300, H: 220, Radius: 14}}
-	regions, view := computePluginSurface(0, 320, 300, 400, 1080, 1040, 2, rects)
+	regions, view := computePluginSurface(0, 320, 300, 400, 1080, 1040, 2, rects, nil)
 	if len(regions) != 1 {
 		t.Fatalf("want 1 region, got %d", len(regions))
 	}
@@ -109,7 +109,7 @@ func TestComputePluginSurfaceClampsToTheWindow(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			regions, _ := computePluginSurface(testPetX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1, []plugins.Rect{tc.rect})
+			regions, _ := computePluginSurface(testPetX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1, []plugins.Rect{tc.rect}, nil)
 			if len(regions) != 1 {
 				t.Fatalf("want 1 region, got %d", len(regions))
 			}
@@ -129,7 +129,7 @@ func TestComputePluginSurfaceDropsEmptyBlocks(t *testing.T) {
 		{DX: 0, DY: 0, W: 0, H: 0},
 		{DX: 160, DY: 10, W: 300, H: 220},
 	}
-	regions, view := computePluginSurface(testPetX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1, rects)
+	regions, view := computePluginSurface(testPetX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1, rects, nil)
 	if len(regions) != 1 {
 		t.Fatalf("want 1 surviving region, got %d", len(regions))
 	}
@@ -142,7 +142,7 @@ func TestComputePluginSurfaceDropsEmptyBlocks(t *testing.T) {
 // nothing is advertised and the region is not extended by anything.
 func TestComputePluginSurfaceAllDroppedReturnsNil(t *testing.T) {
 	regions, view := computePluginSurface(testPetX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1,
-		[]plugins.Rect{{DX: 0, DY: 0, W: 0, H: 0}})
+		[]plugins.Rect{{DX: 0, DY: 0, W: 0, H: 0}}, nil)
 	if regions != nil {
 		t.Errorf("regions must be nil, got %+v", regions)
 	}
@@ -160,7 +160,7 @@ func TestComputePluginSurfaceAllDroppedReturnsNil(t *testing.T) {
 // corners jagged while it was there).
 func TestComputePluginSurfaceRadiusIsCapped(t *testing.T) {
 	regions, view := computePluginSurface(testPetX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1,
-		[]plugins.Rect{{DX: 10, DY: 10, W: 40, H: 100, Radius: 200}})
+		[]plugins.Rect{{DX: 10, DY: 10, W: 40, H: 100, Radius: 200}}, nil)
 	if len(regions) != 1 {
 		t.Fatalf("want 1 region, got %d", len(regions))
 	}
@@ -183,7 +183,7 @@ func TestComputePluginSurfaceEllipseFlag(t *testing.T) {
 		{DX: 160, DY: 10, W: 300, H: 220, Radius: 14},
 		{DX: 200, DY: 240, W: 34, H: 20, Radius: 10, Ellipse: true},
 	}
-	regions, view := computePluginSurface(testPetX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1, rects)
+	regions, view := computePluginSurface(testPetX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1, rects, nil)
 	if len(regions) != 2 || len(view.Rects) != 2 {
 		t.Fatalf("want 2 of each, got %d regions and %d rects", len(regions), len(view.Rects))
 	}
@@ -213,7 +213,7 @@ func TestComputePluginSurfaceEllipseHasNoRadius(t *testing.T) {
 	// A radius that WOULD be valid for this box, so the assertion cannot pass
 	// merely because the cap zeroed it.
 	rects := []plugins.Rect{{DX: 200, DY: 240, W: 34, H: 20, Radius: 9, Ellipse: true}}
-	regions, view := computePluginSurface(testPetX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1, rects)
+	regions, view := computePluginSurface(testPetX, testPetY, testPetW, testPetH, testTotalW, testTotalH, 1, rects, nil)
 	if len(regions) != 1 {
 		t.Fatalf("want 1 region, got %d", len(regions))
 	}
@@ -234,7 +234,7 @@ func TestComputePluginSurfaceEllipseCoexistsWithRoundedBlocks(t *testing.T) {
 		{DX: 160, DY: 10, W: 40, H: 100, Radius: 200, Ellipse: true},
 		{DX: 220, DY: 10, W: 40, H: 100, Radius: 200},
 	}
-	regions, view := computePluginSurface(0, 320, 300, 400, 1080, 1040, 2, rects)
+	regions, view := computePluginSurface(0, 320, 300, 400, 1080, 1040, 2, rects, nil)
 	if len(regions) != 2 {
 		t.Fatalf("want 2 regions, got %d", len(regions))
 	}

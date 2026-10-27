@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"math"
 
@@ -48,6 +47,30 @@ type PluginSurfaceRect struct {
 	// clamps every rectangle into the window, and the pet sits flush against the window's
 	// right edge, so a block wider than the pet is shifted left of the pet's centre.
 	TailX float64 `json:"tailX"`
+	// Hidden reports that the plugin asked the host to stop SHOWING this block
+	// (`surface.blocks`), without the block leaving the declaration.
+	//
+	// The entry stays in the view on purpose. It used to be dropped, which made "hide this
+	// block" indistinguishable from "this block does not exist" - and since the page keys
+	// its iframes by position in `rects`, a block that vanished renumbered every survivor
+	// and forced the page to tear down and rebuild ALL of them. A rebuilt frame is a
+	// destroyed document: whatever the plugin had rendered (a half-typed message, an answer
+	// still streaming in) is gone, and events posted while the new document is loading are
+	// lost.
+	//
+	// So the split is: the REGION drops a hidden block (nothing is painted there, so nothing
+	// may be clickable there - AGENTS.md §3.2), while the VIEW keeps it with this flag set,
+	// so the page can keep the iframe alive at its declared rectangle and merely stop
+	// showing it.
+	Hidden bool `json:"hidden"`
+	// Room is the free space ABOVE the pet inside the window, in CSS pixels.
+	//
+	// It travels with every rectangle because a plugin cannot derive it and cannot do without
+	// it: the band the floating blocks share is whatever the user's 桌宠大小 leaves (the pet is
+	// centred, so a 1.5x pet leaves 110px where the default leaves 160). A block that grows
+	// upwards - the answer box - has to know how tall it may become, and the question strip has
+	// to know whether it still fits above it.
+	Room float64 `json:"room"`
 }
 
 // PluginSurfaceView is the plugin's floating surface as the frontend sees it.
@@ -120,7 +143,21 @@ func mirrorDeclaredRects(rects []plugins.Rect, petWLogical float64) []plugins.Re
 // every block is dropped the result is (nil, nil): no region extension, no
 // layout field, and the caller reports that the surface fell outside the
 // window.
-func computePluginSurface(petX, petY, petW, petH, totalW, totalH int, s float64, rects []plugins.Rect) ([]desktop.Bounds, *PluginSurfaceView) {
+func computePluginSurface(petX, petY, petW, petH, totalW, totalH int, s float64, rects []plugins.Rect, hidden map[int]bool) ([]desktop.Bounds, *PluginSurfaceView) {
+	return computePluginSurfaceSized(petX, petY, petW, petH, totalW, totalH, s, rects, hidden, nil)
+}
+
+// computePluginSurfaceSized is computePluginSurface plus the heights a plugin asked for.
+//
+// `sizes` maps a DECLARATION index to the height the plugin wants (see `surface.blocks`). A
+// request is honoured only when the declaration gave the block a ceiling (`maxH`) and the value
+// is clamped into [h, maxH]; the block grows UPWARDS, keeping its bottom edge where it was, so a
+// reply that gets longer never moves the input pill it points at.
+//
+// The wrapper above exists so the dozen existing call sites - tests included - keep the old
+// signature: a pure geometry function that grew a second optional input should not force every
+// caller to say `nil`.
+func computePluginSurfaceSized(petX, petY, petW, petH, totalW, totalH int, s float64, rects []plugins.Rect, hidden map[int]bool, sizes map[int]int) ([]desktop.Bounds, *PluginSurfaceView) {
 	if s <= 0 {
 		s = 1
 	}
@@ -134,11 +171,32 @@ func computePluginSurface(petX, petY, petW, petH, totalW, totalH int, s float64,
 
 	var regions []desktop.Bounds
 	view := &PluginSurfaceView{Rects: []PluginSurfaceRect{}}
+	// regionOf[k] is the index in `regions` of the block described by view.Rects[k], or -1
+	// for a HIDDEN block (which is described but not cropped in). The two slices were
+	// appended in lockstep until hiding stopped removing blocks; the indirection is what
+	// keeps the growth pass below aimed at the right rectangle.
+	regionOf := make([]int, 0, len(rects))
 
 	for i, r := range rects {
-		// 1. Map the declared rectangle onto the window, relative to the pet.
+		// A block the plugin asked the host to hide contributes NO REGION - that is the whole
+		// point of `surface.blocks`: an area nothing is drawn in must not keep swallowing
+		// clicks, because `pointer-events` lives on the parent document's frame element and a
+		// plugin cannot touch that.
+		//
+		// It still gets a VIEW entry, marked Hidden (see the field's comment). Dropping it
+		// instead would renumber the survivors - `i` is the DECLARATION index and travels on
+		// in PluginSurfaceRect.Index - and the page would rebuild every frame.
+		hideThis := hidden[i]
+
+		// 1. Map the declared rectangle onto the window, relative to the pet. `anchor` picks the
+		//    pet's edge `dy` is measured from: a block under the pet must be anchored to its
+		//    FEET, or a bigger 桌宠大小 swallows it (it used to sit on the pet's legs).
+		y0 := petY
+		if r.Anchor == plugins.RectAnchorBottom {
+			y0 = petY + petH
+		}
 		x := petX + round(r.DX*s)
-		y := petY + round(r.DY*s)
+		y := y0 + round(r.DY*s)
 		w := round(r.W * s)
 		h := round(r.H * s)
 
@@ -193,7 +251,14 @@ func computePluginSurface(petX, petY, petW, petH, totalW, totalH int, s float64,
 
 		// Boxes, not shapes: the region's job is which pixels of the WINDOW exist,
 		// and the shape of each block is the page's business.
-		regions = append(regions, desktop.Bounds{X: x, Y: y, Width: w, Height: h})
+		//
+		// A HIDDEN block stops here: no pixels of the window belong to it, so it is not
+		// cropped in - but it is still described below, so the page keeps its frame.
+		regionOf = append(regionOf, -1)
+		if !hideThis {
+			regions = append(regions, desktop.Bounds{X: x, Y: y, Width: w, Height: h})
+			regionOf[len(regionOf)-1] = len(regions) - 1
+		}
 		// The view carries the SAME rectangle divided by the scale, so the page
 		// places its iframes on exactly the pixels the region covers.
 		// The pet's centre as a distance from THIS rectangle's left edge, in CSS px.
@@ -214,6 +279,8 @@ func computePluginSurface(petX, petY, petW, petH, totalW, totalH int, s float64,
 			R:       float64(radius) / s,
 			Ellipse: r.Ellipse,
 			TailX:   tailX,
+			Hidden:  hideThis,
+			Room:    float64(petY) / s,
 		})
 	}
 
@@ -222,6 +289,59 @@ func computePluginSurface(petX, petY, petW, petH, totalW, totalH int, s float64,
 		// region, so the pet keeps the window to itself.
 		return nil, nil
 	}
+	// Heights the plugin asked for. Applied AFTER the declared geometry is settled, because a
+	// request may only change the height of a block that already exists: it cannot move one,
+	// cannot widen one, and cannot introduce one.
+	//
+	// `regionOf[k]` answers "which rectangle does view.Rects[k] own" (or -1 for a hidden
+	// block). The guard on `declared.H` is what makes the growth opt-in: a block without
+	// `maxH` in its manifest ignores every request, which is every plugin but the chat one
+	// today.
+	for k := range view.Rects {
+		block := &view.Rects[k]
+		ri := regionOf[k]
+		if block.Hidden || ri < 0 {
+			// A hidden block has no region to grow into: the request describes a box
+			// nothing is painted in, and honouring it would move the page's frame away
+			// from the pixels the window was cropped to.
+			continue
+		}
+		want, asked := sizes[block.Index]
+		if !asked || want <= 0 || block.Index < 0 || block.Index >= len(rects) {
+			continue
+		}
+		declared := rects[block.Index]
+		ceiling := int(math.Round(declared.MaxH * s))
+		floor := int(math.Round(declared.H * s))
+		if ceiling <= floor {
+			continue // no ceiling declared: this block cannot grow
+		}
+		max := int(math.Round(float64(want) * s))
+		if max > ceiling {
+			max = ceiling
+		}
+		// ...and the window has the last word. A block anchored to the pet's head grows UP into
+		// the band the user's 桌宠大小 leaves above it, and a request taller than that band used to
+		// be honoured anyway: the top edge went to a negative y, the region lost it (the region
+		// cannot leave the window) while the page still drew the block there - which is exactly the
+		// answer that was cut off at the top on a 1.5x pet. Clamping the grown height to what is
+		// available turns "as tall as it asked" into "as tall as it fits".
+		if room := regions[ri].Y + regions[ri].Height; max > room {
+			max = room
+		}
+		if max <= floor {
+			continue // a request that is not taller than the declaration is not a request
+		}
+		grew := max - floor
+		// Upwards: the bottom edge stays put, the top edge rises. Both the region and the view
+		// rect have to move together or the page would draw the box somewhere the window is not
+		// cropped for.
+		regions[ri].Y -= grew
+		regions[ri].Height = max
+		block.Y -= float64(grew) / s
+		block.H = float64(max) / s
+	}
+
 	return regions, view
 }
 
@@ -294,6 +414,21 @@ func (a *App) pluginSurfaceRects(pluginID string) ([]plugins.Rect, bool) {
 // and the layout is untouched. A refusal that left the layout half-updated would
 // be worse than not refusing at all.
 func (a *App) OpenPluginSurface(pluginID string) (Layout, error) {
+	// A FRESH surface shows everything the manifest declared. Without this, a plugin that hid a
+	// block last time would come back with it missing, and "nothing hidden" is the default that
+	// every plugin which never calls `surface.blocks` has to keep.
+	//
+	// NOT when this plugin's surface is ALREADY up, though. The page reuses the frames in that
+	// case (same plugin, same version, same blocks), so the plugin gets no second `init` and
+	// nothing would ask for its hidden blocks and heights again - the reset would simply strand
+	// the surface on the manifest's defaults. That is not theoretical: clicking the conversation
+	// button over the pet while the surface is open goes through here, and it left an EMPTY
+	// question strip on screen and shrank the answer box back to its declared height, losing the
+	// answer that was being read. Pressing a button should not destroy the state the plugin owns.
+	if !a.surfaceShowingFor(pluginID) {
+		a.clearHiddenSurfaceBlocks()
+	}
+
 	row, ok := a.pluginManager().Get(pluginID)
 	if !ok || !row.Enabled || row.Manifest == nil {
 		return a.currentLayout(), fmt.Errorf("插件 %s 未启用", pluginID)
@@ -304,14 +439,12 @@ func (a *App) OpenPluginSurface(pluginID string) (Layout, error) {
 	if len(row.Manifest.Surface) == 0 {
 		return a.currentLayout(), fmt.Errorf("插件 %s 未声明 surface", pluginID)
 	}
-	// A question the user has not answered owns this slot. The surface would
-	// TAKE the slot rather than share it, so opening it over the plan prompt
-	// would not cover the question, it would delete it - and the timer would
-	// stay parked with nothing on screen explaining why.
-	if kind := a.unansweredQuestionKind(); kind != BubbleNone {
-		a.DebugLog("plugin surface: refused, a " + kind + " bubble is waiting for an answer")
-		return a.currentLayout(), errors.New(pluginSurfaceBlocked(kind))
-	}
+	// Nothing refuses the slot for being a question any more. The only question the
+	// host asked was the pomodoro picker, and it went with the host's timer: both
+	// pomodoro questions belong to the pomodoro plugin, which opens its own surface
+	// (openspec/changes/todo-pomodoro-as-plugins, design.md §4.1). A reminder bubble
+	// is folded away below instead - it is a notification, and the surface is the
+	// round the user is in the middle of.
 	// Prove the rectangles can actually be cropped to before changing any
 	// state: a surface entirely outside the window has nothing to draw in, and
 	// admitting it would leave the layout advertising a surface with no region.
@@ -349,6 +482,17 @@ func (a *App) OpenPluginSurface(pluginID string) (Layout, error) {
 		layout = a.currentLayout()
 	}
 	return layout, nil
+}
+
+// surfaceShowingFor reports whether pluginID's surface is the one currently on screen.
+//
+// It exists so a RE-open of the same surface can be told apart from a fresh one: the two must
+// not behave the same way, because only a fresh one has frames that will be created (and thus
+// told everything) again. See OpenPluginSurface.
+func (a *App) surfaceShowingFor(pluginID string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.pluginSurface != nil && a.pluginSurface.PluginID == pluginID
 }
 
 // ClosePluginSurface hides the floating surface and restores the region to the
@@ -476,7 +620,7 @@ func (a *App) pluginSurfaceGeometry(pluginID string) ([]desktop.Bounds, *PluginS
 	if !panelOnRight {
 		declared = mirrorDeclaredRects(declared, float64(petW)/s)
 	}
-	regions, view := computePluginSurface(petX, petY, petW, petH, totalW, totalH, s, declared)
+	regions, view := computePluginSurfaceSized(petX, petY, petW, petH, totalW, totalH, s, declared, a.hiddenSurfaceBlocks(), a.requestedSurfaceSizes())
 	// The plugin's identity is stamped on HERE, and it has to be stamped on EVERY
 	// view that leaves this file.
 	//
@@ -493,20 +637,9 @@ func (a *App) pluginSurfaceGeometry(pluginID string) ([]desktop.Bounds, *PluginS
 	return regions, view, true
 }
 
-// pluginSurfaceBlocked is the reason a surface is refused the slot while a
-// question is on screen.
-//
-// The sentence names the consequence, in the style questionOwnsTheSlot set for
-// the retired overlay: the plan prompt is the gate on the next focus, so a user
-// who cannot see why the plugin's window will not open has no way to know the
-// timer is parked behind a question.
-func pluginSurfaceBlocked(kind string) string {
-	switch kind {
-	case BubblePick:
-		return "番茄钟还在等你选一件事，先处理它再打开插件浮层面（plan）"
-	case BubblePlan:
-		return "番茄钟还在等你写计划，先答完再打开插件浮层面（plan）"
-	default:
-		return "番茄钟还在等你写总结，先答完它再打开插件浮层面（plan）"
-	}
-}
+// pluginSurfaceBlocked used to hold the three sentences a refused surface could say:
+// "a summary is waiting", "a plan is waiting", "a todo is waiting". None of them can
+// happen now - both pomodoro questions belong to the pomodoro plugin and the picker
+// went with the host's timer - so the surface is never refused for a question and the
+// sentences are gone rather than left as text nothing can produce
+// (openspec/changes/todo-pomodoro-as-plugins, design.md §4.1).

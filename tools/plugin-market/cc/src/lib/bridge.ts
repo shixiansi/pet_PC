@@ -38,6 +38,8 @@ const DEV = import.meta.env.DEV;
 // description of every payload and it is the generated one.
 export type PluginRow = plugins.Installed;
 export type PermissionLabel = main.LabelPair;
+export type PluginConfig = main.PluginConfig;
+export type ConfigEditor = main.ConfigEditor;
 export type Config = store.Config;
 export type Todo = store.Todo;
 export type PomodoroRecord = store.PomodoroRecord;
@@ -71,6 +73,27 @@ const FAKE_ROWS: PluginRow[] = [
       panel: true,
       panelSlot: 'chat',
       entry: 'index.html',
+      // One item of every KIND the vocabulary has (`internal/plugins.ConfigValueTypes`), so the
+      // editor's five controls are all exercised in the browser: a long-ish text field, a
+      // number, a bool, a `select` with `multiple` (stored as a comma-joined string), and a
+      // write-only secret. A fake that declared only text fields would let four of them rot.
+      config: [
+        { key: 'model', label: '模型', type: 'text', default: 'deepseek-chat' },
+        { key: 'temperature', label: '温度', type: 'number', default: '0.8' },
+        { key: 'stream', label: '流式返回', type: 'bool', default: 'true' },
+        {
+          key: 'providers',
+          label: '服务商（可多选）',
+          type: 'select',
+          multiple: true,
+          default: 'deepseek',
+          options: [
+            { value: 'deepseek', label: '深度求索' },
+            { value: 'openai', label: 'OpenAI' },
+          ],
+        },
+        { key: 'apiKey', label: 'API Key', type: 'secret', secret: true },
+      ],
     },
     Dir: 'C:\\Users\\fan\\AppData\\Roaming\\PetPC\\plugins\\com.shixiansi.plugin-chat',
     Error: '',
@@ -107,19 +130,41 @@ const FAKE_ROWS: PluginRow[] = [
     Dir: 'C:\\Users\\fan\\AppData\\Roaming\\PetPC\\plugins\\com.example.broken',
     Error: 'manifest.json: 第 4 行 permissions 里有一项不在权限表内（"todos.remove"）',
   }),
-];
+].map(asHostSends);
+
+/**
+ * Turns a fake row into the VALUE the host actually sends.
+ *
+ * `createFrom` builds class instances, and Wails does not: a binding's result is JSON. The
+ * difference is not cosmetic - Svelte 5's `$state` DEEP-PROXIES plain objects and arrays but
+ * leaves class instances alone, so class-instance fakes silently lack the proxy that the real
+ * page has. That gap is exactly how this page shipped a `DataCloneError`:
+ *
+ *   Uncaught DataCloneError: Failed to execute 'postMessage' on 'Window':
+ *   [object Object] could not be cloned.
+ *
+ * - the plugin frame's `init` was handed `Manifest.permissions` and `Granted` from a `$state`
+ * row, i.e. Proxied arrays, and a Proxy cannot cross `postMessage`. In the browser it worked
+ * (class instances), in the .exe it threw inside the message listener, so the plugin sat on
+ * 「等待宿主初始化…」 while the host looked fine. jsdom could not see it either, for the same
+ * reason: it was being fed these very class instances.
+ *
+ * So the fakes are flattened: `createFrom` keeps the FIELD NAMES honest (a typo is still a
+ * type error), and this keeps the SHAPE honest (plain data, like the wire).
+ */
+function asHostSends<T>(row: T): T {
+  return JSON.parse(JSON.stringify(row)) as T;
+}
 
 // The host's wording, in the host's order (plugins.AllowedPermissions), copied from
 // internal/plugins/capability.go. It is duplicated ON PURPOSE here and only here: this is
-// dev-only fake data, and a browser that shows a bare `timer.control` because the stub is
+// dev-only fake data, and a browser that shows a bare `plugin.share` because the stub is
 // stale is a smaller problem than a page that cannot be run without the .exe. The real
 // screen never reads these - it reads App.PermissionLabels().
 const LABELS: Array<[id: string, label: string]> = [
   ['todos.read', '读取待办列表'],
   ['todos.write', '新增、修改、完成与删除待办'],
   ['pet.bubble', '让桌宠弹出一句话的气泡'],
-  ['timer.read', '读取番茄钟阶段与剩余时间'],
-  ['timer.control', '开始、暂停、继续与停止番茄钟（不能结束阶段或写记录）'],
   ['events', '订阅待办与番茄钟的变化事件（关闭界面后也会送达）'],
   ['net.fetch', '访问网络（仅限插件声明的域名）'],
   ['net.credentials', '以你保存的网站登录凭据发请求（凭据本身不会显示给插件）'],
@@ -227,6 +272,116 @@ export const Grant = (id: string, granted: string[]): Promise<void | unknown> =>
   DEV ? later(undefined) : host.Grant(id, granted);
 export const SetEnabled = (id: string, on: boolean): Promise<void | unknown> =>
   DEV ? later(undefined) : host.SetEnabled(id, on);
+
+// --- 插件的配置编辑器（manifest.config） ----------------------------------------------
+//
+// The PAGE's own bindings, not the frame's: the editor lists what the manifest declared and
+// writes it through the same `plugins.ConfigStore` the pet and the plugin read. So a value
+// typed here is what the plugin's `config.get` answers on its next call - there is no second
+// store and no "applied on restart".
+//
+// A secret is never backfilled: the host sends `value: ''` plus `secretSet` / `secretMask`, so
+// the page has nothing to leak and nothing to overwrite by accident. Blank means "keep".
+const FAKE_VALUES: Record<string, Record<string, string>> = {
+  'com.shixiansi.plugin-chat': {
+    model: 'deepseek-chat',
+    temperature: '0.8',
+    stream: 'true',
+    providers: 'deepseek',
+  },
+};
+const FAKE_SECRET_SET = new Set<string>(['com.shixiansi.plugin-chat']);
+
+export const GetConfig = (id: string): Promise<PluginConfig> =>
+  DEV ? fakeConfig(id) : host.GetConfig(id);
+export const SaveConfig = (id: string, values: Record<string, string>): Promise<void | unknown> => {
+  if (!DEV) return host.SaveConfig(id, values);
+  const declared = FAKE_ROWS.find((r) => r.ID === id)?.Manifest?.config ?? [];
+  const secretKeys = new Set(declared.filter((c) => c.type === 'secret').map((c) => c.key));
+  const store = (FAKE_VALUES[id] ??= {});
+  for (const [key, value] of Object.entries(values)) {
+    if (secretKeys.has(key)) {
+      // A secret is WRITE-ONLY: keep the fact that one is stored, never the value.
+      if (value !== '') FAKE_SECRET_SET.add(id);
+      continue;
+    }
+    store[key] = value;
+  }
+  return later(undefined);
+};
+
+/**
+ * Builds the same shape `Market.GetConfig` sends, out of the fake declarations.
+ *
+ * It is derived from `Manifest.config` rather than hand-written, so the dev editor cannot
+ * describe controls the real one would not draw.
+ */
+function fakeConfig(id: string): Promise<PluginConfig> {
+  const row = FAKE_ROWS.find((r) => r.ID === id);
+  if (!row) return Promise.reject(new Error('插件 ' + id + ' 未安装'));
+  if (!row.Manifest) return Promise.reject(new Error('插件 ' + id + ' 的 manifest 无法解析'));
+  const store = FAKE_VALUES[id] ?? {};
+  const items = (row.Manifest.config ?? []).map((decl) => {
+    if (decl.type === 'secret') {
+      const set = FAKE_SECRET_SET.has(id);
+      return main.ConfigEditor.createFrom({
+        key: decl.key,
+        label: decl.label,
+        type: decl.type,
+        value: '',
+        secret: true,
+        secretSet: set,
+        secretMask: set ? '••••a1b2' : '',
+      });
+    }
+    return main.ConfigEditor.createFrom({
+      ...decl,
+      value: store[decl.key] ?? '',
+      default: decl.default,
+    });
+  });
+  return later(
+    asHostSends(
+      main.PluginConfig.createFrom({
+        pluginId: id,
+        name: row.Manifest.name,
+        dir: row.Dir,
+        items,
+        usage: id === 'com.shixiansi.plugin-chat' ? '今天已用 3 / 200 次' : '',
+      }),
+    ),
+  );
+}
+
+// --- 插件自己的界面（workshop） ------------------------------------------------------
+//
+// The plugin page mounts each plugin's document in a sandboxed frame (`lib/plugin-frame.ts`),
+// and every call that document makes comes back through `Market.PluginRequest` - the SAME
+// dispatcher the pet uses, with THIS program's capability table (audio / storage / config /
+// net.fetch; `todos.*`, `timer.*`, `events.subscribe` and the like are refused here, on
+// purpose: they need things only the pet has).
+//
+// There is deliberately no dev fake for it. In a browser nothing can reach it: the frame's
+// `src` is `/plugin-asset/...`, which only the .exe's AssetServer serves, so no document boots
+// and no `ready` is ever posted. A plausible-looking fake would be worse than none - one that
+// answered `todos.list` from FAKE_TODOS would let a workshop look correct in `npm run dev`
+// while the .exe refuses the very same call.
+/** One plugin call, answered by the shared gate. Returns the method's JSON as a string. */
+export const PluginRequest = (id: string, method: string, payload: string): Promise<string> => {
+  if (!DEV) return host.PluginRequest(id, method, payload);
+  return Promise.reject(
+    new Error(
+      '浏览器里没有插件帧，没有真实请求可答（' + id + ' → ' + method + '，payload ' + payload + '）',
+    ),
+  );
+};
+
+// The remembered selection, so reopening this window lands where the user left off - the
+// reason the old market had these two bindings. `''` in dev, i.e. first-run: nothing selected,
+// and the page says so instead of showing an empty pane.
+export const SelectedID = (): Promise<string> => (DEV ? later('') : host.SelectedID());
+export const RememberSelection = (id: string): Promise<void | unknown> =>
+  DEV ? later(undefined) : host.RememberSelection(id);
 
 export const MainSettings = (): Promise<Config> => (DEV ? later(FAKE_CONFIG) : host.MainSettings());
 export const SetPetScale = (v: number): Promise<Config> =>

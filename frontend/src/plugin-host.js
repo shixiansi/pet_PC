@@ -51,6 +51,17 @@ const TYPE_INIT = 'init';
 const TYPE_REQUEST = 'request';
 const TYPE_RESPONSE = 'response';
 const TYPE_EVENT = 'event';
+/**
+ * The host telling a MOUNTED frame that its rectangle changed.
+ *
+ * `init` is sent once, and a surface frame outlives many geometry passes: the pet is resized (the
+ * user's 桌宠大小), the answer box is asked to grow, the window's side flips. A plugin that keeps
+ * using the rectangle from `init` ends up drawing a tail at the pet's old centre, and it cannot
+ * know how much room it has above the pet - which is what decides whether its own blocks still fit.
+ *
+ * So this message carries the new rectangle (including `room`) to every frame whose rect changed.
+ */
+const TYPE_SURFACE = 'surface';
 
 /**
  * One plugin's sandboxed interface.
@@ -223,6 +234,16 @@ class PluginFrame {
     this.post({ v: V, type: TYPE_EVENT, name, payload });
   }
 
+  /**
+   * Tells this frame its rectangle changed.
+   *
+   * Only for a MOUNTED frame whose rect actually moved or resized: `init` already carried the
+   * first one, and a message sent before the document installed its listener would be lost.
+   */
+  sendGeometry(rect) {
+    this.post({ v: V, type: TYPE_SURFACE, rect });
+  }
+
   /** Posts a message into the frame. */
   post(message) {
     if (!this.el.contentWindow) return;
@@ -260,8 +281,23 @@ export class PluginHost {
     this.fail = fail;
     this.debug = debug || (() => {});
 
-    /** The floating surface's frames, in declaration order. */
-    this.surfaceFrames = [];
+    /**
+     * The floating surface's frames, keyed by the block's DECLARATION index.
+     *
+     * A Map, not an array, and the key is `rect.index` rather than the position in the
+     * array. Two reasons, both of which were bugs first:
+     *
+     *   - `surface.blocks` can hide a block, and a hidden block still comes back in the
+     *     list (with `hidden: true`; see PluginSurfaceRect.Hidden). With positional
+     *     addressing, hiding block 0 made the block that was declared 1 look like block 0,
+     *     and a frame built as `rectIndex: i` then told the surviving block it had the
+     *     other block's job - the input pill rendered as a result strip and the composer
+     *     disappeared.
+     *   - when the SET of blocks changes the frames still have to be rebuilt, but now that
+     *     is a comparison of keys instead of a count, so "one block was hidden" no longer
+     *     looks like "the surface was replaced".
+     */
+    this.surfaceFrames = new Map();
     /** The panel slot's single frame, or null. */
     this.slotFrame = null;
     /** The slot name the current slot view fills, or ''. */
@@ -294,7 +330,7 @@ export class PluginHost {
 
   /** True while a plugin's interface is on screen in either slot. */
   isOpen() {
-    return this.surfaceFrames.length > 0 || !!this.slotFrame;
+    return this.surfaceFrames.size > 0 || !!this.slotFrame;
   }
 
   /**
@@ -402,7 +438,7 @@ export class PluginHost {
     // Never trust the origin: the frames are opaque by design, so their origin
     // is "null" and an origin check would be both useless and wrong. Identity of
     // the window is the check that matters.
-    for (const frame of this.surfaceFrames) {
+    for (const frame of this.surfaceFrames.values()) {
       if (frame.el.contentWindow === event.source) {
         frame.handleMessage(event.data);
         return;
@@ -433,7 +469,7 @@ export class PluginHost {
     const name = ev?.name;
     if (typeof id !== 'string' || typeof name !== 'string') return;
     let delivered = 0;
-    for (const frame of this.surfaceFrames) {
+    for (const frame of this.surfaceFrames.values()) {
       if (frame.pluginId === id) {
         frame.sendEvent(name, ev.payload);
         delivered++;
@@ -499,21 +535,29 @@ export class PluginHost {
     }
 
     const rects = surface.rects;
-    // Rebuild when the plugin changes, when its VERSION changes, or when the count
-    // changes; otherwise reuse, so a plugin's interface is not torn down and
-    // re-created on every layout.
+    // Frames are keyed by the block's DECLARATION index (`rect.index`), never by position.
+    // A hidden block still arrives in `rects` (with `hidden: true`), so the key set of a
+    // surface does not change when a block is shown or hidden - which is what lets a plugin
+    // toggle a box mid-exchange without losing the document inside it.
+    const wanted = rects.map((r, i) => ({ rect: r, index: r.index ?? i }));
+
+    // Rebuild when the plugin changes, when its VERSION changes, or when the SET of blocks
+    // changes; otherwise reuse, so a plugin's interface is not torn down and re-created on
+    // every layout.
     //
-    // The version is part of the test for the same reason it is on the slot frame:
-    // an update keeps the id and changes the files behind it, so an id-only
-    // comparison would leave the previous version's document running in a surface
-    // the user had just updated.
+    // The version is part of the test for the same reason it is on the slot frame: an update
+    // keeps the id and changes the files behind it, so an id-only comparison would leave the
+    // previous version's document running in a surface the user had just updated.
+    const sameSet =
+      this.surfaceFrames.size === wanted.length &&
+      wanted.every((w) => this.surfaceFrames.has(w.index));
     if (this.surfacePluginId !== surface.pluginId ||
         this.surfaceVersion !== (view?.version || '') ||
-        this.surfaceFrames.length !== rects.length) {
+        !sameSet) {
       this.clearSurface();
       this.surfacePluginId = surface.pluginId;
       this.surfaceVersion = view?.version || '';
-      for (let i = 0; i < rects.length; i++) {
+      for (const { rect, index } of wanted) {
         const frame = new PluginFrame({
           pluginId: surface.pluginId,
           version: view?.version || '',
@@ -521,24 +565,32 @@ export class PluginHost {
           kind: 'surface',
           permissions: view?.permissions || [],
           granted: view?.granted || [],
-          rectIndex: i,
+          // The DECLARATION index, which is also the block's JOB (0 question, 1 answer,
+          // 2 input for the chat plugin). Passing the position in this loop instead told a
+          // surviving block that it had another block's job - the input pill rendered as a
+          // result strip and the composer disappeared.
+          rectIndex: index,
           rectCount: rects.length,
-          rect: rects[i],
+          rect,
           onRequest: (m, p) => App.PluginRequest(surface.pluginId, m, JSON.stringify(p)),
         });
-        this.surfaceFrames.push(frame);
+        this.surfaceFrames.set(index, frame);
         mount.append(frame.el);
       }
     }
     mount.classList.remove('hidden');
-    rects.forEach((r, i) => {
-      const frame = this.surfaceFrames[i];
-      if (!frame) return;
-      frame.rect = r;
-      frame.el.style.left = `${r.x}px`;
-      frame.el.style.top = `${r.y}px`;
-      frame.el.style.width = `${r.w}px`;
-      frame.el.style.height = `${r.h}px`;
+    for (const { rect, index } of wanted) {
+      const frame = this.surfaceFrames.get(index);
+      if (!frame) continue;
+      // The plugin draws inside its own document, so it has to be TOLD when the box under it
+      // moves or resizes - `init` happened once, long ago. Compared by value: the layout object is
+      // rebuilt on every geometry pass, so identity would always differ.
+      const moved = JSON.stringify(frame.rect) !== JSON.stringify(rect);
+      frame.rect = rect;
+      frame.el.style.left = `${rect.x}px`;
+      frame.el.style.top = `${rect.y}px`;
+      frame.el.style.width = `${rect.w}px`;
+      frame.el.style.height = `${rect.h}px`;
       // An ellipse block is cropped to an ELLIPSE by the native region, so the
       // frame has to be drawn as one too: 50% on all four corners is the only
       // radius that matches an ellipse of this box. `r.r` is 0 for these blocks
@@ -546,18 +598,32 @@ export class PluginHost {
       // shapes and the crop uses one or the other), so falling through to `r.r`
       // would draw a hard-edged rectangle inside an elliptical hole - the
       // corners of the frame would be visible tint over the desktop.
-      const radius = r.ellipse === true ? '50%' : `${r.r}px`;
+      const radius = rect.ellipse === true ? '50%' : `${rect.r}px`;
       frame.el.style.borderTopLeftRadius = radius;
       frame.el.style.borderTopRightRadius = radius;
       frame.el.style.borderBottomLeftRadius = radius;
       frame.el.style.borderBottomRightRadius = radius;
-    });
+      // A HIDDEN block keeps its frame, its document and its box: it is only taken out of
+      // sight and out of hit-testing.
+      //
+      // `visibility` rather than `display: none`: hiding an iframe with display collapses its
+      // viewport to nothing, so the plugin's document would re-lay-out (and a scrolled
+      // transcript would lose its position) the moment the block came back. These two lines
+      // are the page agreeing with the window region, which already stopped including a
+      // hidden block - nothing is painted there, so nothing may be clickable there.
+      const hidden = rect.hidden === true;
+      frame.el.style.visibility = hidden ? 'hidden' : '';
+      frame.el.style.pointerEvents = hidden ? 'none' : '';
+      if (hidden) frame.el.dataset.hidden = '1';
+      else delete frame.el.dataset.hidden;
+      if (moved) frame.sendGeometry(rect);
+    }
   }
 
   /** Hides and removes every surface frame. */
   clearSurface() {
-    for (const frame of this.surfaceFrames) frame.destroy();
-    this.surfaceFrames = [];
+    for (const frame of this.surfaceFrames.values()) frame.destroy();
+    this.surfaceFrames = new Map();
     this.surfacePluginId = '';
     this.surfaceVersion = '';
   }

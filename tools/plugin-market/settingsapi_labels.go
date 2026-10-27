@@ -24,7 +24,7 @@ type LabelPair struct {
 // and that is the point: the install dialog is the user's consent, and consent in two
 // different wordings is consent to two different things. A duplicated map would also
 // drift silently the moment a permission is added - the Go side would gain a row and the
-// screen would keep showing a bare `timer.control`.
+// screen would keep showing a bare `plugin.share`.
 //
 // The ORDER is AllowedPermissions' order, for the same reason that slice exists: it is
 // the order the install dialog asks in, and two views of one consent should not disagree

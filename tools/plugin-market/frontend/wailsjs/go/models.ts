@@ -498,6 +498,7 @@ export namespace plugins {
 	    dy: number;
 	    w: number;
 	    h: number;
+	    maxH?: number;
 	    radius: number;
 	    ellipse?: boolean;
 	
@@ -511,6 +512,7 @@ export namespace plugins {
 	        this.dy = source["dy"];
 	        this.w = source["w"];
 	        this.h = source["h"];
+	        this.maxH = source["maxH"];
 	        this.radius = source["radius"];
 	        this.ellipse = source["ellipse"];
 	    }

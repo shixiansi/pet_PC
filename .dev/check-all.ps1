@@ -39,9 +39,9 @@
 #                             code: the static checks only read it as text, and the
 #                             harness runs the pet's page against a fake backend.
 #   7. behaviour harness    - the real bundle in a real browser engine against a
-#                             fake backend: click/double-click, the panel slot, the
-#                             plugin surface's geometry and protocol, settings
-#                             round trips.
+#                             fake backend: the pet's click and its hover button, the
+#                             panel slot, the plugin surface's geometry and protocol,
+#                             settings round trips.
 #   8. wails build          - the shipping artifact must link.
 #   9. region pixel checks  - the SHIPPING binary against the real desktop: the
 #                             panel/bubble/overlay crop, the pet not moving, and
