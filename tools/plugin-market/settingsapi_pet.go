@@ -120,18 +120,6 @@ func (m *Market) ResetPetImage() (store.Config, error) {
 	return s.Config(), nil
 }
 
-// --- 番茄钟 -----------------------------------------------------------------------
-
-// SetPomodoroOnStartup is the only preference here that cannot take effect immediately, and
-// the page says so: it is about what happens at the next start of the pet.
-func (m *Market) SetPomodoroOnStartup(on bool) (store.Config, error) {
-	return store.SaveSettings(m.dataDir, func(c *store.Config) { c.PomodoroOnStartup = on })
-}
-
-func (m *Market) SetPomodoroSound(on bool) (store.Config, error) {
-	return store.SaveSettings(m.dataDir, func(c *store.Config) { c.PomodoroSound = on })
-}
-
 // --- 对话提醒 ---------------------------------------------------------------------
 
 // The reminder loop reads its config on every tick (30s), so every field below takes effect
@@ -144,10 +132,6 @@ func (m *Market) SetReminderEnabled(on bool) (store.Config, error) {
 
 func (m *Market) SetReminderOnStartup(on bool) (store.Config, error) {
 	return store.SaveSettings(m.dataDir, func(c *store.Config) { c.ReminderOnStartup = on })
-}
-
-func (m *Market) SetRemindDuringBreak(on bool) (store.Config, error) {
-	return store.SaveSettings(m.dataDir, func(c *store.Config) { c.RemindDuringBreak = on })
 }
 
 func (m *Market) SetRemindWhenEmpty(on bool) (store.Config, error) {

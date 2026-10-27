@@ -58,10 +58,6 @@ export function PluginRequest(arg1, arg2, arg3) {
   return window['go']['main']['Market']['PluginRequest'](arg1, arg2, arg3);
 }
 
-export function PomodoroRecords() {
-  return window['go']['main']['Market']['PomodoroRecords']();
-}
-
 export function RememberSelection(arg1) {
   return window['go']['main']['Market']['RememberSelection'](arg1);
 }
@@ -90,10 +86,6 @@ export function ServePluginAsset(arg1, arg2) {
   return window['go']['main']['Market']['ServePluginAsset'](arg1, arg2);
 }
 
-export function SetAutoStartNextPhase(arg1) {
-  return window['go']['main']['Market']['SetAutoStartNextPhase'](arg1);
-}
-
 export function SetAutostart(arg1) {
   return window['go']['main']['Market']['SetAutostart'](arg1);
 }
@@ -102,36 +94,12 @@ export function SetEnabled(arg1, arg2) {
   return window['go']['main']['Market']['SetEnabled'](arg1, arg2);
 }
 
-export function SetFocusMinutes(arg1) {
-  return window['go']['main']['Market']['SetFocusMinutes'](arg1);
-}
-
 export function SetGlobalHotkeys(arg1) {
   return window['go']['main']['Market']['SetGlobalHotkeys'](arg1);
 }
 
-export function SetLongBreakEvery(arg1) {
-  return window['go']['main']['Market']['SetLongBreakEvery'](arg1);
-}
-
-export function SetLongBreakMinutes(arg1) {
-  return window['go']['main']['Market']['SetLongBreakMinutes'](arg1);
-}
-
 export function SetPetScale(arg1) {
   return window['go']['main']['Market']['SetPetScale'](arg1);
-}
-
-export function SetPomodoroOnStartup(arg1) {
-  return window['go']['main']['Market']['SetPomodoroOnStartup'](arg1);
-}
-
-export function SetPomodoroSound(arg1) {
-  return window['go']['main']['Market']['SetPomodoroSound'](arg1);
-}
-
-export function SetRemindDuringBreak(arg1) {
-  return window['go']['main']['Market']['SetRemindDuringBreak'](arg1);
 }
 
 export function SetRemindWhenEmpty(arg1) {
@@ -156,10 +124,6 @@ export function SetReminderOnStartup(arg1) {
 
 export function SetReminderWindow(arg1, arg2) {
   return window['go']['main']['Market']['SetReminderWindow'](arg1, arg2);
-}
-
-export function SetShortBreakMinutes(arg1) {
-  return window['go']['main']['Market']['SetShortBreakMinutes'](arg1);
 }
 
 export function SetSnapToEdge(arg1) {

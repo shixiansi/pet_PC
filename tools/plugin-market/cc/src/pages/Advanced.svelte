@@ -9,7 +9,6 @@
     Diagnostics,
     SetReminderEnabled,
     SetReminderOnStartup,
-    SetRemindDuringBreak,
     SetRemindWhenEmpty,
     SetReminderCadence,
     SetReminderWindow,
@@ -128,10 +127,6 @@
       <span>启动时自动开启提醒</span>
     </label>
     <label class="switch">
-      <input type="checkbox" checked={cfg.remindDuringBreak} onchange={(e) => save(() => SetRemindDuringBreak((e.currentTarget as HTMLInputElement).checked))} />
-      <span>休息时允许提醒</span>
-    </label>
-    <label class="switch">
       <input type="checkbox" checked={cfg.remindWhenEmpty} onchange={(e) => save(() => SetRemindWhenEmpty((e.currentTarget as HTMLInputElement).checked))} />
       <span>没有待办时也提醒</span>
     </label>
@@ -229,7 +224,7 @@
     <dt>数据目录</dt><dd class="mono">{dir || '读取中…'}</dd>
     <dt>设置</dt><dd class="mono">settings.json（本程序写）</dd>
     <dt>运行时状态</dt><dd class="mono">config.json（桌宠写：位置/开机启动/提醒开关）</dd>
-    <dt>数据</dt><dd class="mono">todos.json · pomodoro.json · pomodoro-records.json</dd>
+    <dt>数据</dt><dd class="mono">todos.json</dd>
   </dl>
   <p class="hint">一个文件只有一个写者 —— 这是这两个程序能同时跑而不互相覆盖的前提。</p>
 </Card>

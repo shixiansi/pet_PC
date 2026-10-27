@@ -18,17 +18,20 @@ import (
 const hostKeyFile = "llm-key.bin"
 
 // dataFiles is what the 高级 page reports on: every file the two programs put in the shared
-// data directory, minus the ones whose CONTENT is the user's business (todos, records,
-// settings). Sizes and timestamps answer "is the pet actually writing anything" without
-// copying someone's todo list into a bug report.
+// data directory, minus the ones whose CONTENT is the user's business (todos, settings).
+// Sizes and timestamps answer "is the pet actually writing anything" without copying
+// someone's todo list into a bug report.
+//
+// No pomodoro*.json: those two were the pet's timer state and its archive, and both moved into
+// the pomodoro plugin's private directory (plugin-data/com.shixiansi.plugin-pomodoro/) when the
+// host timer retired. A file this page reports on has to be a file one of these two programs
+// still writes.
 var dataFiles = []string{
 	"settings.json",
 	"config.json",
 	"plugins.json",
 	"plugin-market.json",
 	"todos.json",
-	"pomodoro.json",
-	"pomodoro-records.json",
 	hostKeyFile,
 	"debug.log",
 }

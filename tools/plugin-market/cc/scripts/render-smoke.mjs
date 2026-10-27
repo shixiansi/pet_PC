@@ -112,17 +112,16 @@ await open('待办');
 check('待办：标题来自 store.Todo.title', text().includes('写周报') && text().includes('整理纸箱'));
 check('待办：完成数来自 store.Todo.done', text().includes('1 项未完成 / 共 2 项'));
 
-await open('专注');
-const number = w.document.querySelector('input[type="number"]');
-check('专注：第一个框拿到了 focusMinutes（25）', number?.value === '25');
-check('专注：自动接续读到了 autoStartNextPhase', text().includes('自动接续下一段'));
+// 「专注」 and 「记录」 used to be checked here. Both pages are gone: they read and wrote the
+// pet's timer settings and its record archive, and those retired with the host timer (the
+// timer's own settings and its records belong to the pomodoro plugin now). The rail must not
+// grow them back, so the absence is what gets asserted instead.
 check(
-  '专注：两个番茄钟开关在（提示音 / 启动时开启）',
-  text().includes('阶段结束提示音') && text().includes('启动时自动开启番茄钟') && text().includes('下次启动生效'),
+  'rail 上没有「专注」和「记录」了（它们的配置与档案归番茄钟插件）',
+  ![...w.document.querySelectorAll('nav button')].some(
+    (b) => b.textContent.trim() === '专注' || b.textContent.trim() === '记录',
+  ),
 );
-
-await open('记录');
-check('记录：来自 store.PomodoroRecord', text().includes('写周报') && text().includes('共 1 个番茄'));
 
 // --- the plugin page, which is a LIST + a DETAIL AREA now -----------------------------
 //
@@ -288,7 +287,7 @@ if (diagButton) {
   check('高级：诊断报告说明了日志为什么不在', after.includes('PETPC_DEBUG'));
 }
 
-check('六个页面都没有报错行', !/已装列表：|权限文案：|读取中…/.test(text()));
+check('访问过的每一页都没有报错行', !/已装列表：|权限文案：|读取中…/.test(text()));
 check('没有未捕获错误横幅', banner() === '');
 
 let bad = 0;

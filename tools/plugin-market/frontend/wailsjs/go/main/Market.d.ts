@@ -34,8 +34,6 @@ export function PluginMarketPath():Promise<string|boolean>;
 
 export function PluginRequest(arg1:string,arg2:string,arg3:string):Promise<string>;
 
-export function PomodoroRecords():Promise<Array<store.PomodoroRecord>>;
-
 export function RememberSelection(arg1:string):Promise<void>;
 
 export function ResetPetImage():Promise<store.Config>;
@@ -50,27 +48,13 @@ export function ServeHTTP(arg1:http.ResponseWriter,arg2:http.Request):Promise<vo
 
 export function ServePluginAsset(arg1:http.ResponseWriter,arg2:http.Request):Promise<void>;
 
-export function SetAutoStartNextPhase(arg1:boolean):Promise<store.Config>;
-
 export function SetAutostart(arg1:boolean):Promise<store.Config>;
 
 export function SetEnabled(arg1:string,arg2:boolean):Promise<void>;
 
-export function SetFocusMinutes(arg1:number):Promise<store.Config>;
-
 export function SetGlobalHotkeys(arg1:boolean):Promise<store.Config>;
 
-export function SetLongBreakEvery(arg1:number):Promise<store.Config>;
-
-export function SetLongBreakMinutes(arg1:number):Promise<store.Config>;
-
 export function SetPetScale(arg1:number):Promise<store.Config>;
-
-export function SetPomodoroOnStartup(arg1:boolean):Promise<store.Config>;
-
-export function SetPomodoroSound(arg1:boolean):Promise<store.Config>;
-
-export function SetRemindDuringBreak(arg1:boolean):Promise<store.Config>;
 
 export function SetRemindWhenEmpty(arg1:boolean):Promise<store.Config>;
 
@@ -83,8 +67,6 @@ export function SetReminderEnabled(arg1:boolean):Promise<store.Config>;
 export function SetReminderOnStartup(arg1:boolean):Promise<store.Config>;
 
 export function SetReminderWindow(arg1:string,arg2:string):Promise<store.Config>;
-
-export function SetShortBreakMinutes(arg1:number):Promise<store.Config>;
 
 export function SetSnapToEdge(arg1:boolean):Promise<store.Config>;
 

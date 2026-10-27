@@ -42,7 +42,6 @@ export type PluginConfig = main.PluginConfig;
 export type ConfigEditor = main.ConfigEditor;
 export type Config = store.Config;
 export type Todo = store.Todo;
-export type PomodoroRecord = store.PomodoroRecord;
 export type HotkeyView = desktop.HotkeyView;
 
 // Three rows, three shapes the host really produces:
@@ -193,14 +192,6 @@ const FAKE_CONFIG: Config = store.Config.createFrom({
   autostart: false,
   marketBaseUrl: 'https://gh-proxy.com/https://raw.githubusercontent.com/shixiansi/pet-pc-plugins/main',
   globalHotkeys: false,
-  pomodoroOnStartup: false,
-  autoStartNextPhase: true,
-  remindDuringBreak: true,
-  pomodoroSound: true,
-  focusMinutes: 25,
-  shortBreakMinutes: 5,
-  longBreakMinutes: 15,
-  longBreakEvery: 4,
   reminderOnStartup: false,
   reminderEnabled: false,
   reminderIntervalMin: 30,
@@ -240,19 +231,6 @@ const FAKE_TODOS: Todo[] = [
     done: true,
     createdAt: '2026-10-20T20:00:00+08:00',
     doneAt: '2026-10-21T10:30:00+08:00',
-  }),
-];
-
-const FAKE_RECORDS: PomodoroRecord[] = [
-  store.PomodoroRecord.createFrom({
-    id: 'r1',
-    todoId: 'a',
-    todoTitle: '写周报',
-    startedAt: '2026-10-26T09:30:00+08:00',
-    endedAt: '2026-10-26T09:55:00+08:00',
-    focusMinutes: 25,
-    plan: '写完第三节',
-    summary: '写了两节，第三节开头',
   }),
 ];
 
@@ -386,16 +364,6 @@ export const RememberSelection = (id: string): Promise<void | unknown> =>
 export const MainSettings = (): Promise<Config> => (DEV ? later(FAKE_CONFIG) : host.MainSettings());
 export const SetPetScale = (v: number): Promise<Config> =>
   DEV ? savedConfig({ petScale: v }) : host.SetPetScale(v);
-export const SetFocusMinutes = (v: number): Promise<Config> =>
-  DEV ? savedConfig({ focusMinutes: v }) : host.SetFocusMinutes(v);
-export const SetShortBreakMinutes = (v: number): Promise<Config> =>
-  DEV ? savedConfig({ shortBreakMinutes: v }) : host.SetShortBreakMinutes(v);
-export const SetLongBreakMinutes = (v: number): Promise<Config> =>
-  DEV ? savedConfig({ longBreakMinutes: v }) : host.SetLongBreakMinutes(v);
-export const SetLongBreakEvery = (v: number): Promise<Config> =>
-  DEV ? savedConfig({ longBreakEvery: v }) : host.SetLongBreakEvery(v);
-export const SetAutoStartNextPhase = (on: boolean): Promise<Config> =>
-  DEV ? savedConfig({ autoStartNextPhase: on }) : host.SetAutoStartNextPhase(on);
 
 // --- 外观与启动 / 番茄钟开关 / 对话提醒 ----------------------------------------------
 //
@@ -420,17 +388,10 @@ export const ChoosePetImage = (): Promise<Config> => (DEV ? savedConfig({ petIma
 export const ResetPetImage = (): Promise<Config> =>
   DEV ? savedConfig({ petImageFile: undefined, originalPath: undefined }) : host.ResetPetImage();
 
-export const SetPomodoroOnStartup = (on: boolean): Promise<Config> =>
-  DEV ? savedConfig({ pomodoroOnStartup: on }) : host.SetPomodoroOnStartup(on);
-export const SetPomodoroSound = (on: boolean): Promise<Config> =>
-  DEV ? savedConfig({ pomodoroSound: on }) : host.SetPomodoroSound(on);
-
 export const SetReminderEnabled = (on: boolean): Promise<Config> =>
   DEV ? savedConfig({ reminderEnabled: on }) : host.SetReminderEnabled(on);
 export const SetReminderOnStartup = (on: boolean): Promise<Config> =>
   DEV ? savedConfig({ reminderOnStartup: on }) : host.SetReminderOnStartup(on);
-export const SetRemindDuringBreak = (on: boolean): Promise<Config> =>
-  DEV ? savedConfig({ remindDuringBreak: on }) : host.SetRemindDuringBreak(on);
 export const SetRemindWhenEmpty = (on: boolean): Promise<Config> =>
   DEV ? savedConfig({ remindWhenEmpty: on }) : host.SetRemindWhenEmpty(on);
 export const SetReminderCadence = (intervalMin: number, jitterMaxMin: number): Promise<Config> =>
@@ -441,8 +402,6 @@ export const SetReminderDisplay = (items: number, autoHideSec: number): Promise<
   DEV ? savedConfig({ reminderMaxItems: items, reminderAutoHideSec: autoHideSec }) : host.SetReminderDisplay(items, autoHideSec);
 
 export const Todos = (): Promise<Todo[]> => (DEV ? later(FAKE_TODOS) : host.Todos());
-export const PomodoroRecords = (): Promise<PomodoroRecord[]> =>
-  DEV ? later(FAKE_RECORDS) : host.PomodoroRecords();
 export const DataDir = (): Promise<string> => (DEV ? later('C:\\fake\\PetPC') : host.DataDir());
 
 // --- 高级页的诊断面 --------------------------------------------------------------
@@ -461,8 +420,6 @@ config.json                   188 B  2026-10-26 18:38:51
 plugins.json                  264 B  2026-10-18 09:20:11
 plugin-market.json             64 B  2026-10-02 21:05:44
 todos.json                    398 B  2026-10-26 09:12:00
-pomodoro.json                 120 B  2026-10-26 09:55:00
-pomodoro-records.json         512 B  2026-10-26 09:55:00
 llm-key.bin                   452 B  2026-10-18 09:21:30
 debug.log                    不存在
 
