@@ -38,10 +38,19 @@
 
 ### 2.1 两个边缘事件（`events` 权限）
 
-| 事件 | payload |
-|---|---|
-| `timer.phaseEnded` | `{phase: "focus" \| "break"}` |
-| `reminder.fired` | `{due, overdue, total}` |
+| 事件 | payload | 现在谁在发 |
+|---|---|---|
+| `timer.phaseEnded` | `{phase: "focus" \| "break"}` | **没有人发了**（见下面的补记） |
+| `reminder.fired` | `{due, overdue, total}` | 宿主，手动「立刻提醒一次」 |
+
+> **2026-10-27 补记：`timer.phaseEnded` 目前没有发射方。** 它唯一的发射者是宿主计时器
+> （`completePhaseLocked` → `notifyPluginPhaseEnded`），而计时器整块退休、归
+> `plugin-pomodoro` 了。所以语音插件的「番茄钟结束」那一句**现在不会响**。
+> 事件名与 `SubscribableEvents` 暂时**保留**——直接删掉会让已装的语音插件
+> `events.subscribe` 报错，那比不响更糟。三条候选路（接受 / 用 `plugin.share` 轮询 /
+> 新增一条很窄的"插件声明事实"方法）写在
+> `openspec/changes/todo-pomodoro-as-plugins/design.md` §4.5 的同名一行里。
+> `reminder.fired` 不受影响：提醒气泡仍由宿主发（只是排期在待办插件那边）。
 
 两者都是**边缘事件**，与 `timer.changed` 有本质区别：后者是**状态广播**（倒计时一动就发），
 想知道"专注刚刚结束"的插件得自己记住上一帧、再判断跳变——也就是每个插件各自把宿主
@@ -49,7 +58,7 @@
 
 `phase` 只有 `focus` / `break` 两个值，而不是 `short_break`/`long_break`/`idle` 全套：
 对一个只想"挑哪句话"的插件来说，需要的唯一信息就是**是工作结束还是休息结束**，
-而这个分类宿主本来就持有（`store.IsFocusPhase`）——发原始名字等于逼每个插件重新实现它。
+而这个分类宿主本来就持有（`store.IsFocusPhase`，随计时器一起删除；插件侧是 `machine.js`）。
 
 **payload 里没有任何措辞。** 该说什么、用谁的嗓子、要不要出声，宿主一概不知道。
 
@@ -119,15 +128,19 @@ JSON），`audio` 是**二进制、几百 KB 量级**。只想记住一个设置
 
 | 程序 | 提供 | 不提供（以及为什么） |
 |---|---|---|
-| 桌宠 | `audio.*`、`storage.*`、`config.*`、`net.fetch`、`todos.*`、`timer.*`、`bubble.say`、`surface.*`、`llm.chat`、`events.subscribe` | — |
-| 市场 | `audio.*`、`storage.*`、`config.*`、`net.fetch` | `todos.*`/`timer.*`/`bubble.say`/`surface.*`/`llm.chat`/`events.subscribe`——市场没有待办文件、没有番茄钟、没有可以画气泡的宠物窗口 |
+| 桌宠 | `audio.*`、`storage.*`、`config.*`、`net.fetch`、`todos.*`、`bubble.say`、`surface.*`、`llm.chat`、`events.subscribe` | — |
+| 市场 | `audio.*`、`storage.*`、`config.*`、`net.fetch` | `todos.*`/`bubble.say`/`surface.*`/`llm.chat`/`events.subscribe`——市场没有待办文件、没有可以画气泡的宠物窗口 |
 
 从市场调用后者会得到「本程序不支持该方法」。这比一张共享的表更诚实：共享表会宣称
 这些方法到处可用，然后在更深的地方以 nil dereference 的形式失败。
 
+> `timer.*`（`timer.state` / `start` / `pause` / `resume` / `stop`）曾经在桌宠那一行里，
+> 现在**两个程序都不提供了**：番茄钟插件自己计时，宿主没有计时器可以借给谁。
+> 权限数因此从 17 降到 15（`openspec/changes/todo-pomodoro-as-plugins` 阶 2）。
+
 `events.subscribe` 值得单独说：语音插件**确实订阅**，但它是在**桌宠挂的那个常驻帧里**订阅的。
-从市场订阅是这个程序兑现不了的承诺——它没有番茄钟也没有提醒调度器，
-只会记下订阅然后永远不发任何事件。所以拒绝它，并且说清楚。
+从市场订阅是这个程序兑现不了的承诺——它没有提醒调度器（番茄钟也没有了，见 §2.1 的补记），
+只会记下订阅然后永远不发任何事件。所以拒绝它，并且说清楚。所以拒绝它，并且说清楚。
 
 ---
 

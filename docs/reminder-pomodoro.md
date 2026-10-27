@@ -2,6 +2,25 @@
 
 > **v3（已实现）** · 代码已完成，`build\bin\PetPC.exe` 已打包
 > v1 → v2 的变更见 §0；实现状态与落地决定见 §15
+>
+> ## 【2026-10-27 · 宿主计时器整块退休，本文档降级为「历史 + 仍然有效的理由」】
+>
+> 计时器、记录与两道门控**整个**归 `market/plugins/com.shixiansi.plugin-pomodoro` 了：
+> `app_pomodoro.go`、`internal/pomodoro/`、`internal/store/pomodoro.go`、
+> `State.pomodoro` / `records` / `recordTotals`、前端的番茄条与记录档案、以及 14 个相关绑定
+> 全部删除。所以下面这些章节描述的是**已经不存在的实现**，读它们是为了知道「当初为什么这样做」，
+> 不要照着它们去找代码：
+>
+> - §0–§3（修订决定、目标、场景）、§4（气泡与提示音的逐条规格）、§5–§7（记录、统计、设置项）、
+>   §11–§15（验收、落地决定、测试清单）—— 对应的宿主代码已删。其中**状态机行为**逐条移植进了
+>   插件（`market/tests/plugin-pomodoro-machine.test.js`，25 条），**规格本身仍然有效**。
+> - **§8（窗口区域裁剪）与 §9–§10（隐藏、布局）仍然描述现在发货的行为**，只是例子里的
+>   「气泡 / 面板 / 浮层面」三态要按 `app_bubble.go` 的两种气泡 kind（提醒 / 桌宠菜单）来读。
+>
+> **为什么不整篇归档**：`AGENTS.md` §3.2 与 `app_bubble.go` 的注释都按 §8.2 的编号引用这份文档，
+> 而 §8 至今仍是窗口区域裁剪（包围盒、不许圆角区域、不许 shadow）的唯一权威描述。
+> 归档会让那几处引用变成死链。历史细节在 git 与
+> `openspec/changes/todo-pomodoro-as-plugins/design.md` §4.1 里，这里留下的是**仍然指导现状的理由**。
 
 ---
 
@@ -157,7 +176,7 @@
 - 点「保存」→ 写入记录（§6），**然后休息才开始计时**。
 - 点「跳过」→ 也写入一条记录，`summary` 为空，标记为未填写。**记录照样保留**（因为记录不可删，不能靠"跳过"绕过）。**跳过同样会开始休息**——门控卡的是"有没有应答"，不是"有没有写字"。
 - **总结气泡不能随便关掉**：Esc、拖动桌宠、点别处都不会关它，必须明确选一个。见 §4.5.1。
-- **双击桌宠也不会把它顶掉**：总结气泡占着那一块矩形，而实时交流浮层同样要占那块，**占了就是删掉问题**（不是盖住）。所以浮层在有未回答的问题时**拒绝打开**，并把光标送进总结输入框（§8.2）。
+- **点对话按钮也不会把它顶掉**：总结气泡占着那一块矩形，而实时交流浮层同样要占那块，**占了就是删掉问题**（不是盖住）。所以浮层在有未回答的问题时**拒绝打开**，并把光标送进总结输入框（§8.2）。
 
 ### 4.5.1 休息由记录**门控**（2026-10-04 修订）
 
@@ -450,18 +469,16 @@ type PomodoroState struct {
     CurrentTodoID    string     `json:"currentTodoId"`    // 本轮选中的待办
     CurrentTodoTitle string     `json:"currentTodoTitle"` // 快照
     PhaseStartedAt   *time.Time `json:"phaseStartedAt"`
-    PendingRecordID  string     `json:"pendingRecordId,omitempty"` // 有记录在等总结（休息的门控）
-    PlanPending      bool       `json:"planPending,omitempty"`     // 正等用户写下本轮专注要做什么（§4.5.2）
-    NextTodoID       string     `json:"nextTodoId,omitempty"`      // 结转给下一个专注的待办
-    NextTodoTitle    string     `json:"nextTodoTitle,omitempty"`   // 结转的待办标题快照
+    // pendingRecordId / planPending / nextTodoId / nextTodoTitle 四个键随宿主的两道门控一起删除
 }
 ```
 
 单独文件：这是**运行状态**而非用户偏好。损坏时**直接重置为空闲，不弹警告**（区别于 config/todos 的容错策略）。
 
-`NextTodo*` 的结转时点是**专注结束时**（那时候会话自己才知道它做的是什么），而不是休息结束时——
-`finishPhase` 在专注分支就清空了 `CurrentTodo*`，休息到点那一刻已经无值可复制。
-`Phase == idle` 时 `NormaliseState` 会把 `PlanPending`/`NextTodo*` 一并归零，避免"空闲却等计划"的僵尸门控。
+> **这四个键为什么没了**：`PendingRecordID`（"有记录在等总结"）、`PlanPending`（"正等计划"）与
+> `NextTodoID/NextTodoTitle`（结转给下一个专注的待办）只服务于宿主自己问的那两个问题。问题归
+> 番茄钟插件之后，宿主没有任何"等回答"的状态，字段连同 `NormaliseState` 里为僵尸门控准备的那段
+> 归零逻辑一起删除。旧 `pomodoro.json` 里残留这四个键会被 `encoding/json` 直接忽略，不需要迁移。
 
 ### 7.3 番茄钟记录 —— `pomodoro-records.json`（新文件）
 
@@ -488,15 +505,13 @@ type PomodoroRecord struct {
 ```go
 // 番茄钟
 SetPomodoroEnabled(bool) (State, error) // 开启/关闭整个功能
-StartPomodoro(todoID string) (State, error) // 选待办；确认后停在等计划态（§4.5.2）
-StartPomodoroWithPlan(plan string) (State, error) // 应答计划气泡，并**由这一刻起算专注**
+StartPomodoro(PomodoroStartInput) (State, error) // 选待办；确认即**由这一刻起算专注**
 PausePomodoro() (State, error)
 ResumePomodoro() (State, error)
 StopPomodoro() (State, error)
 SkipPhase() (State, error)
 
 // 记录
-SavePomodoroSummary(recordID, summary string) (State, error) // 只改实际结果，不能删
 EditPomodoroRecord(recordID, plan, summary string) (State, error) // 一次写回计划 + 实际两行
 PomodoroRecords() ([]PomodoroRecord, error)
 
@@ -546,9 +561,9 @@ DismissBubble() error
 
 两条实现约束，缺一不可：
 
-- **Go 侧必须拒绝**（`OpenLive` 读 `unansweredQuestionKind`）。只靠前端拦不住别的调用方，也拦不住事件顺序上的竞态。
-- **前端也必须拦**（`openLive` 读同一个状态）。因为「操作失败」的 toast 长在面板里，而气泡占着槽位时面板必然是关着的——报错弹在一个看不见的地方等于什么都没说。所以双击桌宠在这个状态下变成"**去回答问题**"：光标落进总结/计划输入框（选择气泡则落在「开始专注」上）。
-- **主动说话同样被挡**（`decideProactive` 的 `awaitingAnswer` 门）。它会自动弹浮层，所以撞上提问时的后果和双击一样。
+- **Go 侧必须拒绝**（`OpenPluginSurface` 读 `unansweredQuestionKind`）。只靠前端拦不住别的调用方，也拦不住事件顺序上的竞态。
+- **前端也必须拦**（`openChatPluginSurface` 读同一个状态）。因为「操作失败」的 toast 长在面板里，而气泡占着槽位时面板必然是关着的——报错弹在一个看不见的地方等于什么都没说。所以对话按钮在这个状态下变成"**去回答问题**"：光标落进总结/计划输入框（选择气泡则落在「开始专注」上）。
+- **主动说话同样被挡**（`decideProactive` 的 `awaitingAnswer` 门）。它会自动弹浮层，所以撞上提问时的后果和点对话按钮一样。
 - **三种提问各有自己的说明文案**（"选一件事"/"写总结"/"写计划"不是同一句话），所以拒绝时能说清是哪一个问题占着槽位。
 
 ### 8.3 视觉
@@ -571,7 +586,7 @@ DismissBubble() error
 | 气泡显示时进入专注 | 收起气泡（专注优先） |
 | 开始专注但没有任何待办 | 允许选「不关联待办」→ 见 §13 |
 | 写总结时跳过 | 仍生成记录，`summary` 为空 |
-| **写总结/选待办时双击桌宠** | 浮层**拒绝打开**，光标落到那个输入框（问题不能被顶掉，见 §8.2） |
+| **写总结/选待办时点对话按钮** | 浮层**拒绝打开**，光标落到那个输入框（问题不能被顶掉，见 §8.2） |
 | 休息到点 | 弹**计划气泡**，计时器停住；应答（含留空/跳过）那一刻专注才开始计时（§4.5.2） |
 | **计划气泡显示时按 Esc / 拖动桌宠 / 点别处** | **不消失**，计时器仍停着（门控不可随手关掉，§4.5.2） |
 | 计划待答时打开再关闭面板 | 关闭面板时**重新弹出**（面板里没有回答它的入口，§4.5.2） |
@@ -608,7 +623,7 @@ DismissBubble() error
 - [ ] 25 分到点 → 播声音 + 弹出总结气泡 + 记录生成
 - [ ] 总结气泡**未抢键盘焦点**（在记事本里打字不中断）
 - [ ] 总结气泡里 **`Enter` 保存**、`Shift+Enter` 换行、中文选字的回车不保存
-- [ ] 总结气泡在时**双击桌宠不会顶掉它**，光标落到输入框
+- [ ] 总结气泡在时**点对话按钮不会顶掉它**，光标落到输入框
 - [ ] 记录**没有删除入口**；修改总结后重启仍在
 - [ ] 第 4 个专注结束 → 进入**长**休息
 - [ ] 专注中途重启 → 剩余时间正确续算
@@ -738,11 +753,11 @@ DismissBubble() error
 | `internal/store/pomodoro.go` | 番茄钟运行状态（`pomodoro.json`，含计划门控字段 §4.5.2）、记录档案（`pomodoro-records.json`，含计划字段）、阶段常量与时长 |
 | `internal/store/reminder.go` | 提醒候选选取（§5.4 优先级）、活跃时段判断、`OpenTodos` |
 | `internal/store/store.go` | `Config` 新增 19 项 + `Normalise` 的「零值即缺省」升级 |
-| `internal/pomodoro/machine.go` | 状态机：`StartFocus`/`Pause`/`Resume`/`Stop`/`Reset`/`FinishPhase`/`SkipPhase`/`Reconcile`/`Remaining`，以及门控判定纯函数 `ShouldAskPlan`（§4.5.2）。2026-10 从 `package main` 的 `pomodoro.go` 下沉而来（`openspec/changes/pomodoro-state-machine-extraction`），只有这里和 `internal/store` 是它的依赖 |
+| `internal/pomodoro/machine.go` | 状态机：`StartFocus`/`Pause`/`Resume`/`Stop`/`Reset`/`FinishPhase`/`SkipPhase`/`Reconcile`/`Remaining`。2026-10 从 `package main` 的 `pomodoro.go` 下沉而来（`openspec/changes/pomodoro-state-machine-extraction`），只有这里和 `internal/store` 是它的依赖。**门控判定纯函数 `ShouldAskPlan` 已删**（归插件，见本文档顶部横幅） |
 | `app_pomodoro.go` | 绑定方法、气泡内容（含计划气泡）、记录页数据、系统提示音调用、计划在内存中的生命周期 |
-| `app.go` | `App.focusPlan` 与全屏取值注入点 `foregroundFullscreen`；关闭面板时重弹计划气泡 |
+| `app.go` | **（已删）** `App.focusPlan`、全屏取值注入点 `foregroundFullscreen`、关闭面板时重弹计划气泡的钩子——三者都只服务于计划门控，随它一起删除。`App.revealedForQuestion` 与 `questionVisibility` 还在，但已无调用者（见顶部横幅） |
 | `app_hotkey.go` | 计划待答时拒绝隐藏桌宠（`errPlanBlocksHiding`） |
-| `app_reminder.go` | 调度器：`decideReminder`（纯函数）+ 30 秒 tick + 抖动 + 手动提醒 |
+| `app_reminder.go` | 提醒气泡与手动「立刻提醒」。调度器（`decideReminder` 纯函数 + 30 秒 tick + 抖动）已随提醒搬进待办插件而删除，见 `openspec/changes/todo-pomodoro-as-plugins` |
 | `internal/desktop/sound_*.go` | `MessageBeep` 系统提示音 |
 | `internal/desktop/fullscreen_*.go` | 前台全屏检测（§4.7） |
 | `frontend/src/main.js` `style.css` `index.html` | 双角标、气泡四态、番茄钟条、记录页（计划/实际两行 + 就地编辑）、设置项 |
@@ -760,8 +775,8 @@ DismissBubble() error
 | §5.2「进入休息立即弹一次」与写总结气泡冲突 | 记为**待补提醒**，总结气泡一关（保存/跳过）就补弹 | 两者都要占同一个气泡位；总结是不能丢的问题 |
 | `RemindDuringBreak` 关掉时 | 既不弹，**也不记为「错过」** | 用户要的是休息时安静，不是稍后补一次 |
 | 提醒是否会覆盖「选择待办/写总结」气泡 | **不会**，直接放弃这次提醒 | 那两个气泡在等用户回答，被通知顶掉就等于把问题弄丢了 |
-| 浮层（实时交流）是否会覆盖「选择待办/写总结」气泡 | **不会**，`OpenLive` 直接拒绝并说明是哪个问题 | 浮层和气泡共用一块矩形，打开不是"盖住"而是"删掉"；总结气泡还是休息的门控，删掉就等于计时器永久停住且无解释（§8.2） |
-| 浮层打开时主动说话 | 主动说话本身也被 `awaitingAnswer` 挡住 | 它会自动弹浮层，后果和双击桌宠一样 |
+| 浮层（实时交流）是否会覆盖「选择待办/写总结」气泡 | **不会**，`OpenPluginSurface` 直接拒绝并说明是哪个问题 | 浮层和气泡共用一块矩形，打开不是"盖住"而是"删掉"；总结气泡还是休息的门控，删掉就等于计时器永久停住且无解释（§8.2） |
+| 浮层打开时主动说话 | 主动说话本身也被 `awaitingAnswer` 挡住 | 它会自动弹浮层，后果和点对话按钮一样 |
 | 浮层是否可以顶掉提醒气泡 / 面板 | **可以** | 提醒只是通知，面板是记录视图；浮层是用户正在看的实时面 |
 | （计划气泡）计划文本存哪 | 只存**记录**里的 `plan` 字段 + 内存里的"当前专注计划" | 与 §4.5.2 的澄清裁定一致：`planPending` 是门控标记，计划本身不该混进运行状态 |
 | （计划气泡）`NextTodo*` 什么时候写 | **专注结束时**由 `finishPhase` 写入 | 休息到点那一刻 `CurrentTodo*` 已被清空，无值可复制（实现时发现的冲突，见 §4.5.2 要点 1） |
