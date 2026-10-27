@@ -43,14 +43,16 @@
 | `timer.phaseEnded` | `{phase: "focus" \| "break"}` | **没有人发了**（见下面的补记） |
 | `reminder.fired` | `{due, overdue, total}` | 宿主，手动「立刻提醒一次」 |
 
-> **2026-10-27 补记：`timer.phaseEnded` 目前没有发射方。** 它唯一的发射者是宿主计时器
-> （`completePhaseLocked` → `notifyPluginPhaseEnded`），而计时器整块退休、归
-> `plugin-pomodoro` 了。所以语音插件的「番茄钟结束」那一句**现在不会响**。
-> 事件名与 `SubscribableEvents` 暂时**保留**——直接删掉会让已装的语音插件
-> `events.subscribe` 报错，那比不响更糟。三条候选路（接受 / 用 `plugin.share` 轮询 /
-> 新增一条很窄的"插件声明事实"方法）写在
-> `openspec/changes/todo-pomodoro-as-plugins/design.md` §4.5 的同名一行里。
-> `reminder.fired` 不受影响：提醒气泡仍由宿主发（只是排期在待办插件那边）。
+> **2026-10-27 补记：`timer.phaseEnded` 目前没有发射方，前两句台词不会响。**
+> 它唯一的发射者是宿主计时器（`completePhaseLocked` → `notifyPluginPhaseEnded`），而计时器整块
+> 退休、归 `plugin-pomodoro` 了。事件名与 `SubscribableEvents` **保留**——直接删掉会让已装的
+> 语音插件 `events.subscribe` 报错，那比不响更糟。
+> 三条候选路（接受 / `plugin.share` 轮询 / 新增一条很窄的"插件声明事实"方法）都卡在同一处：
+> **"阶段结束"必须由一个一直在跑的代码产生**，而番茄钟插件只在它的浮层面打开时才有脚本在转。
+> 所以真正的修法是让番茄钟插件托管一个常驻帧，把计时循环搬进去——方案、代价（两个帧不能同时
+> 计时、记录 id 要按阶段结束时刻派生）与验收写在
+> `openspec/changes/pomodoro-headless-timer/`。在那之前这是**已知缺口**，不是回归。
+> `reminder.fired` 不受影响：提醒气泡仍由宿主发（排期在待办插件那边）。
 
 两者都是**边缘事件**，与 `timer.changed` 有本质区别：后者是**状态广播**（倒计时一动就发），
 想知道"专注刚刚结束"的插件得自己记住上一帧、再判断跳变——也就是每个插件各自把宿主

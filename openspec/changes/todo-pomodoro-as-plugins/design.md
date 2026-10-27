@@ -62,8 +62,8 @@
 |---|---|---|
 | 提醒会**发两次** | 宿主 `app_reminder.go` 的调度器 + 待办插件的常驻帧，读的是同一份待办 | 删宿主的 `startReminderLoop`/`tickReminder`/`setNextReminder`/`makeUpMissedReminder`/`noteBreakReminderOwed`（保留 `RemindNow` 手动那条），然后把插件的 `remindEnabled` 默认值改回 `true`。**现在插件侧默认关**，所以只有一个在发 |
 | 待办/番茄钟**面板 tab 还在** | 阶 3 才删 | 阶 3 |
-| 番茄钟**两套计时器**（宿主 + 插件 2.0.0 源码） | 插件 2.0.0 已自持状态机，但**还没打包/安装**（打包要写 `market/dist` 与 `%APPDATA%`，需提权，用户尚未批准） | 跑 `market/tools/package.ps1` + 安装五个文件；在那之前**已装的仍是 1.0.0**（驱动宿主计时器，行为不变） |
-| **`timer.phaseEnded` 没有发射方了** | 它唯一的发射者是宿主计时器（`completePhaseLocked` → `notifyPluginPhaseEnded`）。宿主计时器删掉之后，**语音插件的「番茄钟结束」那句不会再响**：它订阅的正是这个事件，而插件不能自己发宿主的 事件 | 未定。三条路：(a) 接受，番茄钟结束时由番茄钟插件弹一句文字气泡（它已有 `pet.bubble`）；(b) 番茄钟插件用 `plugin.share` 写一个「阶段结束」的时间戳，语音插件的常驻帧轮询它（≤2s 延迟，成本可忽略）；(c) 新增一个很窄的「插件声明一条事实」方法 + 权限——最贵，且要动 §3.1 的七处。**在选定之前，事件名与 `SubscribableEvents` 保留**：删掉会让已装的语音插件 `events.subscribe` 直接报错，比不响更糟 |
+| 番茄钟**两套计时器**（宿主 + 插件 2.0.0） | 已解决：`plugin-pomodoro` **2.0.0 已打包、已进目录、已安装**（`market/dist/…-2.0.0.zip` + `index.json` 的 sha256 与 `%APPDATA%` 里那五个文件逐字节对得上） | — |
+| **`timer.phaseEnded` 没有发射方了** | 它唯一的发射者是宿主计时器（`completePhaseLocked` → `notifyPluginPhaseEnded`）。宿主计时器删掉之后，**语音插件的「番茄钟结束」那句不会响**：它订阅的正是这个事件，而插件不能自己发宿主的事件 | **已定性，另开一个 change 收尾**：三条候选路（(a) 接受 + 气泡 / (b) `plugin.share` 轮询 / (c) 新增很窄的"插件声明事实"方法）都要求"阶段结束"由一个**一直在跑的代码**产生，而番茄钟插件只在浮层面打开时才有脚本在转。所以第一步是让插件常驻（`background: true`）并把计时循环搬进无界面帧——方案、代价与验收见 `openspec/changes/pomodoro-headless-timer/`。在那之前事件名与 `SubscribableEvents` **保留**：删掉会让已装的语音插件 `events.subscribe` 直接报错，比不响更糟 |
 
 **宿主侧退休清单**（阶 1/2 的收尾，一次做完）：
 `app_reminder.go` 的调度部分、`app_pomodoro.go` 的状态机外壳与门控、`internal/store` 的待办族、

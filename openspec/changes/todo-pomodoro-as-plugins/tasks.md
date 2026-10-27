@@ -44,11 +44,16 @@
            `#bubble-plan` 全部删除，桌宠菜单的番茄钟格改成"打开番茄钟插件的浮层面"，
            15 个绑定（含 `SavePomodoroSummary` / `StartPomodoroWithPlan` 两个早已失效的）与
            三份假绑定同步删除。
-     - [ ] **遗留一：`timer.phaseEnded` 现在没有发射方**。它唯一的发射者是宿主计时器
-           （`completePhaseLocked` → `notifyPluginPhaseEnded`），所以**语音插件的「番茄钟结束」
-           那句不会再响**。事件名与 `SubscribableEvents` 暂时保留——删掉会让已装的语音插件
-           `events.subscribe` 直接报错，比不响更糟。三条候选路（接受 / `plugin.share` 轮询 /
-           新增一条很窄的"插件声明事实"方法）写在 `design.md` §4.5 的那一行里。
+     - [x] **遗留一：`timer.phaseEnded` 没有发射方——已定性，另开一个 change 收尾**。它唯一的
+           发射者是宿主计时器（`completePhaseLocked` → `notifyPluginPhaseEnded`），所以**语音插件的
+           「番茄钟结束」那句不响**。事件名与 `SubscribableEvents` **保留**——删掉会让已装的语音插件
+           `events.subscribe` 直接报错，比不响更糟。
+           **三条候选路都被同一件事挡住**：接受 / `plugin.share` 轮询 / 新增"插件声明事实"方法，
+           三者都要求"阶段结束"由一个**一直在跑的代码**产生，而番茄钟插件只在它的浮层面打开时才有
+           脚本在转（浮层面是 iframe，关掉即销毁）。所以这不是"选哪条路"，而是"插件得先常驻"。
+           方案、代价（两个帧不能同时计时、记录 id 按阶段结束时刻派生去重）与验收写在新开的
+           `openspec/changes/pomodoro-headless-timer/`；README 语音那一节与 `docs/voice.md` §2.1
+           现在都写明这是**已知缺口**而不是回归。
      - [x] **门禁已恢复（Go 与静态检查）**：`go build` 0、`go vet` 0、`go test ./...` 除
            `internal/desktop` 的 9 条 §7 沙箱自启项外全 `ok`、`node .dev\check-frontend.cjs`
            **150 条全绿**。`check-frontend.cjs` 为此改了三处：`goAppPomodoro`/`goPomodoroEngine`
@@ -161,8 +166,10 @@
 `npm test` **33 条全绿**、`node .dev\check-frontend.cjs` **133 条全绿**、
 `node .dev\run-frontend-harness.cjs` **107 条全绿**。`tools/plugin-market` 这一轮没动，未重跑。
 
-**仍然开着的**（不属这一轮）：遗留一（`timer.phaseEnded` 没有发射方）、`todos.*` 退休与待办数据搬家、
-阶 3（删面板与 `panelSlot`）、以及 `plugin-pomodoro` 2.0.0 的发布。
+**仍然开着的**：`todos.*` 退休与待办数据搬家、阶 3（删面板与 `panelSlot`）；
+遗留一已定性，方案在 `openspec/changes/pomodoro-headless-timer/`。
+`plugin-pomodoro` **2.0.0 已经发布并安装**（`market/dist/…-2.0.0.zip`、`index.json` 里的 sha256、
+`%APPDATA%` 里那五个文件与源逐字节相同，2026-10-27 复核）——之前那条"未发布"的记录是过期的。
 
 ## 阶 1：待办插件接管数据与提醒
 
