@@ -182,23 +182,22 @@ func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool)
 
 // --- prompt context --------------------------------------------------------
 
-// The snapshot is the persona and the clock, and the interesting half is what is NOT in
-// it: the host no longer owns the todo list or the timer, so nothing about the user's day
-// can reach the model through this path. Asserted from here rather than from internal/llm
-// because that package can only see the struct it is given - the leak this guards against
-// is a caller filling it back in.
+// The snapshot is the persona and the clock, and the interesting half is what is NOT in it:
+// the host no longer owns the todo list or the timer, so nothing about the user's day can
+// reach the model through this path. Asserted from here rather than from internal/llm
+// because that package can only see the struct it is given - the leak this guards against is
+// a caller filling it back in.
 func TestPromptContextCarriesNoUserData(t *testing.T) {
 	a := newLLMTestApp(t)
-	if _, err := a.AddTodo(TodoInput{Title: "交周报"}); err != nil {
-		t.Fatalf("AddTodo: %v", err)
-	}
 
 	prompt := promptFor(t, a.promptContext(a.store.Config()))
-	if strings.Contains(prompt, "交周报") {
-		t.Errorf("a todo reached the prompt: the host does not own the list any more:\n%s", prompt)
+	for _, leaked := range []string{"待办：", "番茄钟未开启", "专注中"} {
+		if strings.Contains(prompt, leaked) {
+			t.Errorf("the prompt still describes the user's day (%q): the host does not own that data any more:\n%s", leaked, prompt)
+		}
 	}
 	if !strings.Contains(prompt, "被问到就说自己看不到") {
-		t.Errorf("the prompt should say the list is not visible:\n%s", prompt)
+		t.Errorf("the prompt should say the list and the timer are not visible:\n%s", prompt)
 	}
 	if !strings.Contains(prompt, "现在：") {
 		t.Errorf("the clock is not private data and should still be there:\n%s", prompt)
@@ -213,72 +212,12 @@ func promptFor(t *testing.T, ctx llm.PromptContext) string {
 	return llm.BuildSystemPrompt(ctx)
 }
 
-// TestPromptContextIncludesTodosAndPomodoro, TestPromptContextRespectsContextSwitch and
-// TestPromptDueLabel used to live here. The first filled the snapshot from the host's
-// store, the second proved the privacy switch worked, and the third rendered a deadline
-// phrase for the prompt. All three described data the host no longer has: the list is the
-// todo plugin's own storage, the switch could no longer change anything, and the label
-// helper went with it.
-
-// --- window ----------------------------------------------------------------
-
-// TestOpenChatOpensThePanel covers the shape of the conversation surface: it is a
-// tab inside the panel, so OpenChat opens the panel and tells the frontend which
-// tab to show.
-func TestOpenChatOpensThePanel(t *testing.T) {
-	a, events := newLLMTestAppWithEvents(t)
-
-	if _, err := a.OpenChat(); err != nil {
-		// Without a real window the geometry call fails; that is an environment
-		// limitation, not a logic error, so the state is asserted anyway.
-		t.Logf("OpenChat geometry: %v", err)
-	}
-
-	a.mu.Lock()
-	panelOpen := a.panelOpen
-	bubble := a.bubble
-	a.mu.Unlock()
-
-	if !panelOpen {
-		t.Error("OpenChat did not open the panel")
-	}
-	// The conversation is a tab, so nothing should be occupying the bubble slot.
-	if bubble != nil {
-		t.Errorf("OpenChat raised a bubble: %+v", bubble)
-	}
-
-	// The frontend needs the event to switch to the conversation tab.
-	if !events.has(eventChatOpen) {
-		t.Errorf("OpenChat did not emit %s (saw %v)", eventChatOpen, events.names())
-	}
-}
-
-// TestOpenTodoPanelFromChatReportsTheOtherTab: the conversation's "待办" button
-// has to move the frontend back, which it does by event because the layout
-// carries geometry rather than which tab is showing.
-func TestOpenTodoPanelFromChatReportsTheOtherTab(t *testing.T) {
-	a, events := newLLMTestAppWithEvents(t)
-
-	if _, err := a.OpenTodoPanelFromChat(); err != nil {
-		t.Logf("OpenTodoPanelFromChat geometry: %v", err)
-	}
-	a.mu.Lock()
-	panelOpen := a.panelOpen
-	a.mu.Unlock()
-	if !panelOpen {
-		t.Error("the panel did not open")
-	}
-
-	// The last chat-open event must be the "false" (leave the chat) one.
-	all := events.byName(eventChatOpen)
-	if len(all) == 0 {
-		t.Fatalf("no %s event (saw %v)", eventChatOpen, events.names())
-	}
-	if v, ok := all[len(all)-1].data["open"].(bool); !ok || v {
-		t.Errorf("the last %s event was %+v, want open=false", eventChatOpen, all[len(all)-1].data)
-	}
-}
-
+// TestPromptContextIncludesTodosAndPomodoro, TestPromptContextRespectsContextSwitch,
+// TestPromptDueLabel, TestOpenChatOpensThePanel and TestOpenTodoPanelFromChatReportsTheOtherTab
+// used to live here. The first three described data the host no longer has (the list is the
+// todo plugin's storage and the timer is its own plugin), and the last two described the
+// panel's tabs - OpenChat and OpenTodoPanelFromChat are gone with the panel, and the
+// conversation is the chat plugin's floating surface now.
 // TestShutdownIsIdempotentWithoutAChatRequest: the conversation no longer runs
 // inside the pet, so there is no in-flight request for shutdown to cancel - but
 // shutdown still releases the global shortcuts and the plugin websockets, and doing

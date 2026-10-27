@@ -43,7 +43,7 @@ const V = 1;
  * plugin owns the slot, and it mounts that plugin here - and a string written
  * out in two files is a string that can drift.
  */
-export const SLOT_CHAT = 'chat';
+
 
 /** The message the plugin sends to announce itself, and the host's answer. */
 const TYPE_READY = 'ready';
@@ -298,10 +298,6 @@ export class PluginHost {
      *     looks like "the surface was replaced".
      */
     this.surfaceFrames = new Map();
-    /** The panel slot's single frame, or null. */
-    this.slotFrame = null;
-    /** The slot name the current slot view fills, or ''. */
-    this.slotName = '';
     /** The plugin id the current surface belongs to, or ''. */
     this.surfacePluginId = '';
     /** The version the current surface frames were built from, or ''. */
@@ -328,9 +324,15 @@ export class PluginHost {
     EventsOn('pet:plugin-event', (ev) => this.routeEvent(ev));
   }
 
-  /** True while a plugin's interface is on screen in either slot. */
+  /**
+   * True while a plugin's floating surface is on screen.
+   *
+   * "on screen in either slot" used to be the question, because the panel had a slot view of
+   * its own. The panel is gone and the chat plugin renders itself as a floating surface, so a
+   * surface is now the whole of "something is on screen".
+   */
   isOpen() {
-    return this.surfaceFrames.size > 0 || !!this.slotFrame;
+    return this.surfaceFrames.size > 0;
   }
 
   /**
@@ -444,10 +446,6 @@ export class PluginHost {
         return;
       }
     }
-    if (this.slotFrame && this.slotFrame.el.contentWindow === event.source) {
-      this.slotFrame.handleMessage(event.data);
-      return;
-    }
     for (const frame of this.backgroundFrames.values()) {
       if (frame.el.contentWindow === event.source) {
         frame.handleMessage(event.data);
@@ -474,10 +472,6 @@ export class PluginHost {
         frame.sendEvent(name, ev.payload);
         delivered++;
       }
-    }
-    if (this.slotFrame && this.slotFrame.pluginId === id) {
-      this.slotFrame.sendEvent(name, ev.payload);
-      delivered++;
     }
     // The headless frames count as mounted interfaces: that is the whole reason
     // they exist. Without this a background-only plugin would never receive
@@ -626,57 +620,5 @@ export class PluginHost {
     this.surfaceFrames = new Map();
     this.surfacePluginId = '';
     this.surfaceVersion = '';
-  }
-
-  /**
-   * Shows one plugin's interface in a named panel slot.
-   *
-   * This is what "filling a slot" means for a plugin: its view fills the slot's
-   * existing body, which for 'chat' is the 对话 tab's rectangle. No window
-   * geometry is involved, so the panel's 380x520 rectangle - and the region crop
-   * that matches it - are untouched.
-   *
-   * `slot` is passed through to the frame so the handshake can tell the plugin
-   * which slot it landed in (T51). At most one slot view exists at a time: the
-   * panel shows one tab at a time, so opening a second would leave the first
-   * plugin running invisibly with no way for the user to close it.
-   *
-   * The mount point is the slot element itself. The host does not add classes to
-   * it beyond clearing the "no plugin here" hint - the slot's box was sized by
-   * its own stylesheet before any plugin existed, so mounting must not change it.
-   */
-  openSlot(slot, plugin) {
-    this.closeSlot();
-    const frame = new PluginFrame({
-      pluginId: plugin.id,
-      version: plugin.version || '',
-      entry: plugin.entry || 'panel.html',
-      kind: 'panel',
-      slot,
-      permissions: plugin.permissions || [],
-      granted: plugin.granted || [],
-      onRequest: (m, p) => App.PluginRequest(plugin.id, m, JSON.stringify(p)),
-    });
-    this.slotFrame = frame;
-    this.slotName = slot;
-    frame.el.dataset.slot = slot;
-    const mount = this.els.chatSlot;
-    if (!mount) return;
-    mount.textContent = '';
-    mount.append(frame.el);
-  }
-
-  /** Hides the slot's interface and removes its frame. */
-  closeSlot() {
-    if (this.slotFrame) {
-      this.slotFrame.destroy();
-      this.slotFrame = null;
-    }
-    this.slotName = '';
-  }
-
-  /** True while a slot view is showing. */
-  slotOpen() {
-    return !!this.slotFrame;
   }
 }

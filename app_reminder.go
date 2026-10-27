@@ -79,7 +79,16 @@ func (a *App) showReminderBubble(manual bool) bool {
 	rem := cfg.Reminder()
 	now := time.Now()
 
-	items := a.store.ReminderItems(rem.MaxItems, now)
+	// The list comes from the todo plugin's published snapshot, NOT from the host's store:
+	// the store's copy is the one that was migrated into the plugin, so reading it here
+	// would remind the user about whatever the list looked like on the last launch.
+	//
+	// This is the only host-side feature that still needs the list, which is why it reads
+	// the SHARED snapshot rather than anything private: the writing plugin made it
+	// readable on purpose (that is what `share.set` means), and the pomodoro reads it for
+	// the same reason.
+	todos := a.sharedTodoList()
+	items := reminderItems(todos, rem.MaxItems, now)
 	if len(items) == 0 && !rem.WhenEmpty {
 		return false
 	}
@@ -88,7 +97,7 @@ func (a *App) showReminderBubble(manual bool) bool {
 	for _, t := range items {
 		bubbleItems = append(bubbleItems, BubbleItem{ID: t.ID, Title: t.Title, Due: dueLabel(t), Status: dueStatusOf(t)})
 	}
-	openCount := a.store.Stats().Open
+	openCount := openTodoCount(todos)
 	more := openCount - len(bubbleItems)
 	if more < 0 {
 		more = 0
@@ -107,15 +116,15 @@ func (a *App) showReminderBubble(manual bool) bool {
 
 	// Announced AFTER the bubble is up, so a slow reaction cannot delay the visual
 	// notice - and so the two arrive together rather than the voice coming first.
-	// The counts come from Stats rather than from the items: the bubble is capped
-	// at MaxItems, so counting the rows would understate a long list.
+	// The counts come from the whole snapshot rather than from the bubble's rows: the
+	// bubble is capped at MaxItems, so counting the rows would understate a long list.
 	//
 	// The plugin event carries the three numbers and no wording. A plugin is free to
 	// synthesize a sentence with the count in it, which is something the pet's own
 	// fixed clips never could - they had no numbers. What to say remains the
 	// plugin's business, which is the separation this change is for.
-	stats := a.store.Stats()
-	a.notifyPluginReminderFired(stats.DueSoon, stats.Overdue, stats.Open)
+	dueSoon, overdue, open := reminderCounts(todos, now)
+	a.notifyPluginReminderFired(dueSoon, overdue, open)
 
 	a.DebugLog(fmt.Sprintf("reminder: shown (%d items, manual=%v)", len(bubbleItems), manual))
 	return true
@@ -181,22 +190,35 @@ func (a *App) SetBubbleHover(hovered bool) {
 	a.remMu.Unlock()
 }
 
-// OpenTodoPanelFromBubble handles a click on a reminder bubble: the bubble goes
-// away and the todo panel opens in its place, so the user can act immediately.
-func (a *App) OpenTodoPanelFromBubble() (Layout, error) {
+// OpenTodoFromBubble handles a click on a reminder bubble: the bubble goes away and the todo
+// plugin's surface opens in its place, so the user can act immediately.
+//
+// It used to be called OpenTodoPanelFromBubble and it opened the PANEL's 待办 tab. Both halves
+// of that are gone - the tab with the panel, and the list into the todo plugin - so the binding
+// is RENAMED rather than kept: a name that says "panel" would be the next person's reason to
+// look for one.
+//
+// A failure is not reported as an error here. The bubble has already been folded by
+// setBubbleLocked, so the state and the layout agree; what can fail is opening the surface, and
+// OpenPluginSurface explains that in a bubble of its own (not enabled, no grant). Passing the
+// error up would have the frontend toast it inside a panel that no longer exists.
+func (a *App) OpenTodoFromBubble() (Layout, error) {
 	a.mu.Lock()
-	// Go through the invariant helper so the layout cannot keep advertising the
-	// bubble that the panel is replacing.
 	a.setBubbleLocked(nil)
-	a.panelOpen = true
-	// The floating surface shares the slot as well; the panel is the record view
-	// the user asked for, so it wins.
 	a.setPluginSurfaceLocked(nil)
 	a.mu.Unlock()
 	a.emitBubble(BubbleReminder, false)
+
+	id := a.todoSlotPluginID()
+	if id == "" {
+		a.DebugLog("todo slot: no plugin claims it")
+		return a.applyWindowGeometry()
+	}
+	if _, err := a.OpenPluginSurface(id); err != nil {
+		a.DebugLog("todo slot: " + err.Error())
+	}
 	return a.applyWindowGeometry()
 }
-
 // shutdown stops the background loops.
 //
 // The channel that used to end the pomodoro ticker is gone with the timer itself,

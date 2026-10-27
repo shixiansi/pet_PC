@@ -182,7 +182,6 @@ export namespace main {
 		}
 	}
 	export class Layout {
-	    panelOpen: boolean;
 	    windowW: number;
 	    windowH: number;
 	    petX: number;
@@ -204,7 +203,6 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.panelOpen = source["panelOpen"];
 	        this.windowW = source["windowW"];
 	        this.windowH = source["windowH"];
 	        this.petX = source["petX"];
@@ -317,8 +315,6 @@ export namespace main {
 	}
 	export class State {
 	    config: store.Config;
-	    todos: store.Todo[];
-	    stats: store.Stats;
 	    petImageUrl: string;
 	    hasCustomImage: boolean;
 	    dataDir: string;
@@ -326,6 +322,7 @@ export namespace main {
 	    now: string;
 	    hotkeys: desktop.HotkeyView;
 	    petVisible: boolean;
+	    todoBadge: store.Stats;
 	    warnings?: string[];
 	
 	    static createFrom(source: any = {}) {
@@ -335,8 +332,6 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.config = this.convertValues(source["config"], store.Config);
-	        this.todos = this.convertValues(source["todos"], store.Todo);
-	        this.stats = this.convertValues(source["stats"], store.Stats);
 	        this.petImageUrl = source["petImageUrl"];
 	        this.hasCustomImage = source["hasCustomImage"];
 	        this.dataDir = source["dataDir"];
@@ -344,6 +339,7 @@ export namespace main {
 	        this.now = source["now"];
 	        this.hotkeys = this.convertValues(source["hotkeys"], desktop.HotkeyView);
 	        this.petVisible = source["petVisible"];
+	        this.todoBadge = this.convertValues(source["todoBadge"], store.Stats);
 	        this.warnings = source["warnings"];
 	    }
 	
@@ -364,24 +360,6 @@ export namespace main {
 		    }
 		    return a;
 		}
-	}
-	export class TodoInput {
-	    id: string;
-	    title: string;
-	    notes: string;
-	    due: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new TodoInput(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.title = source["title"];
-	        this.notes = source["notes"];
-	        this.due = source["due"];
-	    }
 	}
 
 }
@@ -508,51 +486,6 @@ export namespace store {
 	        this.overdue = source["overdue"];
 	        this.dueSoon = source["dueSoon"];
 	    }
-	}
-	export class Todo {
-	    id: string;
-	    title: string;
-	    notes?: string;
-	    // Go type: time
-	    due?: any;
-	    done: boolean;
-	    // Go type: time
-	    createdAt: any;
-	    // Go type: time
-	    doneAt?: any;
-	
-	    static createFrom(source: any = {}) {
-	        return new Todo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.title = source["title"];
-	        this.notes = source["notes"];
-	        this.due = this.convertValues(source["due"], null);
-	        this.done = source["done"];
-	        this.createdAt = this.convertValues(source["createdAt"], null);
-	        this.doneAt = this.convertValues(source["doneAt"], null);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 
 }

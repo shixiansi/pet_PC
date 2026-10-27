@@ -86,20 +86,20 @@ ${markup}
   // (T113 compares the two as sets, so this is the single place it is written
   // down twice).
   const methods = [
-    'AddTodo', 'ChoosePetImage', 'ClearDone', 'ClosePluginSurface',
-    'DebugLog', 'DeleteTodo', 'DismissBubble', 'DragTo',
+    'ChoosePetImage', 'ClosePluginSurface',
+    'DebugLog', 'DismissBubble', 'DragTo',
     'EndDrag', 'GetLayout', 'GetState', 'HidePet',
-    'HidePetForUser', 'OpenChat', 'OpenChatPluginSurface', 'OpenPetMenu', 'OpenPluginMarket',
-    'OpenPluginSurface', 'OpenTodoPanelFromBubble', 'OpenTodoPanelFromChat', 'SetPluginSurfaceBlocks',
+    'HidePetForUser', 'OpenChatPluginSurface', 'OpenPetMenu', 'OpenPluginMarket',
+    'OpenPluginSurface', 'OpenTodoFromBubble', 'SetPluginSurfaceBlocks',
     'PetImageURL', 'PluginMarketCandidates',
     'PluginMarketPath', 'PluginRequest', 'PluginsInstalled',
     'Quit', 'Ready', 'RemindNow', 'ResetPetImage',
     'ResetToDefaultPosition',
     'SaveHotkeySettings', 'SaveReminderSettings', 'SetAutostart', 'SetBubbleHover',
-    'SetPanelOpen', 'SetReminderEnabled', 'SetScale',
+    'SetReminderEnabled', 'SetScale',
     'SetSnapToEdge', 'ShowPet', 'ShowPetForUser',
     'SnapNow', 'StartDrag',
-    'TogglePanel', 'ToggleTodo', 'UpdateTodo',
+
     'WindowReady',
   ];
   const app = {};
@@ -412,12 +412,7 @@ const checksJs = `
     // The three occupants of the slot beside the pet are mutually exclusive, and
     // the fake has to model that or the exclusion checks pass vacuously. The panel
     // is the one that yields to both of the others.
-    TogglePanel: () => { panelOpen = !panelOpen; if (panelOpen) { currentSurface = null; currentBubble = null; } return layout(panelOpen, currentBubble, currentSurface); },
-    SetPanelOpen: (open) => { panelOpen = open; if (open) { currentSurface = null; currentBubble = null; } return layout(open, currentBubble, currentSurface); },
-    // The conversation is a tab inside the panel, so OpenChat opens the panel and
-    // the frontend switches the tab from the event.
-    OpenChat: () => { panelOpen = true; currentSurface = null; currentBubble = null; return layout(true); },
-    OpenTodoPanelFromChat: () => { panelOpen = true; currentSurface = null; currentBubble = null; return layout(true); },
+
     // Nothing refuses a dismissal any more: the two bubbles the host used to protect
     // were the summary and plan prompts, and both were the host timer's questions. A
     // reminder and the menu card are dismissable, so the fake dismisses whatever is up.
@@ -643,9 +638,14 @@ const checksJs = `
     ok('the app booted and asked to be revealed', booted, 'Ready was never called');
     ok('boot raised no errors', window.__errors.length === 0, window.__errors.join(' | '));
 
-    // Grab the surfaces once: they are referenced throughout.
-    const panelEl = document.getElementById('panel');
-    const chatTab = document.getElementById('tab-chat');
+    // Grab the surface mount once: it is referenced throughout.
+    //
+    // The panel and its 对话 tab used to be grabbed here too. Both are gone from the markup
+    // (openspec/changes/todo-pomodoro-as-plugins, stage 3), so document.getElementById
+    // returns null and the next .classList read is a TypeError - which is exactly how the
+    // harness announced it on the first run after the panel was deleted. The scenarios below
+    // were rewritten around what replaced them: the pet's gesture, the floating surface, and
+    // the headless frames.
     const surfaceMount = document.getElementById('plugin-surface');
 
     // Reset the click bookkeeping between scenarios.
@@ -657,24 +657,24 @@ const checksJs = `
     // a harness race.
     const settle = () => sleep(500);
 
-    // --- 1. a click on the pet toggles the panel, at once -------------------
+    // --- 1. a click on the pet does nothing, and asks for nothing -----------
     //
-    // It used to act only after the system's double-click interval, so that a
-    // second click could open the conversation without the panel first flashing
-    // open and shut. The conversation is a hover button now, so nothing competes
-    // for the second click and the wait is gone: a click has to take effect on the
-    // spot, not 200ms later.
-    panelOpen = false;
+    // It used to toggle the panel, then (briefly) to be deferred for the system's
+    // double-click interval. Both destinations are plugin surfaces now, reached from the pet's
+    // right-click menu and from the hover button, and there is no panel left to toggle.
+    //
+    // The assertion that MATTERS is the negative one: a bare click must not reach for either
+    // surface. A click that opened one of them silently would be a gesture nobody documented,
+    // and it would be indistinguishable from "the pet is broken" the moment the user tried to
+    // use the surface it took over.
+    window.__calls.length = 0;
     await settle();
     pressPet(1);
-    ok('single click toggles the panel at once', panelOpen === true, 'panel state ' + panelOpen);
-    await sleep(100);
-    ok('the panel stayed open', panelOpen === true, 'panel state ' + panelOpen);
-    // A click on the pet must not reach for the conversation plugin: the two
-    // gestures take different targets, and a click that opened the surface would
-    // make the panel impossible to open at all.
-    ok('single click never asks for the plugin surface',
-      calls('OpenChatPluginSurface').length === 0, 'OpenChatPluginSurface was called');
+    await sleep(150);
+    ok('a single click on the pet opens no panel and no surface',
+      calls('OpenChatPluginSurface').length === 0 && calls('OpenPluginSurface').length === 0,
+      'OpenChatPluginSurface=' + calls('OpenChatPluginSurface').length +
+        ' OpenPluginSurface=' + calls('OpenPluginSurface').length);
 
     // --- 2. the conversation button asks the plugin for its surface ----------
     //
@@ -712,10 +712,7 @@ const checksJs = `
     ok('the conversation button asks the plugin for its surface',
       calls('OpenChatPluginSurface').length === 1,
       'OpenChatPluginSurface calls: ' + calls('OpenChatPluginSurface').length);
-    ok('the button does not open the panel tab', calls('OpenChat').length === 0, 'OpenChat calls: ' + calls('OpenChat').length);
-    ok('the button does not toggle the panel', calls('TogglePanel').length === 0, 'TogglePanel calls: ' + calls('TogglePanel').length);
     await sleep(300);
-    ok('the button does not toggle the panel afterwards', calls('TogglePanel').length === 0, 'TogglePanel calls: ' + calls('TogglePanel').length);
 
     // --- 2b. every declared rectangle gets a frame at its exact pixels -------
     //
@@ -810,484 +807,73 @@ const checksJs = `
     window.__clearBubble();
     await sleep(60);
 
-    // --- 3. the 对话 tab is a MOUNT POINT, and the slot resolves from the list
+    // --- 3..7. (deleted) the panel, its two tabs and the slot frame ----------
     //
-    // The host has no conversation of its own any more: the tab body holds one
-    // element, and which plugin's interface lands in it is decided from the
-    // installed list. That makes the resolution RULE the thing worth asserting -
-    // three rows are installed here and only one of them may win.
+    // Five scenarios lived here and every one drove #panel: the 对话 tab as a mount point,
+    // the slot resolution against four rows of the installed list, the host owning no
+    // conversation chrome, the header's control-center button, the panel's box, the layer
+    // that scrolled inside it, and Escape closing it.
     //
-    // The panel is opened with the pet's own single click and then the tab is
-    // clicked, which is the only way in: the conversation button opens the plugin's
-    // floating surface, not the panel, and the tab strip does not open the panel
-    // by itself.
-    if (panelEl.classList.contains('hidden')) {
-      await settle();
-      pressPet(1);
-      await sleep(350);
-    }
-    document.querySelector('.tab[data-tab="chat"]').dispatchEvent(new Event('click', { bubbles: true }));
-    await sleep(200);
-    ok('the panel is open', !panelEl.classList.contains('hidden'), 'the panel is hidden');
-    ok('the conversation tab is showing', !chatTab.classList.contains('hidden'), 'the chat tab is hidden');
-    ok('the todo tab is hidden', document.getElementById('tab-todos').classList.contains('hidden'), 'the todo tab is visible');
-    ok('the panel box matches the layout Go sent',
-      panelEl.style.width === '380px' && panelEl.style.height === '520px',
-      'panel box is ' + panelEl.style.width + 'x' + panelEl.style.height);
-    ok('the panel is clipped, so nothing can spill onto the desktop',
-      getComputedStyle(panelEl).overflow === 'hidden', 'panel overflow is ' + getComputedStyle(panelEl).overflow);
+    // The panel is gone (openspec/changes/todo-pomodoro-as-plugins, stage 3), and each
+    // guarantee has a home that can still fail:
+    //
+    //   - the slot's resolution rule: it is now the SURFACE's rule, and sections 18+ below
+    //     assert it against the frames themselves (which plugin gets a frame, from which
+    //     asset URL, sandboxed to allow-scripts, refusing a disabled plugin);
+    //   - "the plugin is reachable, with nothing over it": the surface's own hit test, also
+    //     below - the panel used to cover it, and now nothing does;
+    //   - "the way into the control center": the pet's own menu cells plus the tray item,
+    //     pinned by .dev/check-frontend.cjs (a browser cannot click a tray icon);
+    //   - "the panel's box comes only from the layout": the surface geometry, below.
+    //
+    // What is asserted HERE is the absence, because a half-restored panel is the failure
+    // mode that still matters: a tab strip with one tab, a #chat-slot nothing mounts into,
+    // or an element at a coordinate the region does not cover.
+    ok('the page has no panel, no tab strip and no chat slot',
+      !document.getElementById('panel') && !document.querySelector('.tab') &&
+        !document.getElementById('chat-slot') && !document.getElementById('close-panel'),
+      'a panel element survived the panel');
+    ok('the pet does not ask for a panel on any gesture',
+      !window.__methods.some((m) => /Panel/.test(m)),
+      'a panel binding is still exported: ' +
+        window.__methods.filter((m) => /Panel/.test(m)).join(','));
 
-    const slotEl = document.getElementById('chat-slot');
-    const slotFrames = () => [...slotEl.querySelectorAll('iframe')];
-    ok('the slot mounted the enabled plugin that claims the 对话 slot',
-      slotFrames().length === 1 &&
-        slotFrames()[0].dataset.pluginId === 'com.example.chat' &&
-        slotFrames()[0].dataset.slot === 'chat',
-      'frames: ' + slotFrames().map((f) => f.dataset.pluginId + '/' + f.dataset.slot).join(','));
-    // The sandbox is the security boundary, so it is asserted as an exact string
-    // on the SLOT frame too: allow-same-origin is what would hand a plugin the
-    // host page's DOM, and it must never appear on any frame.
-    ok('the slot frame is sandboxed to allow-scripts alone',
-      slotFrames().length === 1 && slotFrames()[0].getAttribute('sandbox') === 'allow-scripts' &&
-        slotFrames()[0].getAttribute('allow') === null,
-      'sandbox=' + (slotFrames()[0] && slotFrames()[0].getAttribute('sandbox')));
-    ok('the slot frame is loaded from the host asset route',
-      slotFrames().length === 1 &&
-        slotFrames()[0].getAttribute('src') === '/plugin-asset/com.example.chat/panel.html',
-      'src=' + (slotFrames()[0] && slotFrames()[0].getAttribute('src')));
-    // The slot's own box was sized by the stylesheet before any plugin existed,
-    // and mounting must not change it: the panel's rectangle - which is what the
-    // native window region is cut to - is the thing this protects.
-    ok('mounting a plugin did not resize the slot',
-      getComputedStyle(slotEl).overflow === 'hidden' || slotEl.clientHeight > 0,
-      'slot box: ' + slotEl.clientWidth + 'x' + slotEl.clientHeight);
-    ok('the hint is gone once a plugin fills the slot',
-      !slotEl.classList.contains('chat-slot-empty') &&
-        !(slotEl.textContent || '').includes('对话插件还没装好'),
-      'the empty hint is still in the slot: ' + slotEl.textContent);
-
-    // --- 3b. the slot resolution follows the installed list, live -------------
+    // The helpers the HEADLESS and SURFACE scenarios below share, defined here because the
+    // panel block that used to define them is gone.
     //
-    // The market program can install, remove or switch off the chat plugin while
-    // the pet is running, and the slot is re-resolved on every arrival at the tab
-    // for exactly that reason. Each of the three ways the slot can lose its owner
-    // is exercised here, because a resolution that only looked at "is anything
-    // installed" would pass the first check and fail all three.
+    // resolveWith swaps what PluginsInstalled() answers and then WAITS for the page to pick it
+    // up. It used to do that by clicking the 对话 tab, because a tab click was what re-read the
+    // list; the panel's watcher did the same thing on a timer, and the tab click only existed
+    // to skip that wait.
+    //
+    // With the panel gone, the timer is the ONLY path - which is exactly the property the old
+    // case (h) below was added for, and it is now the only case there is. So this waits past
+    // one period instead of clicking anything: touching nothing is what a market process
+    // installing a plugin actually looks like from the page's side.
+    const allRows = window.__installed.slice();
+    const INSTALLED_WATCH_MS = 1500;
     const resolveWith = async (rows) => {
       window.__installed = rows;
-      document.querySelector('.tab[data-tab="todos"]').dispatchEvent(new Event('click', { bubbles: true }));
-      await sleep(40);
-      document.querySelector('.tab[data-tab="chat"]').dispatchEvent(new Event('click', { bubbles: true }));
-      await sleep(150);
+      await sleep(INSTALLED_WATCH_MS + 500);
     };
-    const allRows = window.__installed.slice();
-
-    // (a) The claiming plugin switched off: the slot must fall back to the hint
-    // rather than keep a switched-off plugin's interface on screen.
-    await resolveWith(allRows.map((p) => (p.id === 'com.example.chat' ? { ...p, enabled: false } : p)));    // The hint may be the GENERIC sentence or the specific diagnosis - what this
-    // asserts is that a hint is shown at all, and that no frame is mounted. The
-    // diagnosis names the actual reason when the installed rows can explain it,
-    // which is strictly more useful than the generic sentence and must not be
-    // mistaken for the slot silently succeeding.
-    ok('a switched-off chat plugin loses the slot',
-      slotFrames().length === 0 && slotEl.classList.contains('chat-slot-empty') &&
-        (slotEl.textContent || '').length > 0,
-      'frames=' + slotFrames().length + ' hint=' + slotEl.classList.contains('chat-slot-empty') +
-        ' text=' + slotEl.textContent);
-
-    // (b) The grant revoked: a plugin that may not draw outside the pet's own box
-    // must not fill the tab, or the slot would be a way around the prompt.
-    await resolveWith(allRows.map((p) => (p.id === 'com.example.chat' ? { ...p, granted: ['llm.chat'] } : p)));
-    ok('a chat plugin without the surface grant loses the slot',
-      slotFrames().length === 0 && slotEl.classList.contains('chat-slot-empty'),
-      'frames=' + slotFrames().length);
-
-    // (c) Uninstalled: nothing left to mount.
-    await resolveWith(allRows.filter((p) => p.id !== 'com.example.chat'));
-    // The row that claimed the slot is gone, but com.example.other is still enabled
-    // and claims no slot - so the DIAGNOSIS fires here and names it as an old
-    // version rather than falling back to the generic sentence. Both are correct;
-    // what must hold is that nothing is mounted and something is said.
-    ok('an uninstalled chat plugin leaves the slot empty',
-      slotFrames().length === 0 && (slotEl.textContent || '').length > 0,
-      'text: ' + slotEl.textContent);
-
-    // (d) A plugin that is enabled and granted but claims NO slot must not be
-    // mounted: the row exists, and only the manifest's own declaration says
-    // whether it belongs in the 对话 tab.
-    await resolveWith([allRows.find((p) => p.id === 'com.example.other')]);
-    ok('an enabled plugin that claims no slot is not mounted',
-      slotFrames().length === 0,
-      'frames=' + slotFrames().length);
-
-    // And back to the full list, so the rest of the run starts from the state the
-    // fake was built with.
+    // Put the full row set back so the scenarios below start from what the fake was built
+    // with: the checks above deliberately remove plugins, and a scenario that started from
+    // whatever they left would assert against a state the product never produces.
     await resolveWith(allRows);
-    ok('the chat plugin takes the slot back when it is installed and enabled again',
-      slotFrames().length === 1 && slotFrames()[0].dataset.pluginId === 'com.example.chat',
-      'frames: ' + slotFrames().map((f) => f.dataset.pluginId).join(','));
-
-    // (e) The plugin's interface must be REACHABLE - nothing may sit on top of it.
+    // --- 8. Escape unwinds the ONE thing it can still unwind ------------------
     //
-    // The user's report was that the plugin renders inside the panel but none of its
-    // controls respond, which is what a transparent overlay swallowing the clicks
-    // looks like. The check is the browser's own hit test: ask what element is at
-    // the centre of the slot's box, and require that it is the plugin's frame (or
-    // something inside it - the frame is a separate document, so the browser reports
-    // the IFRAME element itself from the parent).
+    // It used to be a chain: an edit, then a bubble, then the panel. The edit and the panel
+    // both belonged to the panel, so a bubble is the whole chain now - and Escape on a page
+    // with nothing up must do NOTHING rather than reach for a dismissal that has no target.
     //
-    // This is asserted here because it is the ONE property that separates "the
-    // plugin is drawn" from "the plugin can be used", and nothing else in this suite
-    // covers it: every other check is about markup, geometry or the protocol.
-    const slotBox = slotEl.getBoundingClientRect();
-    const hit = document.elementFromPoint(
-      slotBox.left + slotBox.width / 2,
-      slotBox.top + slotBox.height / 2,
-    );
-    const hitChain = [];
-    for (let el = hit; el; el = el.parentElement) {
-      hitChain.push(el.id ? '#' + el.id : el.tagName.toLowerCase() +
-        (el.className && typeof el.className === 'string' ? '.' + el.className.split(' ')[0] : ''));
-    }
-    ok('the plugin slot is reachable, with nothing covering it',
-      hit === slotFrames()[0],
-      'the element at the slot centre is ' + hitChain.join(' < ') +
-        ' (want the plugin iframe)');
-
-    // (f) The 对话 TAB itself comes and goes with the plugin.
-    //
-    // The pet has no conversation of its own - the tab is a mount point - so with
-    // no plugin to fill it the tab would open onto an explanation and nothing
-    // else. The button is therefore hidden, and the panel is moved off the tab if
-    // it was showing it: a hidden tab whose body is still on screen leaves the tab
-    // strip claiming 待办 while the conversation's box occupies the panel.
-    const chatTabBtn = document.getElementById('tab-chat-btn');
-    ok('the conversation tab is offered while a plugin fills it',
-      !!chatTabBtn && !chatTabBtn.classList.contains('hidden'),
-      'the tab button is hidden although a plugin owns the slot');
-
-    // Take the plugin away while the conversation is the ACTIVE tab, which is the
-    // case that has to move the panel.
-    document.querySelector('.tab[data-tab="chat"]').dispatchEvent(new Event('click', { bubbles: true }));
-    await sleep(120);
-    ok('the conversation tab is active before the plugin goes away',
-      chatTabBtn.classList.contains('active') && !chatTab.classList.contains('hidden'),
-      'the tab did not become active');
-
-    await resolveWith(allRows.filter((p) => p.id !== 'com.example.chat'));
-    // A row that claims no slot is still installed, so the DIAGNOSIS renders; what
-    // matters here is the tab, not the sentence.
-    await sleep(160);
-    ok('the conversation tab disappears with the plugin',
-      chatTabBtn.classList.contains('hidden'),
-      'the tab button is still offered although no plugin fills it');
-    ok('the panel moves off the conversation tab when it goes away',
-      document.getElementById('tab-todos').classList.contains('hidden') === false &&
-        chatTab.classList.contains('hidden'),
-      'the panel stayed on the conversation tab: todos hidden=' +
-        document.getElementById('tab-todos').classList.contains('hidden') +
-        ' chat hidden=' + chatTab.classList.contains('hidden'));
-    ok('the tab strip shows the todo tab as the active one',
-      document.querySelector('.tab[data-tab="todos"]').classList.contains('active'),
-      'no tab is marked active after the conversation tab went away');
-
-    // A request from GO to show the conversation must not reopen it. Go resolves
-    // the slot on its own, so this can arrive before the page's next snapshot.
-    window.__emit('pet:chat-open', { open: true });
-    await sleep(120);
-    ok('a request from the host cannot reopen the removed conversation tab',
-      document.getElementById('tab-todos').classList.contains('hidden') === false,
-      'pet:chat-open put the panel back on a tab that no longer exists');
-
-    // Restore the plugin and the active tab, so the rest of the run starts from the
-    // state the fake was built with.
-    await resolveWith(allRows);
-    await sleep(120);
-    document.querySelector('.tab[data-tab="todos"]').dispatchEvent(new Event('click', { bubbles: true }));
-    await sleep(80);
-
-    // (g) An UPDATED plugin gets a NEW document, and an unchanged one does not.
-    //
-    // An update in the market keeps the plugin id and replaces the files behind it,
-    // so the id alone cannot tell "same plugin, re-laid out" from "same plugin,
-    // updated". The version is what distinguishes them, and both halves matter:
-    // reusing on an update leaves the old interface running while the market says
-    // it was updated, and remounting on every snapshot would restart the plugin's
-    // conversation each time any state changed.
-    {
-      const before = slotFrames()[0];
-      ok('the slot frame records the version it was loaded from',
-        !!before && before.dataset.pluginVersion === '1.1.0',
-        'frame version = ' + (before && before.dataset.pluginVersion));
-
-      // Same rows, arriving again: the frame must be REUSED. This is the case that
-      // protects an in-progress conversation from being thrown away on every state
-      // push.
-      await resolveWith(allRows);
-      await sleep(120);
-      ok('an unchanged plugin keeps its running document',
-        slotFrames()[0] === before,
-        'the frame was rebuilt even though the plugin did not change');
-
-      // The same id at a new version: the frame must be REPLACED.
-      const bumped = allRows.map((p) => (
-        p.id === 'com.example.chat' ? { ...p, version: '1.2.0' } : p
-      ));
-      await resolveWith(bumped);
-      await sleep(120);
-      const after = slotFrames();
-      ok('an updated plugin replaces its running document',
-        after.length === 1 && after[0] !== before && after[0].dataset.pluginVersion === '1.2.0',
-        'frames=' + after.length +
-          ' same=' + (after[0] === before) +
-          ' version=' + (after[0] && after[0].dataset.pluginVersion));
-
-      // Back to the original version for the rest of the run.
-      await resolveWith(allRows);
-      await sleep(120);
-      ok('the slot is back on the installed version',
-        slotFrames().length === 1 && slotFrames()[0].dataset.pluginVersion === '1.1.0',
-        'version=' + (slotFrames()[0] && slotFrames()[0].dataset.pluginVersion));
-    }
-
-    // (h) The tab hides with NO CLICK AT ALL when the plugin goes away.
-    //
-    // This is the user's report: 「取消点击，面板上的对话tab没有及时的隐藏」. Every
-    // other case here reaches the slot through resolveWith, which CLICKS the tab
-    // strip - and that click is what used to re-read the installed list, so those
-    // cases passed while the real behaviour was broken.
-    //
-    // The marketplace is a separate process, so the only honest way to model it is
-    // to change what the binding answers and then WAIT, touching nothing. The period
-    // is 1.5s, so this waits past it with margin.
-    {
-      ok('the conversation tab is showing before the plugin is disabled',
-        !chatTabBtn.classList.contains('hidden'),
-        'the tab is already hidden, so this case would be vacuous');
-
-      // What the market does when it disables the plugin. Nothing is dispatched.
-      window.__installed = allRows.map((p) => (
-        p.id === 'com.example.chat' ? { ...p, enabled: false } : p
-      ));
-      await sleep(1900);
-
-      ok('the conversation tab hides on its own when the plugin is disabled',
-        chatTabBtn.classList.contains('hidden'),
-        'the tab is still offered 1.9s after the plugin was disabled, with no click');
-      ok('the disabled plugin has no document left in the slot',
-        slotFrames().length === 0,
-        'frames=' + slotFrames().length);
-
-      // And it comes back by itself, with no click, when the plugin is re-enabled.
-      window.__installed = allRows;
-      await sleep(1900);
-      ok('the conversation tab comes back on its own when the plugin is re-enabled',
-        !chatTabBtn.classList.contains('hidden'),
-        'the tab is still hidden 1.9s after the plugin was re-enabled, with no click');
-      ok('the re-enabled plugin is mounted again',
-        slotFrames().length === 1,
-        'frames=' + slotFrames().length);
-    }
-
-    // --- 4. the host no longer offers any conversation control ---------------
-    //
-    // This is the point of the change, so it is asserted STRUCTURALLY rather than
-    // by "the old id is absent from the script": the tab body must contain the
-    // slot and nothing else, and the host page must own no transcript, no input
-    // and no send button anywhere. A leftover control would be a second, drifting
-    // copy of the plugin's own interface.
-    ok('the conversation tab body holds the slot and nothing else',
-      chatTab.children.length === 1 && chatTab.firstElementChild === slotEl,
-      'children: ' + [...chatTab.children].map((c) => c.id || c.tagName).join(','));
-    // The host owns no conversation markup anywhere in the page. This is phrased
-    // as a WHITELIST over the chat- class family rather than a list of the old
-    // names: the slot is the only chat- thing the host may still draw, so anything
-    // else in that family is a leftover, including a control this change never
-    // thought to name.
-    const chatClasses = new Set();
-    document.querySelectorAll('[class]').forEach((el) => {
-      [...el.classList].forEach((c) => {
-        if (c.startsWith('chat-')) chatClasses.add(c);
-      });
-    });
-    ok('the host page draws no conversation chrome of its own',
-      [...chatClasses].every((c) => c === 'chat-slot' || c === 'chat-slot-empty'),
-      'unexpected chat- classes: ' + [...chatClasses].join(','));
-    // The plugin owns the conversation's data path, so the host must have no
-    // binding that drives one. Asserted as a whitelist of the names that may end
-    // in "Chat" plus a ban on the whole model-settings family, which is stronger
-    // than naming the removed ones: a binding that was merely left behind in Go
-    // under a name nobody listed here still fails.
-    const allowedChat = ['OpenChat', 'OpenChatPluginSurface', 'OpenTodoPanelFromChat'];
-    const chatBindings = window.__methods.filter((m) => /Chat/.test(m));
-    ok('the host exports no conversation bindings',
-      chatBindings.every((m) => allowedChat.includes(m)) &&
-        !window.__methods.some((m) => /LLM/.test(m)),
-      'unexpected chat bindings: ' +
-        chatBindings.filter((m) => !allowedChat.includes(m)).join(','));
-    // The 待办 jump is the ONE conversation action the host still owes the plugin:
-    // a plugin cannot switch the host's tab, so it asks. The binding is asserted
-    // by name because that is the contract the plugin's own interface codes to.
-    ok('the 待办 jump is still available to the conversation plugin',
-      window.__methods.includes('OpenTodoPanelFromChat'),
-      'OpenTodoPanelFromChat is missing from the export set');
-
-    // --- 5. the way into the control center is a BUTTON in the panel ---------
-    //
-    // History, because it is the reason this check exists in this shape: the entry point was
-    // a button on the 设置 tab; that tab was retired (ui-rebuild 阶段 3) and the entry became
-    // a tray-menu item only - which is invisible unless you already know the tray icon, and
-    // which a page harness cannot click. So it came back into the page, as a gear in the
-    // panel header, and this is the behavioural half of that: one click, one call, no
-    // arguments, and the panel steps aside so the window it opened is not covered.
-    if (document.getElementById('panel').classList.contains('hidden')) {
-      pressPet(1);
-      await settle();
-    }
-    const settingsBtn = document.getElementById('open-settings');
-    ok('the panel header carries a way into the control center', !!settingsBtn, 'no #open-settings button');
+    // The call log is cleared first: an earlier scenario's own DismissBubble (the pet menu
+    // closing on a second right-click, for instance) would otherwise read as "Escape
+    // dismissed a bubble".
     window.__calls.length = 0;
-    settingsBtn.dispatchEvent(new Event('click', { bubbles: true }));
-    await waitFor('OpenPluginMarket', () => calls('OpenPluginMarket').length === 1);
-    await sleep(120);
-    ok('clicking it asks the host to open the control center exactly once',
-      calls('OpenPluginMarket').length === 1,
-      'OpenPluginMarket calls: ' + calls('OpenPluginMarket').length);
-    ok('the button passes no arguments',
-      last('OpenPluginMarket')?.args.length === 0,
-      'args: ' + JSON.stringify(last('OpenPluginMarket')?.args));
-    ok('the panel gets out of the way of the window it opened',
-      document.getElementById('panel').classList.contains('hidden'),
-      'the panel stayed open under the new window');
-
-    // Right-click on the pet opens the pet's OWN menu: a grid of icon cells in the
-    // card the pet speaks in. It used to forward the gesture to the tray thread and
-    // pop the tray icon's native list, which is exactly what it looked like - the
-    // same grey column of system text from both gestures.
-    //
-    // What is checked here is the page's half: the card is drawn from the layout Go
-    // returns, it is a grid of cells inside #bubble, and a second right-click closes
-    // it instead of asking again. The geometry (the crop, the fixed height) is Go's
-    // and is covered by app_pet_menu_test.go.
-    window.__calls.length = 0;
-    document.getElementById('pet')
-      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    await waitFor('OpenPetMenu', () => calls('OpenPetMenu').length === 1);
-    ok('right-clicking the pet asks the host for its menu',
-      calls('OpenPetMenu').length === 1,
-      'OpenPetMenu calls: ' + calls('OpenPetMenu').length);
-    const menuGrid = document.getElementById('bubble-menu');
-    ok('the menu is drawn as a grid inside the speech bubble card',
-      !!menuGrid && !menuGrid.classList.contains('hidden') && menuGrid.closest('#bubble') === document.getElementById('bubble'),
-      'grid hidden or outside the card');
-    ok('the menu has one cell per action, each with a word',
-      !!menuGrid && menuGrid.querySelectorAll('[data-menu]').length === 9 &&
-        [...menuGrid.querySelectorAll('[data-menu]')].every((c) => (c.textContent || '').trim().length > 0),
-      'cells: ' + (menuGrid ? menuGrid.querySelectorAll('[data-menu]').length : 'no grid'));
-    window.__calls.length = 0;
-    document.getElementById('pet')
-      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    await waitFor('DismissBubble', () => calls('DismissBubble').length === 1);
-    ok('a second right-click closes the menu instead of asking again',
-      calls('DismissBubble').length === 1 && calls('OpenPetMenu').length === 0,
-      'DismissBubble=' + calls('DismissBubble').length + ' OpenPetMenu=' + calls('OpenPetMenu').length);
-    // The card (not the grid) is what hides: the grid is a child of #bubble and
-    // goes with its parent. Asserting the parent is the honest check - the grid
-    // element keeps its own class until the next kind is rendered.
-    ok('the card went away with it',
-      document.getElementById('bubble').classList.contains('hidden'),
-      'the card is still drawn');
-    // Re-open for the sections below, which measure the panel - only if it is closed, so a
-    // handler that failed to close it does not become "the panel is closed twice".
-    if (document.getElementById('panel').classList.contains('hidden')) {
-      pressPet(1);
-      await settle();
-    }
-
-    // --- 6. the panel box comes only from the layout -------------------------
-    //
-    // Switching tabs must not move the panel: its rectangle comes from the layout
-    // Go reports, and the native window region is cut to that same rectangle. A tab
-    // that shifted it would put the drawn panel and the cropped region out of step,
-    // which shows up as a strip of desktop along one edge.
-    //
-    // The document's own scroll is pinned to zero first. Focusing a control makes
-    // the browser scroll its nearest scrollable ancestor to reveal it, and this page
-    // is overflow:hidden rather than unscrollable - so a focus from an earlier
-    // scenario can leave the document scrolled by a few pixels. That is a harness
-    // leftover, not the panel moving, and it would otherwise be measured here as a
-    // failure. The scroll offsets are reported on failure so a REAL shift is still
-    // distinguishable from one.
-    const scrollOffsets = () => 'docScroll=' + document.documentElement.scrollTop +
-      '/' + document.documentElement.scrollLeft + ' bodyScroll=' +
-      document.body.scrollTop + '/' + document.body.scrollLeft;
-    document.documentElement.scrollTop = 0;
-    document.documentElement.scrollLeft = 0;
-    document.body.scrollTop = 0;
-    document.body.scrollLeft = 0;
-    await sleep(30);
-    // Measured with offsetTop/offsetLeft, NOT getBoundingClientRect, and the
-    // difference is the whole reliability of this check. The property under test is
-    // "the panel's position comes from the layout and not from its contents" - a
-    // LAYOUT fact, which offset* reports directly. getBoundingClientRect reports the
-    // layout position MINUS the document's scroll, and this page is overflow:hidden
-    // rather than unscrollable, so a focus from any earlier scenario can leave the
-    // document scrolled by a few pixels and shift the rect without the panel having
-    // moved at all. That is a harness artefact, and it produced exactly one
-    // intermittent failure (top: 4 -> 0 with both scroll offsets already zero,
-    // i.e. the scroll changed BETWEEN the two reads because the tab click moved
-    // focus). Comparing offset* asks the question the check is actually about.
-    const boxOf = (el) => ({ top: el.offsetTop, left: el.offsetLeft, w: el.offsetWidth, h: el.offsetHeight });
-    const boxBefore = boxOf(panelEl);
-    document.querySelector('.tab[data-tab="todos"]').dispatchEvent(new Event('click', { bubbles: true }));
-    await sleep(30);
-    const boxAfter = boxOf(panelEl);
-    ok('the panel box is identical after switching tabs',
-      boxBefore.w === boxAfter.w && boxBefore.h === boxAfter.h &&
-      boxBefore.left === boxAfter.left && boxBefore.top === boxAfter.top,
-      JSON.stringify(boxBefore) + ' -> ' + JSON.stringify(boxAfter) + ' ' + scrollOffsets());
-
-    // --- 7. the layer that scrolls is inside the PANEL, not the panel itself -
-    // This is the structural guarantee that a long list cannot change the panel's
-    // rectangle, which is what the native window region is cut to. The
-    // conversation used to be the case that proved it; now it is the todo list,
-    // which is the same shape of content - an unbounded list inside a fixed box.
-    const panelBoxBefore = panelEl.getBoundingClientRect();
-    const listEl = document.getElementById('todo-list');
-    for (let i = 0; i < 60; i++) {
-      listEl.append(document.createElement('li'));
-    }
-    await sleep(30);
-    const panelBoxTall = panelEl.getBoundingClientRect();
-    ok('the panel box is unchanged by a very long list',
-      panelBoxTall.width === panelBoxBefore.width && panelBoxTall.height === panelBoxBefore.height,
-      JSON.stringify(panelBoxBefore) + ' -> ' + JSON.stringify(panelBoxTall));
-    ok('the list scrolls internally rather than growing the panel',
-      listEl.scrollHeight > listEl.clientHeight,
-      'scrollHeight ' + listEl.scrollHeight + ' vs clientHeight ' + listEl.clientHeight);
-    // The invariant is that the SCROLL CONTAINER's own box stays inside the panel
-    // (which is what the native window region is cut to). The content inside it is
-    // expected to extend past the container - that is what makes it scroll - and
-    // the panel's overflow:hidden is what clips it.
-    const panelRect = panelEl.getBoundingClientRect();
-    const listRect = listEl.getBoundingClientRect();
-    ok('the scroll container stays inside the panel box',
-      listRect.bottom <= panelRect.bottom + 1 && listRect.top >= panelRect.top - 1,
-      'list ' + JSON.stringify(listRect) + ' vs panel ' + JSON.stringify(panelRect));
-
-    // --- 8. Escape unwinds the innermost thing first -------------------------
-    // Inside the panel with no bubble up, that is the panel itself.
-    //
-    // The call log is cleared first: the assertion below is about THIS gesture, and
-    // an earlier scenario's own DismissBubble (the pet menu closing on a second
-    // right-click, for instance) would otherwise read as "Escape dismissed a bubble".
-    window.__calls.length = 0;
-    document.querySelector('.tab[data-tab="chat"]').dispatchEvent(new Event('click', { bubbles: true }));
-    await sleep(30);
+    await settle();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await sleep(60);
-    ok('Escape closed the panel from the conversation tab', panelEl.classList.contains('hidden'), 'the panel is still up');
-    ok('Escape used the panel path, not the reminder dismissal',
+    ok('Escape with nothing on screen does not dismiss anything',
       calls('DismissBubble').length === 0,
       'DismissBubble calls: ' + calls('DismissBubble').length);
 
@@ -1323,12 +909,9 @@ const checksJs = `
     // layout plus targeted events). That guarantee is pinned statically instead - see
     // .dev/check-frontend.cjs ("a refused registration still reaches the user"), which
     // asserts both the toast in main.js and the Problems field it reads.
-    ok('the panel has no settings tab and no shortcut switch any more',
-      !document.querySelector('.tab[data-tab="settings"]') &&
-        !document.querySelector('.tab[data-tab="records"]') &&
-        !document.getElementById('hotkey-enabled') &&
-        !document.getElementById('rem-enabled'),
-      'settings UI came back into the panel');
+    ok('the page has no settings tab and no shortcut switch',
+      !document.getElementById('hotkey-enabled') && !document.getElementById('rem-enabled'),
+      'settings UI came back into the pet');
     // The 记录 archive used to be asserted HERE as well, because it had moved into the
     // 待办 tab rather than leaving. It has left now: the archive was the host timer's,
     // and the pomodoro plugin keeps its own sessions in its own surface. So the
@@ -1407,22 +990,34 @@ const checksJs = `
     // fills. This is the other half of the same contract: a handshake that got
     // the kind right for one and wrong for the other is the failure this catches.
     //
-    // The slot is taken away and handed back first, because a handshake happens
-    // ONCE per frame and the frame mounted back in scenario 3 has already had its.
-    // Observing that same frame would read an empty log and pass for the wrong
-    // reason - and it is also the only way to exercise the panel handshake at all,
-    // since nothing else re-creates the slot frame.
-    await resolveWith(allRows.filter((p) => p.id !== 'com.example.chat'));
+    // The surface's handshake names what it is, and the PANEL kind is gone with the panel.
+    //
+    // This used to assert the panel handshake - kind 'panel' with slot 'chat' - and then
+    // it asserted the floating surface's own handshake. The frame is taken away and handed
+    // back first, because a handshake happens ONCE per frame and one that is merely reused
+    // never says anything - reading an empty log would pass for the wrong reason.
+    // The fixture's five-rectangle surface belongs to com.example.beta (see SURFACE_RECTS), so
+    // that is the plugin whose handshake is asserted here. It used to be com.example.chat's
+    // PANEL slot frame; the chat plugin is a surface now too, but the synthetic five-block
+    // geometry above is the fixture that exists to exercise "one init per frame", so its own
+    // handshake is the one worth reading.
     await probeReset();
-    await resolveWith(allRows);
-    const slotProbe = (await probeReceivedWhen(
-      (e) => e.filter((m) => m && m.type === 'init' && m.pluginId === 'com.example.chat').length >= 1,
-      6000,
-    )).filter((m) => m && m.type === 'init' && m.pluginId === 'com.example.chat');
-    ok('the slot frame is told it is a panel filling the chat slot',
-      slotProbe.length >= 1 && slotProbe[0].surface &&
-        slotProbe[0].surface.kind === 'panel' && slotProbe[0].surface.slot === 'chat',
-      JSON.stringify(slotProbe.map((m) => m.surface)));
+    // Taken down first, then put back: the five frames from 2b are REUSED when the same
+    // surface is re-applied (that is the point of the version check), and a reused frame never
+    // says anything again. Clearing the surface destroys them, so the ones mounted here are
+    // fresh documents with a handshake each.
+    window.__emit('pet:layout', layout(false, null, null));
+    await sleep(150);
+    window.__emit('pet:layout', layout(false, null, surfaceView()));
+    const surfaceProbe = (await probeReceivedWhen(
+      (e) => e.filter((m) => m && m.type === 'init' && m.pluginId === 'com.example.beta').length >= 5,
+      8000,
+    )).filter((m) => m && m.type === 'init' && m.pluginId === 'com.example.beta');
+    ok('every surface frame is told it is a floating surface, not a panel',
+      surfaceProbe.length >= 5 &&
+        surfaceProbe.every((m) => m.surface && m.surface.kind === 'surface' &&
+          !('slot' in m.surface)),
+      JSON.stringify(surfaceProbe.map((m) => m.surface)));
 
     // (c) An event for a plugin with frames on screen reaches ALL of them; one
     // for a plugin with nothing on screen is dropped rather than broadcast. The
@@ -1608,54 +1203,53 @@ const checksJs = `
     // and that each got its OWN init - so a plugin with two appearances can still tell
     // them apart by the slot name.
     //
-    // A dedicated row is used rather than reusing com.example.chat, because the slot is
-    // first-declarer-wins and mutating that row would disturb every slot check above it.
+    // ONE PLUGIN, TWO FRAMES - and the SLOT half of it is gone.
     //
-    // pet.surface is granted as well as events because the slot resolver requires it
-    // (slotPlugin ANDs panelSlot === 'chat' with a granted pet.surface). That pairing
-    // is surprising for a plugin that declares no floating rectangle, and a fixture that
-    // omitted it would silently test "no slot owner" instead of the coexistence this
-    // check is about.
+    // This scenario used to prove that a plugin could hold the panel's 对话 tab AND a headless
+    // frame at once, and that the two frames were told apart by their handshake ("chat" vs
+    // "background"). The panel is gone, so the only appearance a plugin has now is its
+    // FLOATING SURFACE; the request round trip below therefore runs through that frame instead
+    // of the deleted slot frame.
+    //
+    // The handshake's slot field survives, and it is worth keeping the assertion for: the
+    // headless frame must still say "background" so a plugin that also declares a surface can
+    // tell its two documents apart. That is the half of the old check that still has a subject.
     const bothRow = {
       id: 'com.example.both', name: '两副面孔插件', version: '1.0.0', author: 'shixiansi',
-      description: '同时占槽位与常驻帧', enabled: true,
+      description: '同时声明浮层面与常驻帧', enabled: true,
       permissions: ['events', 'pet.surface'], granted: ['events', 'pet.surface'],
       pending: [], netHosts: [],
-      panel: true, panelSlot: 'chat', surface: false, background: true,
+      panel: false, panelSlot: '', surface: true, background: true,
       entry: 'panel.html', dir: pluginDir('com.example.both'), error: '',
     };
     await probeReset();
     await resolveWith([bothRow]);
-    const slotFrameCount = document.querySelectorAll('#chat-slot iframe').length;
-    ok('one plugin can hold the slot and the headless frame at once',
-      slotFrameCount === 1 && bgFrames().length === 1,
-      'slot frames=' + slotFrameCount + ' background frames=' + bgFrames().length);
     const bothInits = (await probeReceivedWhen(
-      (e) => e.filter((m) => m && m.type === 'init' && m.pluginId === 'com.example.both').length >= 2,
+      (e) => e.filter((m) => m && m.type === 'init' && m.pluginId === 'com.example.both').length >= 1,
       6000,
     )).filter((m) => m && m.type === 'init' && m.pluginId === 'com.example.both');
-    const bothSlots = bothInits.map((m) => m.surface && m.surface.slot).sort();
-    ok('each of the two frames is told which appearance it is',
-      bothSlots.includes('chat') && bothSlots.includes('background'),
-      'slots=' + JSON.stringify(bothSlots));
+    ok('the headless frame is told it is the background appearance',
+      bothInits.some((m) => m.surface && m.surface.slot === 'background'),
+      'slots=' + JSON.stringify(bothInits.map((m) => m.surface && m.surface.slot)));
 
     // Restored once more: the checks below expect the normal row set.
     await resolveWith(allRows);
 
-    // (d) The request round trip, through the SLOT frame.
+    // (d) The request round trip, through the FLOATING SURFACE's frame.
     //
-    // Every capability a plugin has goes through ONE gated binding, so this is
-    // the whole plugin-to-host channel. The probe is told to send the request
-    // over the wire it really uses - the host posts a command in, the probe posts
-    // a protocol request back - so what is exercised is the assembled protocol
-    // rather than a shortcut around it.
-    const slotFrame = document.querySelector('#chat-slot iframe');
-    ok('the slot has a frame to talk to', !!slotFrame, 'no iframe in #chat-slot');
+    // Every capability a plugin has goes through ONE gated binding, so this is the whole
+    // plugin-to-host channel. The probe is told to send the request over the wire it really
+    // uses - the host posts a command in, the probe posts a protocol request back - so what is
+    // exercised is the assembled protocol rather than a shortcut around it.
+    //
+    // It used to be driven through the panel's slot frame. That frame is gone, and the floating
+    // surface is the only visible frame left, so the round trip moves here - against the
+    // CHAT plugin's surface, because that is the one the fixture mounts.
+    const surfaceFrame = surfaceMount.querySelector('iframe');
+    ok('the surface has a frame to talk to', !!surfaceFrame, 'no iframe in #plugin-surface');
     const responseRelays = (entries) => entries.filter((m) => m && m.type === 'response');
-    // Drives one frame over the wire the plugin really uses: the host posts a
-    // command in, the probe posts a protocol request back. The frame is a
-    // parameter because the refusal below has to be exercised on the plugin the
-    // host words its refusal for.
+    // Drives one frame over the wire the plugin really uses: the host posts a command in, the
+    // probe posts a protocol request back.
     const sendFromFrame = async (cmd, frame) => {
       if (!frame || !frame.contentWindow) return [];
       const before = responseRelays(await probeReceived()).length;
@@ -1663,14 +1257,15 @@ const checksJs = `
       const after = await probeReceivedWhen((e) => responseRelays(e).length > before, 4000);
       return responseRelays(after).slice(before);
     };
-    const sendFromProbe = (cmd) => sendFromFrame(cmd, slotFrame);
 
     const dispatchedBefore = window.__pluginRequests.length;
-    const responses = await sendFromProbe({ __cmd: 'request', id: 'rq1', method: 'todos.list', payload: {} });
+    const responses = await sendFromFrame(
+      { __cmd: 'request', id: 'rq1', method: 'todos.list', payload: {} },
+      surfaceFrame,
+    );
     const dispatched = window.__pluginRequests.slice(dispatchedBefore);
     ok('a plugin request reaches the single gated dispatcher',
-      dispatched.length === 1 && dispatched[0].id === 'com.example.chat' &&
-        dispatched[0].method === 'todos.list',
+      dispatched.length === 1 && dispatched[0].method === 'todos.list',
       'dispatched: ' + JSON.stringify(dispatched));
     ok('the dispatcher answer is returned to the plugin as a response',
       responses.length === 1 && responses[0].id === 'rq1' && responses[0].ok === true,
@@ -1678,20 +1273,18 @@ const checksJs = `
     ok('the response carries the value the binding returned',
       responses.length === 1 && responses[0].result && responses[0].result.method === 'todos.list',
       'result: ' + JSON.stringify(responses[0] && responses[0].result));
-
+    // The short name the scenarios below use. It used to point at the panel's slot frame; the
+    // floating surface is the only visible frame left, so both names are this one call.
+    const sendFromProbe = (cmd) => sendFromFrame(cmd, surfaceFrame);
     // The failure path passes the host's own words through, so the plugin can
     // show the reason rather than a generic failure. The capability exercised is
     // plugin.config - the tenth permission, and the one whose refusal wording is
     // new with this change - because the plugin's own settings screen is where a
     // user is most likely to meet it.
     //
-    // The refusal is asserted on the FLOATING surface's plugin, not the slot's:
-    // the two frames are separate documents with separate PluginFrames, so a
-    // message that arrived at the wrong one would otherwise still look like a
-    // pass. Driving the beta frame is what proves the refusal travels back down
-    // the channel the request came up.
-    const surfaceFrame = surfaceMount.querySelector('iframe');
-    ok('the surface has a frame to talk to', !!surfaceFrame, 'no iframe in #plugin-surface');
+    // The refusal is asserted on the FLOATING surface's plugin: the slot frame it used to be
+    // asserted against is gone with the panel, and the surface is the only visible frame left.
+    // Driving it is what proves the refusal travels back down the channel the request came up.
     const realPluginRequest = window.__handlers.PluginRequest;
     window.__handlers.PluginRequest = () => {
       throw new Error('插件 com.example.beta 未获权限 plugin.config');

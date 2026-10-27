@@ -176,7 +176,7 @@ check(
 );
 // The window calls whose result the frontend feeds to applyLayout must be typed
 // as returning a layout, or the type and the code disagree.
-const layoutReturning = ['OpenChat', 'SetPanelOpen', 'TogglePanel', 'DismissBubble', 'OpenPluginSurface', 'ClosePluginSurface', 'OpenChatPluginSurface'];
+const layoutReturning = ['DismissBubble', 'OpenPluginSurface', 'ClosePluginSurface', 'OpenChatPluginSurface', 'OpenTodoFromBubble'];
 const badLayoutTypes = layoutReturning.filter((n) => typed.get(n) !== 'main.Layout');
 check(
   'every window call the frontend applies as a layout is typed as one',
@@ -278,20 +278,21 @@ check(
   dangling.length === 0,
   `never emitted: ${dangling.join(', ')}`,
 );
-// The three names the pet's page still speaks. Each is checked as a PAIR - emitted
-// by Go and subscribed by the page - because either half alone is the failure
-// mode that matters: an event nobody sends leaves a dead listener, and one nobody
-// listens to leaves a feature that does nothing.
+// The names the pet's page still speaks. Each is checked as a PAIR - emitted by Go
+// and subscribed by the page - because either half alone is the failure mode that
+// matters: an event nobody sends leaves a dead listener, and one nobody listens to
+// leaves a feature that does nothing.
 //
-// pet:plugin-event and pet:layout are subscribed by plugin-host.js and main.js;
-// pet:chat-open is subscribed by main.js and emitted by app_llm.go's OpenChat, and
-// it is what tells the panel which tab to show when the conversation plugin asks
-// for the slot.
+// TWO, not three. `pet:chat-open` used to be here, emitted by app_llm.go's OpenChat to
+// tell the panel which tab to show. OpenChat went with the panel, so nothing emits it -
+// and the page's listener for it is reduced to "re-read the layout", which the
+// subscription scan above still covers as a dangling name. That scan is deliberately
+// name-agnostic now: it allows pet:layout and pet:pomodoro through because they are
+// frontend-side names, and a third allowance for an event NOTHING emits would be a
+// check that has been taught to ignore its own failure mode.
 check(
   'the plugin and layout events are both emitted and subscribed',
-  ['pet:plugin-event', 'pet:layout', 'pet:chat-open'].every(
-    (n) => emittedNames.has(n) && subscribed.has(n),
-  ),
+  ['pet:plugin-event', 'pet:layout'].every((n) => emittedNames.has(n) && subscribed.has(n)),
   `emitted=${[...emittedNames].join(',')} subscribed=${[...subscribed].join(',')}`,
 );
 
@@ -314,7 +315,6 @@ const marketCss = fs.readFileSync(
 // so resolving it against the pet's would silently produce an empty section and
 // the check would pass while checking nothing.
 const newSections = [
-  { marker: '/* --- chat tab', source: css },
   // '/* --- settings: compact controls' was removed with the settings page itself
   // (openspec/changes/ui-rebuild 阶段 3): the section is gone from the stylesheet, and a
   // marker for a section nobody has is a check that can only fail or lie.
@@ -498,178 +498,91 @@ check(
 // The way into the control center used to be a button on the settings page, and it was the
 // ONLY one - losing it would leave the user with a pet and no way to reach settings. It then
 // became a tray-menu item ALONE, which is not an entry point but a rumour: the tray icon can
-// be folded into the overflow area, and nothing on screen says it exists. So there are two
-// now, and both are checked: the gear in the panel header (one click, where the user already
-// is) and the tray item (the way in while the panel is closed).
+// be folded into the overflow area, and nothing on screen says it exists. The gear in the
+// panel header was added for that reason, and the panel is gone, so the on-screen entry is
+// the pet's own menu again - TWO cells of it (插件 and 设置), which is two ways in that are
+// both visible the moment the user right-clicks the pet.
+//
+// All three are checked: the two menu cells and the tray item. The tray alone would be the
+// rumour this comment started with.
 check(
-  'the pet offers a way into the control center, in the panel header AND the tray',
+  'the pet offers a way into the control center, from its menu AND the tray',
   // Inline reads rather than shared consts: each file is used once, and a const declared
   // further down would be a temporal-dead-zone crash, not a check.
-  /id="open-settings"/.test(html) &&
-    /openSettings: \$\('open-settings'\)/.test(mainJs) &&
-    /els\.openSettings\.addEventListener\('click'/.test(mainJs) &&
-    /App\.OpenPluginMarket\(\)/.test(mainJs) &&
+  /plugins: \(\) => launchControlCenter\(\)/.test(mainJs) &&
+    /settings: \(\) => launchControlCenter\(\)/.test(mainJs) &&
+    /function launchControlCenter\(\)[\s\S]{0,200}App\.OpenPluginMarket\(\)/.test(mainJs) &&
     /TrayCmdOpenMarket\s*=\s*trayCmdOpenMarket/.test(
       fs.readFileSync(path.join(root, 'internal/desktop/tray_windows.go'), 'utf8'),
     ) &&
     /desktop\.TrayCmdOpenMarket,/.test(mainGo) &&
     /case desktop\.TrayCmdOpenMarket:/.test(mainGo),
-  'a way into the control center went missing: the header gear or the tray item',
+  'a way into the control center went missing: the two menu cells or the tray item',
 );
 
-// --- 5. The conversation lives in the panel as a tab ------------------------
-check(
-  'index.html has a conversation tab body',
-  htmlIds.has('tab-chat'),
-  'no #tab-chat',
-);
-check(
-  'the tabs list includes the conversation tab',
-  /data-tab="chat"/.test(html),
-  'no data-tab="chat" button',
-);
-// Two tabs, not four: 记录 folded into 待办 as a collapsed archive, and 设置 moved to the
-// control center (openspec/changes/ui-rebuild 阶段 3). The count is pinned rather than
-// derived because the failure this guards is a tab coming BACK - a restored 设置 tab would
-// be a second writer of settings.json.
-check(
-  'the tabs are todos and chat',
-  (html.match(/data-tab="/g) || []).length === 2 &&
-    /data-tab="todos"/.test(html) &&
-    /data-tab="chat"/.test(html),
-  'unexpected tab count',
-);
-// The conversation tab is a MOUNT POINT, not a transcript: the plugin's iframe
-// is placed into #chat-slot by plugin-host.js, and the slot is what resolves
-// which plugin owns it. Without the element the plugin would have nowhere to
-// draw and the tab would be blank.
-check(
-  'index.html has a conversation slot for the plugin',
-  htmlIds.has('chat-slot'),
-  'no #chat-slot',
-);
-check(
-  'switchTab toggles the conversation tab with the others',
-  /tabChat\.classList\.toggle\('hidden', name !== 'chat'\)/.test(mainJs),
-  'switchTab does not toggle #tab-chat',
-);
-// The 对话 TAB (the button) is shown only while a plugin fills it.
+// --- 5. THERE IS NO PANEL, and it must stay gone ----------------------------
 //
-// The pet has no conversation of its own: the tab is a mount point, so with no
-// plugin it opens onto an explanation and nothing else. The button is hidden in
-// that state, which means the markup must carry an id for it (separate from
-// #tab-chat, which is the BODY and is toggled by switchTab for a different
-// reason).
-check(
-  'the conversation tab button has its own id, separate from its body',
-  htmlIds.has('tab-chat-btn') && htmlIds.has('tab-chat') && /tabChatBtn: \$\('tab-chat-btn'\)/.test(mainJs),
-  'the tab button and the tab body are not separately addressable',
-);
-check(
-  'the conversation tab is hidden when no plugin fills the slot',
-  // The availability setter is what owns it, and it must both hide the button and
-  // move the panel off the tab - a hidden tab whose body is still showing would
-  // leave the strip claiming 待办 while the conversation's box stayed on screen.
-  /function setChatTabAvailable\(available\)/.test(mainJs) &&
-    /btn\.classList\.toggle\('hidden', !available\)/.test(mainJs) &&
-    /if \(btn\.classList\.contains\('active'\)\) switchTab\('todos'\)/.test(mainJs),
-  'the tab button is not hidden and the panel is not moved off it',
-);
-check(
-  'switchTab re-resolves the slot, which is what decides the tab exists',
-  // The switch must NOT refuse itself when the tab is hidden: reading the installed
-  // list is what resolves the slot, and the same read is what would discover the
-  // plugin that un-hides the tab. A guard that refused the switch would deadlock -
-  // the refused call was the only thing that could have re-read the list.
-  /if \(name === 'chat'\) \{\s*refreshChatSlot\(\);\s*\}/.test(mainJs) &&
-    !/name === 'chat' && els\.tabChatBtn/.test(mainJs),
-  'switchTab refuses the conversation tab instead of re-resolving the slot',
-);
-// The plugin slot must be re-read while the tab strip is ON SCREEN, because both
-// observable changes happen outside this process: the market installs, updates,
-// disables and removes plugins, and Go's State carries none of that.
+// This block used to hold thirteen checks about the panel: its two tabs, the 对话 tab's
+// mount point, the slot's frame being rebuilt on a version change, the watcher that kept
+// the tab in step with the installed list, and the two events that moved the panel between
+// tabs. All of it described a 380x520 column that is no longer in the markup
+// (openspec/changes/todo-pomodoro-as-plugins, stage 3): 待办 became the todo plugin's
+// floating surface and 对话 the chat plugin's own three blocks.
 //
-// The bound is the PANEL being open, not the tab being hidden. The first version
-// polled only while the tab was hidden, which missed the direction the user
-// reported (the plugin disabled -> the tab must go away): in that case the tab is
-// visible, so the watcher was not running at all.
+// So the checks are DELETED rather than loosened, and what replaces them is the ABSENCE
+// check - which is the failure mode that still matters. Half a panel is worse than none: an
+// `els` entry pointing at a section nothing draws is a null that fails at the first click,
+// and a tab strip with one tab is a strip that has to be kept working for no reason.
 check(
-  'the conversation tab is watched while the panel is open',
-  // The pieces are asserted separately rather than as one span: the interval call
-  // and the period constant sit a few lines apart, and a single regex over both
-  // would be brittle against any comment added between them - which is the kind of
-  // assertion that gets "fixed" by loosening it until it stops checking anything.
-  /function setChatTabWatch\(wanted\)/.test(mainJs) &&
-    /chatTabWatchTimer = setInterval\(/.test(mainJs) &&
-    /\}, CHAT_TAB_WATCH_MS\);/.test(mainJs) &&
-    /clearInterval\(chatTabWatchTimer\)/.test(mainJs) &&
-    /setChatTabWatch\(!!layout\.panelOpen\)/.test(mainJs),
-  'nothing re-reads the installed list while the tab strip is on screen',
+  'the panel is gone from the markup',
+  ['panel', 'tab-todos', 'tab-chat', 'tab-chat-btn', 'chat-slot', 'close-panel', 'open-settings']
+    .every((id) => !htmlIds.has(id)) && !/data-tab="/.test(html),
+  'a panel element or a tab strip is back in index.html',
 );
 check(
-  'the watch is NOT bound to the tab being hidden',
-  // Guards the specific regression: binding it to `!available` leaves the
-  // "plugin disabled -> hide the tab" direction unwatched, because the tab is
-  // visible in exactly that case.
-  !/setChatTabWatch\(!available\)/.test(mainJs),
-  'the watcher is bound to the tab being hidden, which misses the hide direction',
+  'main.js renders no panel and no tab',
+  // The binding scan above already proves no dead App.* call survives; this is the other
+  // half. A renderer touching els.panel or a `switchTab` would throw on the null element at
+  // the first layout push, which is worse than the feature being absent.
+  !/els\.panel|els\.tabs|els\.tabChat|els\.chatSlot|switchTab|renderChatSlot|setChatTabWatch/
+    .test(mainJs) &&
+    !/layout\.panelOpen/.test(mainJs),
+  'main.js still drives a panel the page no longer has',
 );
 check(
-  'opening the panel re-reads the installed list at once',
-  // Without this the first read after a change made while the panel was closed
-  // waits out a whole period, so the tab can be visibly wrong for up to 1.5s.
-  //
-  // The transition is asserted via its two halves rather than as one span, because
-  // the comment explaining it sits between the brace and the call.
-  /panelWasOpen === false/.test(mainJs) &&
-    /const panelWasOpen = panelOpenState;/.test(mainJs) &&
-    /panelOpenState = !!layout\.panelOpen;/.test(mainJs),
-  'the open transition does not refresh the slot immediately',
-);
-// An UPDATE keeps the plugin id and replaces the files behind it, so an id-only
-// reuse test leaves the previous version's document running - the market says
-// "updated" and the pet keeps drawing the old interface.
-check(
-  'the plugin slot frame is rebuilt when the plugin VERSION changes',
-  /pluginHost\.slotFrame\.version === plugin\.version/.test(mainJs),
-  'an updated plugin would keep running its previous document',
+  'the stylesheet carries no panel rules',
+  // A stylesheet rule for a section nobody draws is a rule that can silently win a cascade
+  // later, and `#panel` was the widest surface in this file.
+  !/#panel\s*\{/.test(css) && !/#panel\s/.test(css) && !/\.panel-head|\.tab-body|\.chat-slot\s*\{/
+    .test(css),
+  'a stylesheet rule outlived the panel it styled',
 );
 check(
-  'the floating surface frames are rebuilt when the version changes',
-  /this\.surfaceVersion !== \(view\?\.version \|\| ''\)/.test(pluginHostJs),
-  'an updated plugin would keep running its previous surface document',
+  'the conversation is a floating surface, and its frame survives a re-render',
+  // What the panel's slot used to guarantee - "an updated plugin gets a fresh document, an
+  // unchanged one keeps the running one" - is now the floating surface's job. The version
+  // belongs in the comparison for the reason it always did: an update keeps the plugin id
+  // and replaces the files behind it, so an id-only reuse test leaves the PREVIOUS version's
+  // document on screen while the market says "updated".
+  /this\.surfaceVersion !== \(view\?\.version \|\| ''\)/.test(pluginHostJs) &&
+    /frame\.dataset\.pluginVersion = this\.version/.test(pluginHostJs) &&
+    !/this\.slotFrame/.test(pluginHostJs),
+  'the surface frames are not version-aware, or a panel slot frame came back',
 );
 check(
-  'the iframe carries the version it was loaded from',
-  /frame\.dataset\.pluginVersion = this\.version/.test(pluginHostJs),
-  'the loaded version is not observable from the DOM',
+  'the pet has a way into the control center WITHOUT the panel',
+  // The gear in the panel header was one of the two entries, and the panel is gone. The tray
+  // item and the pet's own two menu cells (插件 / 设置) are what is left, so all three are
+  // pinned: losing the header button without these would leave a pet with no way in at all.
+  /TrayCmdOpenMarket\s*=\s*trayCmdOpenMarket/.test(
+    fs.readFileSync(path.join(root, 'internal/desktop/tray_windows.go'), 'utf8'),
+  ) &&
+    /desktop\.TrayCmdOpenMarket,/.test(mainGo) &&
+    /case desktop\.TrayCmdOpenMarket:/.test(mainGo) &&
+    /plugins: \(\) => launchControlCenter\(\)/.test(mainJs) &&
+    /settings: \(\) => launchControlCenter\(\)/.test(mainJs),
+  'a way into the control center went missing: the tray item or the two menu cells',
 );
-// There must be no leftover floating-card element: the surface is a tab, and a
-// stray #chat would be an unpositioned box with no region to be cropped to.
-check(
-  'no leftover conversation card element',
-  !htmlIds.has('chat') && !/applyChatCard/.test(mainJs),
-  'the removed card element or its positioning code is still present',
-);
-// The conversation tab's "待办" jump is still reported through Go, but the button
-// that made the call lived in the host's own conversation UI (chat.js) and was
-// deleted with it. The conversation is a plugin now: its own page decides whether
-// to offer the jump, and it reaches the host through the same Go binding. What is
-// checked here is that the binding still exists to be called, and that it is still
-// typed as a layout call.
-check(
-  'the "待办" jump is still available to the conversation plugin',
-  exported.has('OpenTodoPanelFromChat') && typed.get('OpenTodoPanelFromChat') === 'main.Layout',
-  'the jump binding is gone, so a plugin cannot send the user to the todo tab',
-);
-check(
-  'Go reports which tab the frontend should show',
-  /eventChatOpen, map\[string\]any\{"open":/.test(
-    fs.readFileSync(path.join(root, 'app_llm.go'), 'utf8'),
-  ),
-  'the event carries no direction',
-);
-
 // --- 6. The conversation button: hover target inside the pet's box ----------
 //
 // The double click on the pet is gone. The conversation entry is a BUTTON the page
@@ -719,19 +632,29 @@ check(
   'a transparent button still takes the click, so the pet\'s corner would open the chat',
 );
 check(
-  'hovering the pet is what reveals it, and an anchored pet hides it again',
-  /#pet:hover \.pet-chat[^{]*\{[^}]*pointer-events:\s*auto/.test(css) &&
-    /#pet\.anchored \.pet-chat[^{]*\{[^}]*visibility:\s*hidden/.test(css),
-  'the button is not tied to the pet\'s hover state',
+  'hovering the pet is what reveals it',
+  // The second half of this used to be "#pet.anchored hides it again": while the PANEL was
+  // open the pet was its anchor rather than a button, so a second conversation entry there
+  // would have opened a surface over the window the user was already reading. The panel is
+  // gone and nothing sets `anchored` any more, so the rule was deleted with it - the hover
+  // reveal is the whole of the gesture now.
+  /#pet:hover \.pet-chat[^{]*\{[^}]*pointer-events:\s*auto/.test(css) && !/\.anchored/.test(css),
+  'the button is not tied to the pet\'s hover state, or the anchored state came back',
 );
-// The click/double-click arbitration is gone with the double click. It cost every
-// click the system's double-click interval, and the only thing it bought was
-// keeping two clicks from unwinding as open-then-close.
+// A click on the pet does NOTHING now, and that is the decision rather than an omission.
+//
+// It used to toggle the panel, and before that it was held for the system's double-click
+// interval so two clicks would not unwind as open-then-close. The panel is gone: 待办 and
+// 对话 are both plugin surfaces, reached from the pet's right-click menu and from the hover
+// button, so there is no destination left for a bare click. What must NOT come back is a
+// click that half-does something - a deferred click, or a click that opens one of the two
+// surfaces silently.
 check(
-  'a click on the pet toggles the panel without waiting for a second one',
-  /applyLayout\(await App\.TogglePanel\(\)\)/.test(mainJs) &&
-    !/DOUBLE_CLICK_MS|pendingClick|lastClickAt/.test(mainJs),
-  'the single click is still deferred for a double click that no longer exists',
+  'a single click on the pet does not open anything, and is not deferred',
+  !/App\.TogglePanel|ToggledPanel/.test(mainJs) &&
+    !/DOUBLE_CLICK_MS|pendingClick|lastClickAt/.test(mainJs) &&
+    !/applyLayout\(await App\.(SetPanel|OpenChat)/.test(mainJs),
+  'the single click opens a panel, or is still deferred for a double click',
 );
 // The click asks the conversation plugin for its floating surface, which is the
 // whole point of the redesign: the pet's own live overlay is gone, and what opens
@@ -1390,72 +1313,43 @@ check(
   'the two-badge stack is still wired up',
 );
 
-// --- 14. One scrollbar style across the panel -------------------------------
-// The settings tab and the todo list had private scrollbar rules while the chat log
-// was left on WebView2's default opaque grey widget, which on a dark 380px panel reads
-// as a different application.
-check(
-  'the scrollable surfaces share one scrollbar rule',
-  // TWO selectors NOW: the records list left with the host timer (the pomodoro plugin
-  // scrolls its own surface), the same way #tab-settings left with the settings page,
-  // #tab-plugins with the plugin tab and .voice-scroll with the voice studio. The group
-  // is still ONE rule rather than two copies, which is what the two checks below pin -
-  // the list here is the membership, they are the shape.
-  /\.todo-list,\s*\n\.chat-log\s*\{/.test(css),
-  'the scrollable surfaces do not share one scrollbar rule',
-);
-check(
-  'the todo list and the chat log are on that rule',
-  /\.todo-list::-webkit-scrollbar-thumb/.test(css) &&
-    /\.chat-log::-webkit-scrollbar-thumb/.test(css),
-  'a surface is still on the native scrollbar',
-);
-check(
-  'the private scrollbar copies are gone',
-  // Leaving one would mean two competing definitions of the same widget. The test is
-  // on the SHAPE of each scrollbar rule - a rule that names only one surface is a
-  // private copy - rather than on a regex, because a selector legitimately appears
-  // alone in the group's sibling rules.
-  (() => {
-    const rules = [...css.matchAll(/([^{}]*?)\{/g)]
-      .map((m) => m[1])
-      .filter((sel) => sel.includes('-webkit-scrollbar'));
-    // Two surfaces share the rule now that #tab-settings and .record-list are gone. A
-    // rule naming only one is still a private copy, which is what this shape test is for.
-    return rules.length > 0 && rules.every((sel) => sel.split(',').length >= 2);
-  })(),
-  'a per-element scrollbar copy survived the consolidation',
-);
-check(
-  'the scrollbar is translucent and trackless',
-  // It should read as a position hint, not as a control: no opaque track, no
-  // fixed light grey, and narrow enough not to eat the 380px panel.
-  /\.chat-log::-webkit-scrollbar-track[\s\S]{0,400}background:\s*transparent/.test(css) &&
-    /scrollbar-color:\s*rgba\(255,\s*255,\s*255,\s*0\.\d+\)\s*transparent/.test(css),
-  'the scrollbar has an opaque track or a hard-coded colour',
-);
+// --- 14. NO scrollbar rules, because nothing on this page scrolls -----------
+//
+// This block held four checks about one shared scrollbar rule: the todo list, the chat log
+// and (at various times) the settings tab, the plugin tab, the records list and the voice
+// studio all put the same thin translucent bar on their scrollers instead of WebView2's
+// opaque grey widget.
+//
+// Every one of those surfaces left the page - the settings tab and the plugin tab to the
+// control center, the records list and the voice studio to plugins, the todo list and the
+// chat log to the todo and chat plugins' own iframes. A plugin's document brings its own
+// stylesheet, so even the ones that still scroll do it out of this file's reach.
+//
+// What replaces them is the absence check, which is the failure mode that still matters: a
+// scrollbar rule here would style a scroller the page does not contain.
 
-// --- 15. The panel's close button centres its glyph -------------------------
-// "×" is a math symbol whose ink sits high in an ascent-heavy box, so the default
-// button metrics drew it visibly off-centre. The correction is a MEASURED padding,
-// and both halves are load-bearing: flex centring alone leaves the ink 2.5px low,
-// and the inherited button padding leaves it 1.5px high.
 check(
-  'the close button centres its glyph with flex, not line metrics',
-  /\.icon-btn\s*\{[^}]*display:\s*flex[^}]*align-items:\s*center[^}]*justify-content:\s*center/.test(
-    css,
-  ),
-  'the close button does not leave the glyph to the font baseline',
+  'the page carries no scrollbar rules',
+  !/-webkit-scrollbar/.test(css) && !/scrollbar-width|scrollbar-color/.test(css),
+  'a scrollbar rule survived the surface it styled',
 );
-check(
-  'the close button carries the measured optical offset',
-  // Measured in the real engine: 18px + inherited 7px padding -> +1.5px;
-  // 17px + padding 0 -> +2.5px; 17px + 5px bottom padding -> 0.00px.
-  /\.icon-btn\s*\{[^}]*font-size:\s*17px/.test(css) &&
-    /\.icon-btn\s*\{[^}]*padding:\s*0 0 5px/.test(css),
-  'the glyph offset was changed without re-measuring',
-);
+// --- 15. NO panel chrome: the close button's glyph measurement is gone --------
+//
+// This block held two checks about the panel header's × button: it was centred with flex
+// rather than line metrics, and it carried a MEASURED 5px bottom padding because "×" is a
+// math symbol whose ink sits high in an ascent-heavy box. Both the button and its stylesheet
+// rule went with the panel, so the checks are deleted rather than loosened - there is no
+// element left whose glyph could be off-centre.
+//
+// What this section now pins is the absence, and the one piece of the old measurement that
+// still has a reader: `.icon-btn` is used by nothing on the page, so a rule for it would be
+// the same dead-CSS trap the panel's other rules were.
 
+check(
+  'no panel chrome is left in the stylesheet',
+  !/\.icon-btn/.test(css) && !/\.tab\b/.test(css) && !/\.tabs\b/.test(css),
+  'a stylesheet rule for the panel header or its tab strip survived the panel',
+);
 // --- 16. Speech is a PLUGIN, and its workshop lives in the market -----------
 //
 // The pet used to own speech AND a standalone voice studio. Both are gone: the
@@ -1492,12 +1386,12 @@ check(
 );
 
 check(
-  'the pet has no voice studio tab and no speech tab',
-  // Two tabs, and no more: plugin management is the market program's window, and the pet's
-  // own plugin surfaces are mounted by main.js rather than by a tab. A stray third tab
-  // would be a duplicate UI competing with the control center.
-  !htmlIds.has('tab-voice') && (html.match(/data-tab="/g) || []).length === 2,
-  'the pet grew a speech tab, or the tab count changed',
+  'the pet has no tabs at all',
+  // There is no tab strip any more. It used to hold 待办 and 对话; both are plugin surfaces
+  // now, and the strip went with the panel that framed it. The check used to pin "exactly
+  // two tabs, and no speech tab" - the count is now zero, which subsumes both.
+  (html.match(/data-tab="/g) || []).length === 0 && !htmlIds.has('tab-voice'),
+  'a tab strip came back into the pet, or a speech tab with it',
 );
 check(
   'the pet has no in-panel way to open a voice studio',

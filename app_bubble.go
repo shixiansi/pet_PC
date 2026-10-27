@@ -141,7 +141,6 @@ func (a *App) DismissBubble() (Layout, error) {
 // unanswered question" check went with the picker.
 func (a *App) showBubble(b *BubbleView) (Layout, error) {
 	a.mu.Lock()
-	a.panelOpen = false
 	// The plugin floating surface shares this slot too, so showing a bubble
 	// folds it away: the region can only describe one occupant, and the surface's
 	// rectangles would otherwise keep the window cropped around an interface that

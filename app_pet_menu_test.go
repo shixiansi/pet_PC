@@ -61,15 +61,16 @@ func TestOpenPetMenuShowsTheMenuCard(t *testing.T) {
 	}
 }
 
-// TestOpenPetMenuTakesTheSlot is the "one thing at a time" invariant: the menu
-// shares the slot with the panel and a plugin's floating surface, so opening it
-// folds both away. A leftover panel or surface would keep the window cropped around
-// rectangles the page is no longer placing anything into.
+// TestOpenPetMenuTakesTheSlot is the "one thing at a time" invariant: the menu shares the slot
+// with a plugin's floating surface, so opening it folds that away. A leftover surface would
+// keep the window cropped around rectangles the page is no longer placing anything into.
+//
+// The panel was the other occupant it folded, and the panel is gone - so the surface alone is
+// now the whole of "something else was in the slot".
 func TestOpenPetMenuTakesTheSlot(t *testing.T) {
 	a := newTestApp(t)
 
 	a.mu.Lock()
-	a.panelOpen = true
 	a.setPluginSurfaceLocked(&PluginSurfaceView{PluginID: "com.example.chat"})
 	a.mu.Unlock()
 
@@ -78,12 +79,8 @@ func TestOpenPetMenuTakesTheSlot(t *testing.T) {
 	}
 
 	a.mu.Lock()
-	open := a.panelOpen
 	surface := a.pluginSurface
 	a.mu.Unlock()
-	if open {
-		t.Error("the panel was left open behind the menu")
-	}
 	if surface != nil {
 		t.Errorf("a plugin surface was left in the slot: %+v", surface)
 	}
@@ -137,13 +134,21 @@ func TestPetMenuClosesLikeAnyBubble(t *testing.T) {
 		assertNoMenu(t, a)
 	})
 
-	t.Run("opening the panel", func(t *testing.T) {
+	t.Run("opening a plugin surface", func(t *testing.T) {
 		a := newTestApp(t)
 		a.openMenuForTest(t)
 
-		if _, err := a.SetPanelOpen(true); err != nil {
-			t.Logf("SetPanelOpen (no window): %v", err)
-		}
+		// The panel used to be this half's trigger, and the panel is gone. A plugin's
+		// floating surface is the occupant that replaced it, and it must fold the menu away
+		// for the same reason: one card at a time in the slot, and the window cropped to
+		// whichever one it is.
+		a.mu.Lock()
+		a.setPluginSurfaceLocked(&PluginSurfaceView{PluginID: "com.example.chat"})
+		a.mu.Unlock()
+		a.mu.Lock()
+		a.setBubbleLocked(nil)
+		a.mu.Unlock()
+
 		assertNoMenu(t, a)
 	})
 

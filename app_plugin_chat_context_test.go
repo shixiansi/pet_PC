@@ -61,9 +61,6 @@ func textOf(msgs []map[string]any) string {
 func TestPluginChatNeverSeesTheDay(t *testing.T) {
 	stub := newChatStub(t)
 	a := pluginApp(t)
-	if _, err := a.AddTodo(TodoInput{Title: "机密待办"}); err != nil {
-		t.Fatalf("AddTodo: %v", err)
-	}
 	// Deliberately generous: everything a plugin could hold, including the snapshot's
 	// old permission name if it were still valid.
 	id := installToolPlugin(t, a, "llm.chat", "plugin.config", "storage", "pet.bubble")
@@ -73,8 +70,11 @@ func TestPluginChatNeverSeesTheDay(t *testing.T) {
 		t.Fatalf("llm.chat: %v", err)
 	}
 	got := textOf(chatMessages(t, stub))
-	if strings.Contains(got, "机密待办") {
-		t.Errorf("the user's todo reached a plugin conversation:\n%s", got)
+	// There is no longer any way to put a todo into `a` (the host's CRUD bindings went with
+	// the panel), so the leak is asserted from the other side: the prompt must not contain a
+	// todo SECTION at all, which is what "the list leaked" would look like.
+	if strings.Contains(got, "- 待办：") {
+		t.Errorf("a todo section reached a plugin conversation:\n%s", got)
 	}
 	if !strings.Contains(got, "被问到就说自己看不到") {
 		t.Errorf("the model was not told the day is not visible:\n%s", got)

@@ -11,10 +11,14 @@ import (
 	"PetPC/internal/store"
 )
 
-// eventChatOpen tells the frontend to switch to the conversation tab. It
-// travels separately from the layout because the layout carries geometry,
-// not which tab is showing.
-const eventChatOpen = "pet:chat-open"
+// eventChatOpen used to tell the frontend to switch the panel to its 对话 tab.
+//
+// It is GONE rather than merely unemitted, and the difference matters to the static gate: a
+// subscription with no emitter is exactly what "every subscribed event is emitted by Go"
+// exists to catch, and allowing this one name through would teach that check to ignore its
+// own failure mode. Nothing outside this page ever subscribed to it - the conversation is a
+// plugin, and a plugin's own "open the conversation" ask goes through
+// OpenChatPluginSurface, which is a binding rather than an event.
 
 // llmState is the LLM-specific half of App's runtime state.
 //
@@ -139,33 +143,19 @@ func (a *App) promptContext(cfg store.Config) llm.PromptContext {
 
 // --- window ----------------------------------------------------------------
 
-// OpenChat opens the panel on the conversation tab.
+// OpenChat and OpenTodoPanelFromChat used to live here. Both opened the PANEL on one of its
+// tabs, and both are gone with it:
 //
-// The panel geometry is untouched: the conversation is a tab inside the same
-// 380x520 rectangle as the others, so the native region crop is the one that is
-// already verified (docs/llm-chat.md 8). Only which tab is showing changes, and
-// that is a frontend concern announced by eventChatOpen.
+//   - the conversation is the chat plugin's floating surface now. A plugin's own script asks
+//     for it (`surface.show`, or the host's OpenChatPluginSurface on the hover button), so
+//     there is no host tab to select;
+//   - the 待办 tab went the same way, and the todo plugin's surface is opened the same way -
+//     from the pet's own menu cell, through OpenPluginSurface.
 //
-// The event is emitted even when the geometry call fails. Landing on the
-// conversation must not depend on the window: the tab is the user's request, and
-// the window position is an implementation detail that can fail without
-// invalidating it.
-func (a *App) OpenChat() (Layout, error) {
-	layout, err := a.SetPanelOpen(true)
-	a.emitEvent(eventChatOpen, map[string]any{"open": true})
-	return layout, err
-}
+// `eventChatOpen` went with OpenChat: it named the panel tab to switch to, and neither the
+// tab nor the emitter exists. A subscription with no emitter is what the static gate calls a
+// dangling event, so the page's listener is deleted too rather than left as a no-op.
 
-// OpenTodoPanelFromChat opens the todo tab, leaving the panel where it is.
-//
-// It exists so the conversation's own "待办" affordance has a single named entry
-// point on the Go side rather than the frontend calling SetPanelOpen and
-// switchTab separately.
-func (a *App) OpenTodoPanelFromChat() (Layout, error) {
-	layout, err := a.SetPanelOpen(true)
-	a.emitEvent(eventChatOpen, map[string]any{"open": false})
-	return layout, err
-}
 
 // --- diagnostics -----------------------------------------------------------
 

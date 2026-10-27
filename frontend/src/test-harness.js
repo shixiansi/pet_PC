@@ -49,15 +49,15 @@ function installBridge(handlers = {}) {
   // .dev/run-frontend-harness.cjs carries the same list for the live-page
   // harness - T113 compares the two as sets.
   const methods = [
-    'AddTodo', 'ChoosePetImage', 'ClearDone', 'ClosePluginSurface',
-    'DebugLog', 'DeleteTodo', 'DismissBubble', 'DragTo',
+    'ChoosePetImage', 'ClosePluginSurface',
+    'DebugLog', 'DismissBubble', 'DragTo',
     'EndDrag', 'GetLayout', 'GetState', 'HidePet',
-    'HidePetForUser', 'OpenChat', 'OpenChatPluginSurface', 'OpenPetMenu', 'OpenPluginMarket',
-    'OpenPluginSurface', 'OpenTodoPanelFromBubble', 'OpenTodoPanelFromChat', 'SetPluginSurfaceBlocks',
+    'HidePetForUser', 'OpenChatPluginSurface', 'OpenPetMenu', 'OpenPluginMarket',
+    'OpenPluginSurface', 'OpenTodoFromBubble', 'SetPluginSurfaceBlocks',
     'PetImageURL', 'PluginMarketCandidates',
     'PluginMarketPath', 'PluginRequest', 'PluginsInstalled', 'Quit', 'Ready', 'RemindNow', 'ResetPetImage', 'ResetToDefaultPosition', 'SaveHotkeySettings', 'SaveReminderSettings', 'SetAutostart', 'SetBubbleHover',
-    'SetPanelOpen', 'SetReminderEnabled', 'SetScale',
-    'SetSnapToEdge', 'ShowPet', 'ShowPetForUser', 'SnapNow', 'StartDrag', 'TogglePanel', 'ToggleTodo', 'UpdateTodo',
+    'SetReminderEnabled', 'SetScale',
+    'SetSnapToEdge', 'ShowPet', 'ShowPetForUser', 'SnapNow', 'StartDrag', 
     'WindowReady',
   ];
   const app = {};

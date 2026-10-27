@@ -83,23 +83,17 @@ func TestBubbleAndLayoutStayInStep(t *testing.T) {
 		t.Errorf("DismissBubble left something behind: showing=%+v advertised=%+v", showing, advertised)
 	}
 
-	// Opening the panel must fold the bubble away in both places too.
+	// A plugin's surface must fold the bubble away in both places too - it is the occupant
+	// that replaced the panel in this slot.
 	if _, err := a.showBubble(&BubbleView{Kind: BubbleReminder, Title: "hi"}); err != nil {
 		t.Logf("showBubble (no window): %v", err)
 	}
-	if _, err := a.SetPanelOpen(true); err != nil {
-		t.Logf("SetPanelOpen (no window): %v", err)
+	if _, err := a.OpenPluginSurface(readyPlugin(t, a)); err != nil {
+		t.Logf("OpenPluginSurface (no window or no surface): %v", err)
 	}
 	showing, advertised = a.bubbleState()
 	if showing != nil || advertised != nil {
-		t.Errorf("opening the panel left a bubble: showing=%+v advertised=%+v", showing, advertised)
-	}
-	// ...and the panel itself must actually be open.
-	a.mu.Lock()
-	open := a.panelOpen
-	a.mu.Unlock()
-	if !open {
-		t.Error("SetPanelOpen(true) did not open the panel")
+		t.Errorf("opening a surface left a bubble: showing=%+v advertised=%+v", showing, advertised)
 	}
 }
 

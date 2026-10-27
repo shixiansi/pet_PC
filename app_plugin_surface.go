@@ -459,7 +459,6 @@ func (a *App) OpenPluginSurface(pluginID string) (Layout, error) {
 	view.PluginID = pluginID
 
 	a.mu.Lock()
-	a.panelOpen = false
 	wasBubble := a.bubble != nil
 	a.setBubbleLocked(nil)
 	// The view computed above is recorded as-is, so the state is complete even

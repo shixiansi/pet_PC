@@ -101,17 +101,14 @@ func TestSetPluginSurfaceLockedKeepsStateAndLayoutInStep(t *testing.T) {
 // the region while the panel or a bubble is up would crop the window around an
 // interface nobody draws.
 //
-// The list has TWO entries: the pet's own live overlay used to be the third
-// opening, and it was deleted with the rest of the host's conversation UI. The
-// slot's occupants are now the panel, a bubble and the surface - and the
-// surface is the one being cleared here, so the entries are the two openings
-// that can take the slot from it.
+// The list has ONE entry now, and it used to hold three. The pet's own live overlay was
+// deleted with the rest of the host's conversation UI, and the panel was deleted after it -
+// so a bubble is the only opening left that can take the slot from a surface.
 func TestExistingOpeningsClearTheSurface(t *testing.T) {
 	cases := []struct {
 		name string
 		open func(a *App)
 	}{
-		{"SetPanelOpen", func(a *App) { a.SetPanelOpen(true) }},
 		{"showBubble", func(a *App) { a.showBubble(&BubbleView{Kind: BubbleReminder, Title: "t"}) }},
 	}
 	for _, tc := range cases {
@@ -261,7 +258,10 @@ func TestOpenPluginSurfaceRefusals(t *testing.T) {
 	})
 }
 
-// assertRefusal checks a refusal left the layout and the panel state untouched.
+// assertRefusal checks a refusal left the layout and the surface state untouched.
+//
+// The panel half of this went with the panel: a refusal used to be asserted not to have
+// opened it either, and there is nothing left to open.
 func assertRefusal(t *testing.T, a *App, err error, wants string) {
 	t.Helper()
 	if err == nil {
@@ -271,16 +271,13 @@ func assertRefusal(t *testing.T, a *App, err error, wants string) {
 		t.Fatalf("error %q must mention %q", err.Error(), wants)
 	}
 	a.mu.Lock()
-	state, advertised, panel := a.pluginSurface, a.layout.PluginSurface, a.panelOpen
+	state, advertised := a.pluginSurface, a.layout.PluginSurface
 	a.mu.Unlock()
 	if state != nil {
 		t.Errorf("a refusal left the surface showing: %+v", state)
 	}
 	if advertised != nil {
 		t.Errorf("a refusal left the layout advertising a surface: %+v", advertised)
-	}
-	if panel {
-		t.Error("a refusal opened the panel")
 	}
 }
 

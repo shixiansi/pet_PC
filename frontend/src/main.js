@@ -31,7 +31,7 @@ import { EventsOn } from '../wailsjs/runtime/runtime';
 // The slot name is imported rather than written out here: the host resolves the
 // slot from the installed list and then mounts into it, so the two halves of
 // "which slot is the conversation" have to be the same string by construction.
-import { PluginHost, SLOT_CHAT } from './plugin-host';
+import { PluginHost } from './plugin-host';
 
 const $ = (id) => document.getElementById(id);
 
@@ -43,41 +43,17 @@ const els = {
   // on it does.
   chatButton: $('pet-chat'),
   badge: $('badge'),
-  panel: $('panel'),
-  close: $('close-panel'),
-  // Opens the control center - the window that owns settings and plugins now. In the panel
-  // HEADER rather than in a tab: a tab for it would be a page with one button on it, and the
-  // tray menu (its only entry point for a while) is invisible unless you already know it.
-  openSettings: $('open-settings'),
   toast: $('toast'),
 
-  tabs: document.querySelectorAll('.tab'),
-  tabTodos: $('tab-todos'),
-  tabChat: $('tab-chat'),
-  // The 对话 tab's BUTTON, as opposed to tabChat which is the tab's body. The
-  // button is hidden while no plugin fills the slot, so the two are separate
-  // elements with separate visibility.
-  tabChatBtn: $('tab-chat-btn'),
-  // Two tabs: 待办 (which now also holds the folded 记录 archive) and 对话 (a plugin slot).
-  // 记录 and 设置 are gone - see index.html's tab-strip comment for where each went.
-
-  // The chat plugin's mount point inside the 对话 tab, the floating surface's
-  // mount point, and the headless frame's mount point. All three are fill-only
-  // containers: what goes inside them is built by plugin-host.js, and they are
-  // independent of each other.
-  chatSlot: $('chat-slot'),
+  // TWO mount points and nothing else: the floating surface's, and the headless frame's.
+  // Both are fill-only containers - what goes inside them is built by plugin-host.js - and
+  // they are independent of each other.
+  //
+  // THE THIRD ONE WENT WITH THE PANEL: #chat-slot was the 对话 tab's body, and the chat
+  // plugin renders itself as a floating surface now. A host mount point for a panel that
+  // no longer exists would be a `div` nothing ever fills.
   pluginSurface: $('plugin-surface'),
   pluginBackground: $('plugin-background'),
-
-  form: $('todo-form'),
-  title: $('todo-title'),
-  due: $('todo-due'),
-  notes: $('todo-notes'),
-  submit: $('todo-form').querySelector('button[type="submit"]'),
-  summary: $('summary'),
-  clearDone: $('clear-done'),
-  list: $('todo-list'),
-  empty: $('empty-hint'),
 
   // Bubble (reminder / menu). The picker, the summary prompt and the plan prompt
   // were the other three kinds, and all three were questions about the host's
@@ -98,11 +74,16 @@ const els = {
   bubbleSecondary: $('bubble-secondary'),
   bubblePrimary: $('bubble-primary'),
 
-  // No settings entries: the settings tab moved to the control center, and the few
+  // No entries for the panel, its tabs, its header buttons, its form or its todo list.
+  // The panel was the 380x520 column beside the pet; 待办 moved into the todo plugin's
+  // surface and 对话 into the chat plugin's, so the whole section is gone from
+  // index.html and every `els` entry pointing at it would be a null that fails at the
+  // first click. That is the same rule the settings tab and the timer strip followed.
+  //
+  // No settings entries either: the settings tab moved to the control center, and the few
   // controls that could not move are in the tray menu (打开控制中心 / 退出 / 立刻提醒 /
-  // 打开数据目录). An `els` entry for an element the page no longer has would be a null
-  // that fails at the first click. The textarea that used to be here (bubble-input) is
-  // one of those: its only users were the summary and plan prompts.
+  // 打开数据目录). The textarea that used to be here (bubble-input) went with the two
+  // prompts that typed into it.
 
   // No confirm-dialog entries: the self-drawn dialog went with the two destructive
   // timer actions it used to guard (跳过 / 放弃当前番茄钟), and the markup went with it.
@@ -126,7 +107,6 @@ const debug = (msg) => {
 /** Latest server-side snapshot. */
 let state = null;
 /** ID of the todo currently being edited, or null when adding. */
-let editingId = null;
 /** The bubble currently on screen (a copy of the layout's bubble), or null. */
 let bubble = null;
 /** Auto-hide timer for a reminder bubble. */
@@ -178,36 +158,10 @@ let installedRefreshInFlight = false;
  */
 let lastLayout = null;
 
-/**
- * Whether the panel was open as of the last applyLayout, and null before the
- * first one.
- *
- * It exists so the open TRANSITION can be told from "still open": the plugin slot
- * is re-read the moment the tab strip becomes visible, but not on every layout
- * call, which would add a backend read to each pet nudge.
- */
-let panelOpenState = null;
-
-/**
- * The watcher that keeps the 对话 tab in step with the installed plugin, or null
- * when it is not running.
- *
- * See setChatTabWatch. It runs while the panel is OPEN, because that is when the
- * tab strip is on screen - and both directions of change (a plugin appearing and a
- * plugin going away) have to be noticed, which is what the first version of this,
- * bound to the tab being hidden, got wrong.
- */
-let chatTabWatchTimer = null;
-
-/**
- * True while a read of the installed list is in flight.
- *
- * refreshChatSlot runs from three places now (the tab, the watch timer, and the
- * panel opening), so two reads can overlap; this keeps the older one from landing
- * after the newer one.
- */
-let chatSlotReadInFlight = false;
-
+// No panel-open state, no chat-tab watcher and no slot-read latch: all three existed to
+// keep the PANEL's tab strip in step with the installed plugin, and the panel is gone. The
+// installed list is still read - the floating surfaces and the headless frames are routed
+// from it - but on the paths that actually need it (see refreshInstalledThenApply).
 // --- helpers --------------------------------------------------------------
 
 function toast(message) {
@@ -231,38 +185,11 @@ const pad = (n) => String(n).padStart(2, '0');
 // page destructive enough to ask about, so the function, its #confirm markup and its
 // CSS went with it: an unreachable dialog is a second UI nobody can check.
 
-/** Formats a Date as the value <input type="datetime-local"> expects. */
-function toLocalInput(date) {
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
-  );
-}
-
-/** Renders a due date relative to today, e.g. "今天 14:30". */
-function formatDue(date) {
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const dueDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const dayDiff = Math.round((dueDay - startOfToday) / 86400000);
-  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-
-  if (dayDiff === 0) return `今天 ${time}`;
-  if (dayDiff === 1) return `明天 ${time}`;
-  if (dayDiff === -1) return `昨天 ${time}`;
-  return `${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
-}
-
-/** Classifies a todo's due date for colouring. */
-function dueStatus(todo) {
-  if (!todo.due || todo.done) return '';
-  const due = new Date(todo.due);
-  const now = Date.now();
-  if (due.getTime() < now) return 'overdue';
-  if (due.getTime() - now <= 86400000) return 'soon';
-  return '';
-}
-
+// toLocalInput / formatDue / dueStatus used to live here. All three rendered a todo's
+// deadline for the panel's form and list, and both of those are gone: the list is the todo
+// plugin's data, and the plugin formats its own dates. What the host still renders from a
+// deadline is the reminder bubble's label, and that has been Go-side all along (dueLabel in
+// app_bubble.go) because the bubble is painted inside the window region, not by the page.
 // --- layout ---------------------------------------------------------------
 
 /**
@@ -281,15 +208,6 @@ function dueStatus(todo) {
  */
 function applyLayout(layout) {
   if (!layout) return;
-  // Whether the panel was open BEFORE this layout, for the open-transition
-  // refresh below.
-  //
-  // It is captured here rather than read off `lastLayout` afterwards, because
-  // `lastLayout` is assigned the NEW layout a few lines down - reading it there
-  // would compare the new value with itself and the transition test would never
-  // fire.
-  const panelWasOpen = panelOpenState;
-  panelOpenState = !!layout.panelOpen;
   // Remembered for the deferred surface handshake below: a surface can arrive
   // before the installed list has been read, and it is completed by re-applying
   // this same layout once the list lands.
@@ -302,38 +220,11 @@ function applyLayout(layout) {
     height: `${layout.petH}px`,
   });
 
-  els.panel.classList.toggle('hidden', !layout.panelOpen);
-  els.pet.classList.toggle('anchored', !!layout.panelOpen);
-
-  // Keep the 对话 tab in step with the installed plugin for as long as the tab
-  // strip is on screen.
-  //
-  // The strip's observable state changes outside this process - the market program
-  // installs, updates, disables and removes plugins, and Go carries none of that in
-  // State - so the tab is refreshed by re-reading the installed list, and this is
-  // the bound that decides when.
-  //
-  // The panel's visibility is the right bound because the strip is invisible when
-  // the panel is closed: a poll then would spend a round trip per period updating
-  // something nobody can see. See setChatTabWatch for why "while the tab is hidden"
-  // - the first attempt - missed the case the user reported.
-  setChatTabWatch(!!layout.panelOpen);
-  if (layout.panelOpen && panelWasOpen === false) {
-    // The moment the strip becomes visible, re-read rather than waiting out a
-    // period: a change made while the panel was closed otherwise shows for up to
-    // 1.5s. This is the transition only (not every layout call), so a layout
-    // update that does not open the panel costs nothing.
-    refreshChatSlot();
-  }
-
-  if (layout.panelOpen) {
-    Object.assign(els.panel.style, {
-      left: `${layout.panelX}px`,
-      top: `${layout.panelY}px`,
-      width: `${layout.panelW}px`,
-      height: `${layout.panelH}px`,
-    });
-  }
+  // Nothing to show or hide here any more. The panel used to be the second rectangle this
+ // function painted - it read the layout's panel flag and copied the four offsets onto the panel -
+  // and the section itself is gone (see index.html). What the panel's GEOMETRY still buys
+  // is the window: `Layout.PanelX/Y/W/H` is where a plugin's floating surface may sit beside
+  // the pet, and plugin-host.js places the frames from the layout's own rectangles.
 
   applyBubble(layout.bubble || null);
 
@@ -343,13 +234,12 @@ function applyLayout(layout) {
   const surface = layout.pluginSurface || null;
   if (surface) {
     // The surface needs the plugin's METADATA (its entry file and its grants), and
-    // that comes from the installed list - which is read when the 对话 tab is
-    // opened, NOT at startup. Opening the surface from the pet's hover button can
-    // therefore arrive before the list has ever been read, and the old code passed
-    // an empty view in that case: the iframe got a default entry and no grants, and
-    // the plugin rendered as unauthorised (or asked for an asset path that does not
-    // exist). Reading the list on demand is what makes the surface independent of
-    // which tab the user happened to visit first.
+    // that comes from the installed list, which is read on demand rather than at
+    // startup. Opening a surface can therefore arrive before the list has ever been
+    // read, and passing an empty view in that case gave the iframe a default entry and
+    // no grants - the plugin rendered as unauthorised (or asked for an asset path that
+    // does not exist). Reading the list here is what makes the surface independent of
+    // which path the user happened to take first.
     if (!pluginViewFor(surface.pluginId)) {
       refreshInstalledThenApply(pluginViewFor);
     }
@@ -372,7 +262,6 @@ function refreshInstalledThenApply() {
   App.PluginsInstalled()
     .then((rows) => {
       installedPlugins = rows || [];
-      renderChatSlot();
       renderBackgroundPlugins();
       // Re-apply so the frames that were created without metadata get theirs.
       if (lastLayout) applyLayout(lastLayout);
@@ -482,7 +371,7 @@ function renderBubble(b) {
   els.bubbleSecondary.onclick = () => App.DismissBubble().then(applyLayout).catch(fail);
   els.bubblePrimary.textContent = '看看待办';
   els.bubblePrimary.classList.remove('hidden');
-  els.bubblePrimary.onclick = () => App.OpenTodoPanelFromBubble().then(applyLayout).catch(fail);
+  els.bubblePrimary.onclick = () => App.OpenTodoFromBubble().then(applyLayout).catch(fail);
 }
 
 /** Renders the reminder's todo list. */
@@ -531,7 +420,7 @@ function scheduleBubbleHide(b) {
 
 function renderBadge() {
   if (!state) return;
-  const { open, overdue, dueSoon } = state.stats || {};
+  // From the TODO PLUGIN's published list, computed by Go: the host has no stats of its own\n  // any more (State.Stats went with the host's todo store).\n  const { open, overdue, dueSoon } = state.todoBadge || {};
   if (!open) {
     els.badge.classList.add('hidden');
   } else {
@@ -567,317 +456,6 @@ function renderPet() {
   els.petImage.src = wanted;
   debug(`renderPet: src set to ${wanted}`);
 }
-
-function renderSummary() {
-  if (!state) return;
-  const { open, overdue, total } = state.stats || {};
-  const parts = [];
-  if (total) parts.push(`共 ${total} 项`);
-  parts.push(`${open || 0} 项未完成`);
-  if (overdue) parts.push(`${overdue} 项已逾期`);
-  els.summary.textContent = parts.join(' · ');
-  els.clearDone.disabled = !(state.todos || []).some((t) => t.done);
-}
-
-function renderTodos() {
-  if (!state) return;
-  const todos = state.todos || [];
-  els.list.replaceChildren();
-  els.empty.classList.toggle('hidden', todos.length > 0);
-
-  for (const todo of todos) {
-    els.list.appendChild(renderTodoItem(todo));
-  }
-  renderSummary();
-}
-
-function renderTodoItem(todo) {
-  const li = document.createElement('li');
-  const status = dueStatus(todo);
-  li.className = `todo-item${todo.done ? ' done' : ''}${status === 'overdue' ? ' overdue' : ''}`;
-
-  const check = document.createElement('input');
-  check.type = 'checkbox';
-  check.checked = !!todo.done;
-  check.title = todo.done ? '标记为未完成' : '标记为已完成';
-  check.addEventListener('change', () => {
-    App.ToggleTodo(todo.id).then(applyState).catch(fail);
-  });
-
-  const main = document.createElement('div');
-  main.className = 'todo-main';
-
-  // textContent (not innerHTML) so a title containing markup stays inert.
-  const title = document.createElement('span');
-  title.className = 'todo-title';
-  title.textContent = todo.title;
-  main.appendChild(title);
-
-  if (todo.due) {
-    const meta = document.createElement('div');
-    meta.className = 'todo-meta';
-    const due = document.createElement('span');
-    due.className = `due ${status}`.trim();
-    due.textContent = formatDue(new Date(todo.due));
-    meta.appendChild(due);
-    main.appendChild(meta);
-  }
-
-  if (todo.notes) {
-    const notes = document.createElement('div');
-    notes.className = 'todo-notes';
-    notes.textContent = todo.notes;
-    main.appendChild(notes);
-  }
-
-  const actions = document.createElement('div');
-  actions.className = 'todo-actions';
-
-  const edit = document.createElement('button');
-  edit.type = 'button';
-  edit.textContent = '编辑';
-  edit.title = '编辑';
-  edit.addEventListener('click', () => startEdit(todo));
-
-  const del = document.createElement('button');
-  del.type = 'button';
-  del.textContent = '删除';
-  del.title = '删除';
-  del.addEventListener('click', () => {
-    App.DeleteTodo(todo.id).then(applyState).catch(fail);
-  });
-
-  actions.append(edit, del);
-  li.append(check, main, actions);
-  return li;
-}
-
-/**
- * Renders the 对话 tab's plugin slot.
- *
- * The tab body is a MOUNT POINT: the host resolves which installed plugin owns
- * the 'chat' slot and mounts its sandboxed iframe. The resolution is re-run from
- * every state snapshot rather than once at startup, because the market program
- * can install or remove the plugin while the pet is running - a slot resolved
- * once would leave the tab stale until a restart.
- *
- * With no such plugin installed the slot shows a sentence pointing at the market
- * instead of an empty rectangle: a blank tab reads as "broken", and the fix is
- * one click away. The hint is built here rather than written in index.html so
- * that the tab body holds no host copy of the conversation's controls - the one
- * id in the markup is the slot, and everything inside it belongs to whoever
- * fills it.
- */
-function renderChatSlot() {
-  const slot = els.chatSlot;
-  if (!slot) return;
-  const plugin = slotPlugin();
-  // The tab is shown only while a plugin owns it.
-  //
-  // The pet has no conversation of its own any more: the 对话 tab is a mount point
-  // and nothing else. With no plugin to fill it the tab is a rectangle whose only
-  // content is an explanation of why it is empty - and a tab you can open onto
-  // nothing is worse than no tab, because it reads as a broken feature rather than
-  // as an absent one. So the BUTTON is hidden too, and the panel falls back to 待办
-  // if it was showing the conversation when the plugin went away.
-  //
-  // The button is hidden rather than removed: the four `data-tab` values stay
-  // stable, so every currentTab comparison, the tab strip's layout and the static
-  // gate's "exactly four tabs" assertion all keep working. The slot's own hint is
-  // still rendered underneath, which is what the user sees for the moment before
-  // the panel switches away - and what they see if they were already on 待办 and
-  // the plugin is removed.
-  setChatTabAvailable(!!plugin);
-  if (!plugin) {
-    pluginHost?.closeSlot();
-    // Name the ACTUAL reason when a plugin is installed but does not qualify.
-    //
-    // The generic hint is right when nothing is installed, and misleading when
-    // something is: the user sees a plugin listed in the market, reads "not
-    // installed yet", and has no way to learn that the copy on disk is an older
-    // package whose manifest predates the slot declaration. That is not a
-    // hypothetical - it is what an install of the previous version produces, and
-    // the symptom is a tab that insists the plugin is missing while the market
-    // shows it as installed.
-    slot.textContent = chatSlotDiagnosis() || CHAT_SLOT_HINT;
-    slot.classList.add('chat-slot-empty');
-    return;
-  }
-  // Re-mounting on every snapshot would restart the plugin's conversation on
-  // every state change, so the frame is reused while it is already the right
-  // plugin in the right slot - at the right VERSION.
-  //
-  // The version belongs in this test, and leaving it out was a real defect: an
-  // update in the market keeps the plugin id and replaces the files behind it, so
-  // an id-only comparison reused the running document and the user kept seeing the
-  // PREVIOUS version's interface until the pet was restarted. The market's own
-  // update button says the plugin was updated; the pet has to agree.
-  //
-  // This test has to come BEFORE the slot is emptied. Clearing first and then
-  // returning early detached the live iframe from the document while the host
-  // still held it as mounted: the plugin kept running with nothing on screen, and
-  // the slot looked empty until the plugin changed. Arriving at the tab calls
-  // this function every time, so it was not a rare path.
-  if (pluginHost?.slotFrame?.pluginId === plugin.id &&
-      pluginHost.slotFrame.version === plugin.version &&
-      pluginHost.slotName === SLOT_CHAT) return;
-  slot.textContent = '';
-  slot.classList.remove('chat-slot-empty');
-  pluginHost?.openSlot(SLOT_CHAT, plugin);
-}
-
-/**
- * Shows or hides the 对话 tab, and moves off it when it goes away.
- *
- * Two things have to happen together, and they are the whole reason this is a
- * function rather than one line in the caller:
- *
- *   - the BUTTON is hidden, so the tab strip stops offering a tab that has nothing
- *     in it. It is `.hidden` (display:none) rather than `disabled`, because a
- *     greyed-out tab invites a click that cannot be answered, while a missing one
- *     simply is not there.
- *   - if the panel is CURRENTLY on the conversation, it switches to 待办. Without
- *     this the panel would sit on a hidden tab's body: the strip would show 待办 as
- *     active while the conversation's (empty) body stayed on screen, and the user
- *     would have no way back except clicking a tab that looks unselected.
- *
- * The fallback is 待办 rather than 设置 because 待办 is the panel's home - it is
- * what opens by default and what the pet's single click leads to.
- */
-function setChatTabAvailable(available) {
-  const btn = els.tabChatBtn;
-  if (!btn) return;
-  btn.classList.toggle('hidden', !available);
-  if (available) return;
-  // Only the ACTIVE tab needs moving. A panel on 待办 must not be disturbed: this
-  // runs from every state snapshot, so switching unconditionally would yank the
-  // user off whatever tab they were reading each time a plugin disappeared.
-  if (btn.classList.contains('active')) switchTab('todos');
-}
-
-/**
- * The watcher that keeps the 对话 tab in step with the installed plugin, while the
- * panel is open.
- *
- * WHY A TIMER IS NEEDED AT ALL: the host learns about installation changes only by
- * reading the installed list, and nothing pushes it. The market is a SEPARATE
- * PROCESS with its own settings file, and Go's State snapshot carries no plugin
- * information - so there is no event to subscribe to and no field to compare. The
- * tab is therefore refreshed by re-reading, and the only question is when.
- *
- * WHY "WHILE THE PANEL IS OPEN" IS THE RIGHT BOUND, and why the first version of
- * this (which polled only while the tab was HIDDEN) was wrong:
- *
- *   - the tab strip is only on screen while the panel is open, so a change made
- *     while the panel is closed cannot be seen by anyone until the panel opens -
- *     and opening it goes through applyLayout, which re-reads anyway. Polling with
- *     the panel closed spends a round trip every period to update something nobody
- *     is looking at.
- *   - the two directions of change are NOT symmetric. Hiding the tab (the plugin
- *     was disabled or removed) had no watcher under the old bound, because the tab
- *     was visible in exactly that case - so the strip kept offering a tab whose
- *     plugin was gone until the user happened to leave and re-enter the tab. That
- *     is the complaint this fixes: 「取消点击，面板上的对话tab没有及时的隐藏」.
- *
- * The period is deliberately slow. The observable effect is one tab appearing or
- * disappearing in a panel the user is already looking at, so half a second either
- * way is invisible, while the cost is a process-local read of plugins.json plus a
- * round trip - and it runs for as long as the panel is open.
- */
-const CHAT_TAB_WATCH_MS = 1500;
-
-function setChatTabWatch(wanted) {
-  if (wanted && chatTabWatchTimer === null) {
-    chatTabWatchTimer = setInterval(() => {
-      // refreshChatSlot re-reads the list and re-renders, which is what shows or
-      // hides the tab and mounts or unmounts the plugin's frame.
-      refreshChatSlot();
-    }, CHAT_TAB_WATCH_MS);
-  } else if (!wanted && chatTabWatchTimer !== null) {
-    clearInterval(chatTabWatchTimer);
-    chatTabWatchTimer = null;
-  }
-}
-
-/**
- * Explains WHY no installed plugin can fill the 对话 slot, or '' when nothing is
- * installed at all.
- *
- * Each clause of the resolution rule gets its own sentence, because they have
- * different fixes and the user cannot tell them apart from the outside:
- *
- *   - a plugin that declares no slot at all is an OLD PACKAGE. `panelSlot` was
- *     added with the conversation plugin 1.1.0; a 1.0.0 install has no such key,
- *     so it parses into `panelSlot: ""`. The fix is to update the plugin in the
- *     market, not to reinstall it - and "reinstall" is exactly what the generic
- *     hint would lead to, because it would install the same old package again if
- *     the catalogue still offers it.
- *   - a slot holder that is switched off needs the switch turned on;
- *   - one without pet.surface needs that permission ticked.
- *
- * The list is searched in the same order the Go resolver uses, so the sentence
- * describes the row that WOULD have won.
- */
-function chatSlotDiagnosis() {
-  const rows = (installedPlugins || []).filter((p) => p.enabled !== false);
-  if (rows.length === 0) return '';
-  const claimants = rows.filter((p) => p.panelSlot === SLOT_CHAT);
-  if (claimants.length === 0) {
-    const names = rows.map((p) => `${p.name || p.id}（v${p.version}）`).join('、');
-    return `对话插件是旧版本：${names} 没有声明「对话」槽位，` +
-      '在插件市场里更新它（或卸载后重新安装新版本）。';
-  }
-  const ungranted = claimants.filter((p) => !(Array.isArray(p.granted) && p.granted.includes('pet.surface')));
-  if (ungranted.length > 0) {
-    const names = ungranted.map((p) => p.name || p.id).join('、');
-    return `对话插件缺少 pet.surface 授权：在插件市场里勾上 ${names} 的这项权限。`;
-  }
-  // A displaced holder: one declares the slot and is granted, but the resolver
-  // still refused it - the only remaining clause is that its files could not be
-  // read, which is what `error` reports.
-  const broken = claimants.filter((p) => p.error);
-  if (broken.length > 0) {
-    const first = broken[0];
-    return `对话插件无法读取：${first.name || first.id} — ${first.error}`;
-  }
-  return '';
-}
-
-/**
- * The installed plugin that owns the 对话 slot, or null.
- *
- * "Owns the slot" is the manifest's own declaration, read from the installed
- * list as `panelSlot === 'chat'`. There is no built-in id here on purpose: the
- * host does not know which plugin should render the conversation, only which
- * slot the plugin asked to fill.
- *
- * The three clauses mirror `chatSlotPlugin()` in Go exactly, and they have to:
- * the backend resolves the conversation button's target from the same rule, so a
- * page that mounted a plugin the host refuses (or refused one the host accepts)
- * would show an interface whose every capability call comes back "未获权限".
- *
- *  - `enabled`: a plugin the user switched off must not keep the tab;
- *  - `granted` contains `pet.surface`: the slot draws a sandboxed iframe outside
- *    the pet's own box, which is what that permission covers, so the slot would
- *    otherwise be a way around the permission prompt;
- *  - `panelSlot === 'chat'`: the slot is claimed by declaration.
- */
-function slotPlugin() {
-  return (installedPlugins || []).find(
-    (p) => p.enabled !== false &&
-      p.panelSlot === SLOT_CHAT &&
-      Array.isArray(p.granted) && p.granted.includes('pet.surface'),
-  ) || null;
-}
-
-/**
- * The sentence shown in an empty 对话 slot.
- *
- * Exported through a constant so the settings hint and this one cannot drift:
- * both tell the user the same two things - the plugin is missing, and where to
- * get it.
- */
-const CHAT_SLOT_HINT = '对话插件还没装好：点右上角的 ⚙ 打开控制中心，装上并授权它。';
 
 /**
  * Asks Go to open the 对话 slot's plugin surface (a click on the hover button).
@@ -998,22 +576,15 @@ function launchControlCenter() {
  * drift. Which cells exist is the markup's business; what they do is this map's.
  */
 const PET_MENU_ACTIONS = {
-  // 日程: whoever claims the `todos` SLOT, through its own floating surface - the column beside
+  // 日程: whoever claims the `todos` slot, through its own floating surface - the column beside
   // the pet. The slot name is resolved from the installed list, so the host never has to know
   // which plugin is "the todo one" (the same idea as the chat slot, see app_chat_slot.go).
   //
-  // The PANEL is the FALLBACK, not the target: with no claimant the gesture still has to do
-  // something, and an older installation's panel tab is what it used to do. That is also what
-  // keeps this cell alive until the panel is deleted for good
-  // (openspec/changes/todo-pomodoro-as-plugins, stage 3).
-  todos: () =>
-    openSlotPluginSurface('todos', () =>
-      App.SetPanelOpen(true).then((next) => {
-        applyLayout(next);
-        // The panel renders from `state`, and the list may have been edited in the
-        // control center since the last push.
-        return App.GetState().then(applyState);
-      })),
+  // The fallback used to be "open the panel's 待办 tab", and that tab is gone with the panel -
+  // the list is the plugin's data. So the fallback is now the same one the 番茄钟 cell uses:
+  // the control center, where the plugin can be installed, enabled and granted. A cell that
+  // quietly did nothing would read as a broken button.
+  todos: () => openSlotPluginSurface('todos', () => launchControlCenter()),
 
   // 对话: the conversation plugin's floating surface - the same thing the hover
   // button opens. That call folds the card away itself, or says why it cannot
@@ -1073,9 +644,7 @@ function applyState(next) {
   if (!next) return;
   state = next;
   renderPet();
-  renderTodos();
   renderBadge();
-  renderChatSlot();
   renderBackgroundPlugins();
   // Surface any data files that had to be reset, once per session.
   if (next.warnings?.length && !applyState._warned) {
@@ -1103,78 +672,6 @@ async function refresh() {
   } catch (err) {
     fail(err);
   }
-}
-
-function resetForm() {
-  editingId = null;
-  els.form.reset();
-  els.submit.textContent = '添加';
-}
-
-function startEdit(todo) {
-  editingId = todo.id;
-  els.title.value = todo.title;
-  els.notes.value = todo.notes || '';
-  els.due.value = todo.due ? toLocalInput(new Date(todo.due)) : '';
-  els.submit.textContent = '保存';
-  switchTab('todos');
-  els.title.focus();
-  els.title.select();
-}
-
-async function submitForm(event) {
-  event.preventDefault();
-  const payload = {
-    id: editingId || '',
-    title: els.title.value,
-    notes: els.notes.value,
-    due: els.due.value,
-  };
-  if (!payload.title.trim()) {
-    toast('请先输入内容');
-    return;
-  }
-  try {
-    const next = editingId
-      ? await App.UpdateTodo(payload)
-      : await App.AddTodo(payload);
-    resetForm();
-    applyState(next);
-  } catch (err) {
-    fail(err);
-  }
-}
-
-async function closePanel() {
-  try {
-    applyLayout(await App.SetPanelOpen(false));
-  } catch (err) {
-    fail(err);
-  }
-}
-
-function switchTab(name) {
-  // Arriving at the conversation is the moment the slot has to be right, and it is
-  // also the moment that DECIDES WHETHER THE TAB SHOULD EXIST.
-  //
-  // Both jobs belong to this one call, and they cannot be separated: reading the
-  // installed list is what resolves which plugin owns the slot, and the answer to
-  // that is the same fact that says whether the tab has anything to show. An
-  // earlier version of this function refused the switch outright when the tab was
-  // hidden - which deadlocked, because the refused call was the only thing that
-  // would have read the list and discovered the plugin that un-hides it.
-  //
-  // So the switch always goes through, `refreshChatSlot` re-reads, and
-  // `renderChatSlot` hides the tab and moves the panel back to 待办 if the fresh
-  // read finds no owner. The panel may therefore sit on the conversation for the
-  // duration of one backend call in the "plugin was just removed" case, which is
-  // invisible next to the round trip that removed it.
-  if (name === 'chat') {
-    refreshChatSlot();
-  }
-  els.tabs.forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
-  els.tabTodos.classList.toggle('hidden', name !== 'todos');
-  els.tabChat.classList.toggle('hidden', name !== 'chat');
 }
 
 /**
@@ -1227,111 +724,82 @@ function backgroundPlugins() {
 }
 
 /**
- * Re-reads the installed plugins and re-renders the 对话 slot from them.
+ * Re-reads the installed plugins and re-mounts the headless frames.
  *
- * The list is read here rather than at startup because the market program owns
- * installation: the pet must not cache "no chat plugin" from launch and show the
- * hint forever after one is installed. Reading it on arrival at the tab keeps
- * the cost off the startup path - the same reason the old plugin tab deferred its
- * market read - while still being fresh when it matters.
+ * The list is read on demand rather than at startup because the market program owns
+ * installation: the pet must not cache "no chat plugin" from launch and then keep using a
+ * stale answer.
+ *
+ * It used to be called refreshChatSlot, and it also rendered the panel's 对话 tab. The tab is
+ * gone, and dropping it nearly took the ONLY re-read path with it: the tab's watcher was the
+ * one thing that noticed an install, an update or a disable made by the market program while
+ * the pet was running. The surfaces still resolve on demand (pluginViewFor), but the HEADLESS
+ * FRAMES are mounted from a list that nothing else refreshes - so their sync is what this
+ * function exists for now, and the poll below is what calls it.
  */
-async function refreshChatSlot() {
-  // One read at a time.
-  //
-  // This used to be called only on arrival at the tab, where overlapping calls were
-  // not possible. It now also runs from the watch timer AND from applyLayout when
-  // the panel opens, so a slow read could be overtaken by a newer one and land
-  // second - rendering the older list over the newer one. Dropping the extra read
-  // is safe: the timer fires again, and the result being discarded is only ever a
-  // list that is already being superseded.
-  if (chatSlotReadInFlight) return;
-  chatSlotReadInFlight = true;
+async function refreshInstalled() {
+  // One read at a time. Two overlapping reads could land out of order and mount frames from
+  // a list that has already been replaced.
+  if (installedRefreshInFlight) return installedPlugins;
+  installedRefreshInFlight = true;
   try {
     try {
       installedPlugins = await App.PluginsInstalled();
     } catch (err) {
-      // A failed read must not leave the previous list in place: pretending the
-      // plugin is still installed would mount an iframe whose files may be gone.
+      // A failed read must not leave the previous list in place: pretending a plugin is
+      // still installed would mount an iframe whose files may be gone.
       installedPlugins = [];
       fail(err);
     }
-    renderChatSlot();
-    // The headless frame is resolved from the SAME list, in the same place. Both
-    // are answers to "what is installed right now", so splitting them across two
-    // reads would let the frame describe a list the slot had already replaced -
-    // and it was a real defect: this function assigned the list but only
-    // re-rendered the slot, so a background plugin installed or switched off while
-    // the pet was running kept its headless frame either way.
+    // The headless frames are resolved from the SAME read. Both are answers to "what is
+    // installed right now", so splitting them across two reads would let the frames describe
+    // a list that has already been replaced - which was a real defect while the panel existed.
     renderBackgroundPlugins();
+    return installedPlugins;
   } finally {
-    chatSlotReadInFlight = false;
+    installedRefreshInFlight = false;
   }
 }
 
 /**
- * Opens the panel on the conversation tab.
+ * How often the installed list is re-read.
  *
- * The tab is switched here rather than in applyLayout because the layout carries
- * geometry, not which tab is showing. Doing it after the window call means the
- * tab is right even if the geometry call fails.
+ * The market is a SEPARATE PROCESS with its own file, and Go's State carries no plugin
+ * information, so there is nothing to subscribe to: the only way to learn that a plugin was
+ * installed, updated, disabled or removed is to ask again.
+ *
+ * 1.5 s is the period the panel's tab watcher used, and it was chosen for exactly this
+ * problem: a background plugin switched off in the market has to stop running in the pet
+ * without a restart, and its headless frame is what "running" means. Live-reloading a frame
+ * is not a visible action, so the cost is a round trip per period rather than a flicker.
  */
-function openChat() {
-  App.OpenChat()
-    .then((layout) => {
-      applyLayout(layout);
-      switchTab('chat');
-    })
-    .catch((err) => {
-      // Still show the tab: if the pet cannot be re-cropped the user should see
-      // the conversation rather than nothing happening at all.
-      switchTab('chat');
-      fail(err);
-    });
-}
-
+const INSTALLED_WATCH_MS = 1500;
 // --- wiring ---------------------------------------------------------------
 
 function wire() {
   // --- plugins ------------------------------------------------------------
-  // The host owns every sandboxed frame on the page: the floating surface's
-  // frames and the panel slot's single frame. It is the only object here that
-  // knows about plugin interfaces, and the 对话 tab's content is one of them.
+  // The host owns every sandboxed frame on the page: the floating surface's frames and the
+  // headless ones. It is the only object here that knows about plugin interfaces.
+  //
+  // It used to take a third mount point (`chatSlot`, the panel's 对话 tab body). The panel
+  // is gone and the chat plugin renders itself as a floating surface, so the slot frame and
+  // the whole openSlot/closeSlot pair went with it - see plugin-host.js.
   pluginHost = new PluginHost(
     {
       pluginSurface: els.pluginSurface,
-      chatSlot: els.chatSlot,
       pluginBackground: els.pluginBackground,
     },
     { fail, debug },
   );
 
-  // The conversation plugin's identity is not known until the installed list is
-  // read, so the slot is filled from the first snapshot rather than here. The
-  // headless frame is resolved from the same snapshot, for the same reason.
-  refreshChatSlot();
+  // The installed list is not known until it is read, and both the surface routing and the
+  // headless frames are resolved from it, so it is read here rather than rendered.
+  refreshInstalled();
   renderBackgroundPlugins();
 
-  // The plugin market is a separate program (like the voice studio), not a page
-  // inside this one. Clicking the entry launches it; the pet keeps running.
-  //
-  // The state is applied because a launch can fail - the program is a sibling
-  // executable that may not be there - and Go reports that failure as the call's
-  // error, which fail() turns into the toast. There is nothing else to render:
-  // which market source to read is the market program's own setting now.
-  // 打开控制中心 from the panel header: one click, one call, no state to read back. The
-  // market is a separate process, so the button's whole observable effect is the launch -
-  // a button that also tried to render something would be the host doing the market's job
-  // again. Failure is visible rather than silent: the program is a sibling exe that may not
-  // be there, and "nothing happened" would look like a dead button.
-  els.openSettings.addEventListener('click', () => {
-    App.OpenPluginMarket()
-      .then((next) => {
-        applyState(next);
-        // The panel is in the way of a window that just opened over it.
-        closePanel();
-      })
-      .catch(fail);
-  });
+  // No 打开控制中心 button on the page any more: it lived in the panel header, and the panel
+  // is gone. The tray menu item and the pet's own 插件/设置 cells are the way in now - see
+  // PET_MENU_ACTIONS.
 
   // --- pet dragging -------------------------------------------------------
   // Coordinates are captured on pointerdown, but the drag is not started with
@@ -1440,21 +908,17 @@ function wire() {
     try {
       if (moved && startPromise) {
         // Make sure StartDrag has resolved before snapping, or the snap would
-        // race the panel collapse and use a stale rectangle.
+        // race the window move and use a stale rectangle.
         await startPromise;
         applyLayout(await App.EndDrag());
-      } else {
-        // A press that never moved is a click, and a click toggles the panel.
-        //
-        // It used to be HELD for the system's double-click interval, because a
-        // second click opened the conversation and letting the first one act at
-        // once made a double click unwind as click-click: the panel opened and
-        // closed and only then did the chat appear. The conversation entry is a
-        // hover button now (see els.chatButton), so nothing competes with this
-        // click any more - and the delay, which every click paid, is gone.
-        applyLayout(await App.TogglePanel());
-        if (editingId === null) els.title.focus();
       }
+      // A press that never moved is a DELIBERATE no-op now.
+      //
+      // It used to toggle the panel, then (briefly) also open the conversation. Both
+      // destinations are plugin surfaces today: 待办 and 对话 are reached from the pet's own
+      // right-click menu and from the hover button, and there is no panel left to toggle.
+      // A single click that did nothing visible would be worse than no gesture, so the
+      // click is simply not wired - the pet's title says what the gestures are.
     } catch (err) {
       fail(err);
     }
@@ -1478,18 +942,18 @@ function wire() {
   // Go emits the layout after asynchronous work (initial placement, snapping).
   EventsOn('pet:layout', applyLayout);
 
-  // Go asks for one of the panel tabs (the tray, or a plugin's own "待办"
-  // button). The payload says which, because the layout carries geometry rather
-  // than which tab is showing.
-  EventsOn('pet:chat-open', (payload) => {
-    switchTab(payload?.open === false ? 'todos' : 'chat');
-  });
+  // `pet:chat-open` is gone, and both halves went together: it told the PANEL to switch to
+  // its 对话 tab, the tab went with the panel, and Go's OpenChat (its only emitter) went
+  // with them. A listener left behind would be a subscription nothing ever sends - which is
+  // what the static gate's dangling-event scan reports, and it is right to.
+  //
+  // The conversation is opened by a BINDING now (OpenChatPluginSurface), because it is the
+  // chat plugin's floating surface and the host has no tab to select.
 
   // The pet was hidden or shown from outside the page (the global shortcut, or
   // the tray). The window is hidden natively - the page is not told to hide
-  // itself - so this only has to keep the panel's rendering honest: the settings
-  // panel reports the shortcut state, and a hidden pet also had its panel and
-  // bubbles folded away by Go.
+  // itself - so this only has to keep the rendering honest: the shortcut state
+  // lives in State, and Go folds a hidden pet's bubbles and surfaces away.
   EventsOn('pet:visible', (payload) => {
     const visible = payload?.visible !== false;
     if (state) state.petVisible = visible;
@@ -1513,39 +977,19 @@ function wire() {
       .catch(() => {});
   });
 
-  // Panel interaction.
-  els.close.addEventListener('click', closePanel);
+  // Escape unwinds the most transient thing on this page - a bubble - and nothing more.
+  //
+  // There were three rungs below it: a record edit, a form edit and the panel. All three
+  // belonged to the panel (the archive, the todo form, the section itself), so all three are
+  // gone. The conversation overlay is not in this list either: its interface belongs to the
+  // plugin, and the plugin decides what Escape means inside its own document.
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      // Escape unwinds the most transient thing first: a bubble, then a form edit,
-      // then the panel. The conversation overlay is not in this list any more: its
-      // interface belongs to the plugin, so the plugin decides what Escape means
-      // inside it. Neither is a record edit - there is no archive on this page to
-      // edit a record in. Nor is a confirmation dialog: there is no destructive
-      // action left on this page to confirm.
-      if (bubble) {
-        // Nothing on this page is a gate any more. The two that were - the summary
-        // prompt and the plan prompt - held the host timer's break and focus, and
-        // they belong to the pomodoro plugin now; its own surface decides what
-        // Escape means there. So a bubble is always dismissable here, and
-        // DismissBubble no longer refuses anything.
-        App.DismissBubble().then(applyLayout).catch(fail);
-      } else if (editingId !== null) {
-        resetForm();
-      } else {
-        closePanel();
-      }
-    }
-  });
-
-  els.tabs.forEach((tab) => {
-    tab.addEventListener('click', () => switchTab(tab.dataset.tab));
-  });
-
-  els.form.addEventListener('submit', submitForm);
-
-  els.clearDone.addEventListener('click', () => {
-    App.ClearDone().then(applyState).catch(fail);
+    if (e.key !== 'Escape') return;
+    // Nothing on this page is a gate any more. The two that were - the summary prompt and
+    // the plan prompt - held the host timer's break and focus, and they belong to the
+    // pomodoro plugin now, whose own surface decides what Escape means there. So a bubble is
+    // always dismissable here, and DismissBubble no longer refuses anything.
+    if (bubble) App.DismissBubble().then(applyLayout).catch(fail);
   });
 
   // --- bubble hover -------------------------------------------------------
@@ -1681,15 +1125,24 @@ async function boot() {
 wire();
 boot();
 
+// THE WATCHER THAT REPLACED THE PANEL TAB'S.
+//
+// The panel's 对话 tab was refreshed by a 1.5s poll, and that poll was the ONLY thing that
+// noticed the market program installing, updating, disabling or removing a plugin while the
+// pet ran. Deleting the panel deleted the poll, and with it the headless frames' ability to
+// follow the installed list - a background plugin switched off in the control center would
+// have kept running in the pet until the next launch. This is that poll, minus the tab: it
+// re-reads the list and re-syncs the frames, which is the part that was load-bearing.
+setInterval(() => {
+  refreshInstalled().catch(() => {});
+}, INSTALLED_WATCH_MS);
+
 // Keep the badge honest between full refreshes.
 //
-// There is no "next reminder at" line here any more: the host has no reminder
-// schedule to display (the todo plugin owns reminders now), so this poll only
-// re-reads what it still renders - the open-todo count. The two things it used to
-// also keep in step (the countdown badge and the strip) went with the host timer,
-// and the 250ms local countdown tick below went with them: it existed to correct
-// drift against Go's own rounding of a phase deadline, and there is no phase here
-// to count down.
+// There is no "next reminder at" line here any more: the host has no reminder schedule to
+// display (the todo plugin owns reminders now), so this poll only re-reads what it still
+// renders. The badge itself now counts the list the TODO PLUGIN publishes, which Go reads
+// from the plugin's `share` snapshot - so an edit in the plugin shows up here one poll late.
 setInterval(() => {
   if (!state) return;
   renderBadge();

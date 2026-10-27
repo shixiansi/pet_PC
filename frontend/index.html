@@ -9,14 +9,13 @@
 <body>
   <!-- Everything is positioned from the layout the Go side computes. -->
   <div id="stage">
-    <div id="pet" title="拖动移动 · 单击打开待办 · 悬停出现对话按钮">
+    <!-- The pet. It is the whole product: everything else and anything the pet has to say
+         hangs off its box. -->
+    <div id="pet" title="拖动移动 · 单击打开对话 · 悬停出现对话按钮">
       <img id="pet-image" alt="桌宠" draggable="false" />
-      <!-- The open-todo count, inside the pet box so it cannot draw outside the
-           window region. It is the only badge left: the countdown above it
-           belonged to the host's timer, and the timer is the pomodoro plugin's
-           now (openspec/changes/todo-pomodoro-as-plugins). The plugin draws its
-           own countdown in its own surface, which is not part of this box and
-           therefore could never have been stacked here. -->
+      <!-- The open-todo count, inside the pet box so it cannot draw outside the window
+           region. It counts what the TODO PLUGIN publishes (its `todo-list` snapshot),
+           because the list is that plugin's data now. -->
       <span id="badge" class="badge hidden"></span>
 
       <!-- The conversation entry: painted by hover, opened by a click (the gesture
@@ -142,10 +141,10 @@
     <!-- Plugin floating surface: the mount point for a plugin's own window,
          placed at the rectangles Go computed for it.
 
-         It is the THIRD occupant of the slot beside the pet (with the panel and
-         the speech bubble), and only one of the three is ever visible. What it is
-         NOT is a second window: Wails v2 has no multi-window API and the app finds
-         its window by class name, so a plugin's interface has to live inside this
+         It is the second occupant of the slot beside the pet (with the speech
+         bubble), and only one of the two is ever visible. What it is NOT is a
+         second window: Wails v2 has no multi-window API and the app finds its
+         window by class name, so a plugin's interface has to live inside this
          one. The rectangles come from the layout - this element never derives a
          size of its own.
 
@@ -156,102 +155,27 @@
          granted `events` runs here, permanently mounted and hidden.
 
          It exists because a plugin's events are delivered only to a frame the host
-         has mounted, and some plugins must act while no interface is on screen - a
-         voice plugin has to hear the pomodoro end whether or not the panel is open.
+         has mounted, and some plugins must act while no interface is on screen - the
+         todo plugin has to fire a reminder whether or not anything is open.
          Hidden rather than merely unpainted, so it can never be clicked or take
          layout space. See plugin-host.js's openBackground. -->
     <div id="plugin-background" class="hidden"></div>
 
-    <section id="panel" class="hidden" aria-label="待办与日程">
-      <header class="panel-head">
-        <div class="tabs">
-          <button class="tab active" data-tab="todos">待办</button>
-          <!-- The 对话 tab exists only while a plugin fills it. It is hidden
-               (not merely disabled) when none does, because a tab that opens onto
-               an explanation of why it is empty is worse than no tab: the pet has
-               no conversation of its own any more, so there is nothing for the
-               user to do there. main.js owns the visibility; the markup always
-               contains the button so the data-tab values stay stable. -->
-          <button class="tab" id="tab-chat-btn" data-tab="chat">对话</button>
-          <!-- 「记录」 and 「设置」 are gone, and this is where the panel stops being the
-               place for either.
+    <!-- THERE IS NO PANEL ANY MORE.
+         It used to be the 380x520 column beside the pet: a 待办 tab and a 对话 tab. Both
+         moved out, one at a time, and the rectangle went with them.
 
-               记录 went with the host's timer. It was folded into the 待办 tab as a
-               collapsed archive when its own tab retired, and it is the pomodoro plugin's
-               now: the plugin keeps its sessions in its own storage and lists them in its
-               own floating surface, so the panel has no third copy to draw - and no
-               record left to edit.
+           待办 -> the todo plugin's own floating surface (right-click -> 日程). The list is
+                   that plugin's data, so the host has nothing to draw and nothing to edit.
+           对话 -> the chat plugin's floating surface (the hover button, or right-click ->
+                  对话). It is the plugin's own three blocks now, not a tab.
 
-               设置 moved to the control center (PetPCPluginMarket.exe) - the window that
-               can hold five groups of controls. What could not move went to the places that
-               own it: the program-level actions (打开控制中心 / 退出 / 立刻提醒 / 打开数据目录)
-               to the tray menu, and the pet's own gestures to the pet. Nothing is left
-               reachable only from a tab that no longer exists. -->
-        </div>
-        <!-- The way into the control center, where the user already is.
-             It used to be a button on the 设置 tab; when that tab retired it briefly became
-             a tray-menu item only, i.e. "right-click an icon that may be folded into the
-             overflow area, then pick an entry". That is not an entry point, it is a rumour:
-             a settings surface needs a visible control in the window the user already has
-             open. The tray item stays as the way in while the panel is closed.
+         What the panel's rectangle still buys is the WINDOW GEOMETRY: the layout keeps
+         its panel rect so a plugin's floating surface has somewhere to sit beside the pet,
+         and `Layout.PanelOpen` is gone with the section it described. See
+         openspec/changes/todo-pomodoro-as-plugins, stage 3. -->
 
-             The variation selector (U+FE0E) keeps the gear a TEXT glyph; without it Windows
-             substitutes the colour emoji, which has a different size and baseline from the
-             × beside it. -->
-        <button id="open-settings" class="icon-btn" title="打开控制中心（设置与插件）" aria-label="打开控制中心">&#9881;&#65038;</button>
-        <button id="close-panel" class="icon-btn" title="收起面板">×</button>
-      </header>
-
-      <!-- Conversation view: a MOUNT POINT, not controls.
-           Since the chat plugin renders the conversation, this tab body holds
-           nothing but #chat-slot. The host resolves which installed plugin owns
-           the slot and mounts its sandboxed iframe here; with none installed the
-           slot shows an explanation instead of an empty frame (see main.js).
-           One id is all that is left on purpose: the controls that used to live
-           here are the plugin's own business now, and a second copy of them in
-           the host is the thing this change removed. -->
-      <div id="tab-chat" class="tab-body hidden">
-        <div id="chat-slot" class="chat-slot"></div>
-      </div>
-
-      <!-- Todo view -->
-      <div id="tab-todos" class="tab-body">
-        <!-- No pomodoro strip. The countdown, the controls and the records archive
-             were the host's timer, and the timer is the pomodoro plugin's now: it
-             draws its own phase, countdown and session list in its own floating
-             surface, and it keeps its records in its own storage. What is left
-             here is one job - the todo list - which is also why the strip's
-             「放弃」 button and the folded 记录 archive are gone rather than moved:
-             both acted on a timer this page no longer runs (design.md §4.1). -->
-
-        <form id="todo-form" class="todo-form">
-          <input id="todo-title" type="text" placeholder="添加一件事…" autocomplete="off" maxlength="200" />
-          <div class="form-row">
-            <input id="todo-due" type="datetime-local" title="截止时间（可选）" />
-            <button type="submit" class="primary">添加</button>
-          </div>
-          <textarea id="todo-notes" rows="2" placeholder="备注（可选）" maxlength="2000"></textarea>
-        </form>
-
-        <div class="list-head">
-          <span id="summary" class="summary"></span>
-          <button id="clear-done" class="link-btn">清除已完成</button>
-        </div>
-
-        <ul id="todo-list" class="todo-list"></ul>
-        <p id="empty-hint" class="empty">还没有待办，上面添加一条吧。</p>
-      </div>
-
-      <p id="toast" class="toast hidden"></p>
-
-      <!-- No confirmation dialog. It was drawn INSIDE the panel rather than with
-           window.confirm() - a native dialog is rendered by WebView2 as a separate
-           browser-chrome window that ignores the app's styling and sits outside the
-           region the window is cropped to - and it guarded the two actions that
-           could lose work: 跳过 a focus phase and 放弃当前番茄钟. Both were the host
-           timer's, so the dialog has no caller left; an unreachable dialog is a
-           second UI nobody can check. -->
-    </section>
+    <p id="toast" class="toast hidden"></p>
   </div>
 
   

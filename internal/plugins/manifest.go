@@ -39,13 +39,23 @@ type Manifest struct {
 	// declares no hosts: an unenforceable allow-list is worse than none, since
 	// the permission would read as "restricted" while permitting everything.
 	NetHosts []string `json:"netHosts,omitempty"`
-	// Panel allows the plugin to register an in-panel view (the plugin tab's
-	// 380x520 scroll area).
+	// Panel is GONE from the pet, and kept only where it still means something.
+	//
+	// It used to allow a plugin an in-panel view (the panel tab's 380x520 scroll area). The
+	// panel itself has retired (openspec/changes/todo-pomodoro-as-plugins, stage 3), so no
+	// host reads this field any more - see PanelSlot for what replaced it, and note that the
+	// field is still parsed because an installed manifest from an older build carries it and
+	// a parse that rejected unknown keys would make every such plugin uninstallable.
 	Panel bool `json:"panel"`
-	// PanelSlot names WHICH panel slot the plugin's view occupies. Empty means
-	// the generic plugin panel; "chat" is the pet's conversation slot. It is a
-	// name rather than a reserved id, so slot ownership is a declaration and not
-	// a built-in exception.
+	// PanelSlot names WHICH slot the plugin's view occupies, and it is the pet's MENU that
+	// resolves the name now - not a panel tab.
+	//
+	// The panel is gone, so `chat` no longer names a tab body; what survives is the half that
+	// was always about finding an owner: "who do I ask when the user picks this menu cell".
+	// `todos` and `pomodoro` are the menu's own slots - see PanelSlotTodos / PanelSlotPomodoro.
+	// Kept as `panelSlot` in JSON rather than renamed to `menuCell`: an installed manifest is
+	// read from disk and a rename would make every plugin already on a user's machine an
+	// illegal manifest on the next launch.
 	PanelSlot string `json:"panelSlot,omitempty"`
 	// Surface is the list of rectangles the plugin wants the window region to
 	// be extended by. Coordinates are CSS pixels relative to the pet's

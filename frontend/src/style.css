@@ -124,10 +124,6 @@ body {
    * The pet must sit on the completely untouched desktop, so nothing is applied
    * here at all. */
 }
-/* While the panel is open the pet acts as the panel's anchor, not a button. */
-#pet.anchored {
-  cursor: default;
-}
 
 /* --- conversation button -------------------------------------------------- */
 
@@ -182,14 +178,6 @@ body {
   background: rgba(44, 48, 58, 0.96);
 }
 
-/* With the panel open the pet is its anchor and the panel already carries the
- * 对话 tab - a second entry there would open a surface over the window the user
- * is already looking at. */
-#pet.anchored .pet-chat {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-}
 
 .pet-chat-icon {
   width: 14px;
@@ -242,420 +230,34 @@ body {
   display: none !important;
 }
 
-/* --- panel --------------------------------------------------------------- */
-
-#panel {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius);
-  /* No box-shadow.
-   *
-   * A shadow is drawn OUTSIDE the panel's border box, so it painted over the
-   * desktop beyond the panel's edge - and the pet box sits immediately beside the
-   * panel, so the shadow fell across the pet. Measured against a solid backdrop:
-   * with the panel open the pixels just right of the panel read 227..255 in a
-   * smooth ~26px ramp, while with the panel closed they were a flat 255. That
-   * gradient beside the pet is what looked like a "blurred background".
-   *
-   * The panel is opaque and the desktop is visible around it, so a drop shadow
-   * has nothing to sit on and only dirties the area next to the pet. */
-  overflow: hidden;
-  /* No backdrop-filter: the page behind the panel is transparent, so there is
-   * nothing to blur - it would only cost a compositing pass on every frame.
-   * The Go side fills the window with the panel colour during the resize
-   * instead, which is what actually keeps the transition seamless. */
-  /* The panel is interactive, so it must not inherit the pet's drag handle. */
-  --wails-draggable: no-drag;
-  animation: panel-in 0.14s ease-out;
-}
-
-@keyframes panel-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-.panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--panel-border);
-  flex: 0 0 auto;
-}
-
-.tabs {
-  display: flex;
-  gap: 4px;
-}
-
-.tab {
-  padding: 5px 12px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-dim);
-  font-family: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.tab:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text);
-}
-
-.tab.active {
-  background: rgba(76, 141, 255, 0.16);
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.icon-btn {
-  width: 26px;
-  height: 26px;
-  /* The glyph is centred, and the offset is MEASURED rather than guessed.
-   *
-   * The default button metrics centre the line box, not the ink: "×" is a math
-   * symbol whose ink sits high in an ascent-heavy box, so the original rule
-   * (inherited 7px/12px padding, 18px font) drew it 1.5px above the button's
-   * centre - visible on a 26px square, and exactly the kind of "off by a hair"
-   * that reads as a rendering bug.
-   *
-   * Flex centring plus `line-height: 1` removes the font's leading from the box,
-   * which gets the line box centred but leaves the ink 2.5px LOW. `padding-bottom:
-   * 5px` then lifts the content box by half of it, landing the ink at 0.00px.
-   *
-   * Both numbers come from measuring the glyph in the real engine (canvas
-   * TextMetrics actualBoundingBox vs the button's rect), not from eyeballing:
-   * 18px/7px padding -> +1.5px, 17px/padding 0 -> +2.5px, 17px/5px bottom -> 0.
-   * If the font or font-size here changes, re-measure rather than adjusting by
-   * feel. */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 0 5px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-dim);
-  font-family: inherit;
-  font-size: 17px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.icon-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text);
-}
-
-.tab-body {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  flex: 1 1 auto;
-  padding: 10px;
-  gap: 10px;
-  overflow: hidden;
-}
-
-/* --- forms --------------------------------------------------------------- */
-
-.todo-form {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex: 0 0 auto;
-}
-
-.form-row {
-  display: flex;
-  gap: 6px;
-}
-
-input[type="text"],
-input[type="datetime-local"],
-textarea {
-  width: 100%;
-  padding: 7px 9px;
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 13px;
-  outline: none;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-input[type="text"]:focus,
-input[type="datetime-local"]:focus,
-textarea:focus {
-  border-color: var(--accent);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-textarea {
-  resize: none;
-}
-
-input[type="datetime-local"] {
-  flex: 1 1 auto;
-  /* The native picker indicator is near-invisible on dark backgrounds. */
-  color-scheme: dark;
-}
-
-button {
-  padding: 7px 12px;
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
-}
-
-button:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-button.primary {
-  background: var(--accent);
-  border-color: transparent;
-  color: #fff;
-  font-weight: 600;
-  flex: 0 0 auto;
-}
-
-button.primary:hover {
-  background: var(--accent-hover);
-}
-
-button.danger {
-  background: rgba(224, 85, 78, 0.16);
-  border-color: rgba(224, 85, 78, 0.4);
-  color: #ff8b85;
-}
-
-button.danger:hover {
-  background: rgba(224, 85, 78, 0.26);
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.link-btn {
-  padding: 2px 4px;
-  border: 0;
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 12px;
-}
-
-.link-btn:hover {
-  background: transparent;
-  color: var(--text);
-  text-decoration: underline;
-}
-
-/* --- scrollbars ---------------------------------------------------------- */
-
-/* One scrollbar style for every scrolling surface inside the panel.
+/* --- NO PANEL ------------------------------------------------------------ */
+/* Everything in this section described #panel: the 380x520 column beside the pet, its header
+ * with the gear and the close button, its tab strip, and the body each tab filled. The panel
+ * is gone (openspec/changes/todo-pomodoro-as-plugins, stage 3) - 待办 became the todo plugin's
+ * floating surface and 对话 the chat plugin's own blocks - so every rule that styled it is
+ * deleted rather than left dormant. A rule for a section nobody draws is a rule that can win
+ * a cascade later, and the panel's selector was the widest one in this file.
  *
- * WebView2 is Chromium, so the default bar is the desktop's own rounded grey
- * widget: it is drawn opaque, ignores the panel's dark translucent palette, and
- * on a 380px panel it eats 15px of the content column. Every surface that
- * scrolls therefore gets this treatment, through one rule rather than one per
- * element - the settings tab and the todo list already had private copies, so the
- * chat log was left on the default and looked like a different application.
+ * What did NOT go with it: `.toast` (still the page's one way to say something went wrong) and
+ * `.plugin-frame` (the floating surface's own frame, further down). Both are checked below. */
+/* --- NO FORM CONTROLS, NO LIST, NO SCROLLBARS ---------------------------- */
+/* Everything from here down to the bubble belonged to the panel:
  *
- * The bar is deliberately narrow (8px), trackless, and translucent white: it
- * reads as a hint about position rather than as a control, which is what a
- * scrollbar on a 380px panel should be. None of this paints outside its element's
- * box, so the window-region rules are untouched.
+ *   .todo-form / .form-row / input / textarea / button / .link-btn  the todo form, the
+ *                                                                  settings rows and the
+ *                                                                  confirm dialog's buttons
+ *   .todo-list / .list-head / .summary / .todo-item / .empty        the list itself
+ *   the scrollbar group (.todo-list, .chat-log, ...)                the panel's scrollers
  *
- * Two surfaces were dropped from this rule when their contents left the panel: the
- * records archive (the pomodoro plugin keeps its own sessions now) and, before it,
- * the settings page. A selector left behind would be a rule nothing can match. */
-.todo-list,
-.chat-log {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
-}
-
-.todo-list::-webkit-scrollbar,
-.chat-log::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.todo-list::-webkit-scrollbar-track,
-.chat-log::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.todo-list::-webkit-scrollbar-thumb,
-.chat-log::-webkit-scrollbar-thumb {
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.16);
-}
-
-.todo-list::-webkit-scrollbar-thumb:hover,
-.chat-log::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.30);
-}
-
-/* The corner where two bars meet: without this Chromium paints its default
- * opaque square there, which is the one pixel of the native widget that survives
- * `height: 8px` on the horizontal bar. */
-.todo-list::-webkit-scrollbar-corner,
-.chat-log::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
-/* --- list ---------------------------------------------------------------- */
-
-.list-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-
-.summary {
-  color: var(--text-dim);
-  font-size: 12px;
-}
-
-.todo-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  overflow-y: auto;
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.todo-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 7px 8px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.045);
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-
-.todo-item:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.todo-item.overdue {
-  border-color: rgba(224, 85, 78, 0.45);
-}
-
-.todo-item.done .todo-title {
-  color: var(--text-dim);
-  text-decoration: line-through;
-}
-
-.todo-item input[type="checkbox"] {
-  margin: 2px 0 0;
-  width: 15px;
-  height: 15px;
-  flex: 0 0 auto;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-.todo-main {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.todo-title {
-  display: block;
-  word-break: break-word;
-  line-height: 1.35;
-}
-
-.todo-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 3px;
-  font-size: 11px;
-  color: var(--text-dim);
-}
-
-.todo-meta .due.overdue {
-  color: #ff8b85;
-}
-
-.todo-meta .due.soon {
-  color: var(--warn);
-}
-
-.todo-notes {
-  margin-top: 3px;
-  font-size: 11px;
-  color: var(--text-dim);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.todo-actions {
-  display: flex;
-  gap: 2px;
-  flex: 0 0 auto;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-.todo-item:hover .todo-actions {
-  opacity: 1;
-}
-
-.todo-actions button {
-  padding: 3px 6px;
-  border: 0;
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 12px;
-}
-
-.todo-actions button:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text);
-}
-
-.empty {
-  color: var(--text-dim);
-  font-size: 12px;
-  text-align: center;
-  margin: 14px 0;
-}
-
+ * All of it is gone with the panel. The list is the todo plugin's data and the plugin draws
+ * its own controls (bringing its own stylesheet, inside its own iframe); the settings rows
+ * moved to the control center; the confirm dialog went with the timer's two destructive
+ * actions. A rule for a class no document contains is dead CSS with a cost: it is the thing
+ * the next person greps for when they wonder whether a `.todo-item` still exists.
+ *
+ * `button`/`input` base styles went too, and that is the surprising part worth stating: NO
+ * element on this page is a form control any more. The pet is a picture, a hover button and
+ * two bubble cards - and the bubble's own buttons carry their own classes. */
 /* --- speech bubble ------------------------------------------------------- */
 
 /* The reminder, the todo picker and the summary prompt all use this one card,
@@ -899,87 +501,20 @@ button:disabled {
   }
 }
 
-/* --- chat tab ------------------------------------------------------------ */
-
-/* The 对话 tab's body is a MOUNT POINT, not a conversation UI.
- *
- * The conversation itself is a plugin: the host resolves which installed plugin
- * claims the slot and mounts its sandboxed iframe here, and until one is
- * installed there is nothing to draw but a sentence saying so. That is why the
- * rules below are three lines of layout and one hint, and why they carry no
- * message styles at all - the messages belong to the plugin, which brings its
- * own stylesheet inside its own iframe.
- *
- * Two consequences for the rules below:
- *
- *  1. Nothing here may draw outside the panel box. Same rule as the bubble: no
- *     shadow, no filter, no transform that spills. Immediately outside is the
- *     user's desktop.
- *  2. The slot stretches to fill the tab body (a fixed-height flex child) and the
- *     frame inside it stretches to fill the slot. Neither may size itself from
- *     its content: the panel is cropped to a fixed 380x520 rectangle, so a plugin
- *     page that grew its container would put the drawn box and the region out of
- *     step. */
-
-.chat-slot {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-/* The placeholder shown when no plugin owns the slot.
- *
- * It is deliberately plain text rather than an empty box: a blank tab is
- * indistinguishable from a broken one, and the user's next move - open the
- * plugin market, install the chat plugin, tick its permissions - cannot be
- * guessed from nothing. The text itself is written by main.js, next to the same
- * sentence Go returns when the pet is double-clicked with no plugin installed,
- * so the two cannot drift. */
-.chat-slot-empty {
-  align-items: center;
-  justify-content: center;
-  color: var(--text-dim);
-  font-size: 12px;
-  line-height: 1.7;
-  text-align: center;
-  padding: 0 18px;
-}
-
-/* The plugin's frame fills the slot. `height: 0` plus a grow factor is the
- * standard way to size a flex child from its container rather than from its
- * content, which is what keeps the frame inside the rectangle the window was
- * cropped to no matter how tall the plugin's page wants to be. */
-.chat-slot > .plugin-frame {
-  flex: 1 1 auto;
-  min-height: 0;
-  height: 0;
-}
-
-/* The host's own conversation UI used to be styled here: the message list, the
- * bubbles, the streaming caret, the input form, and - below the panel section -
- * the live overlay's reply card, thought puffs and input bar.
- *
- * All of it is gone with the code that built it. The conversation is a plugin
- * now: it renders inside its own sandboxed iframe and brings its own stylesheet
- * (see .chat-slot above, which is the only thing left for the host to lay out).
- * Keeping the old rules would have been worse than dead CSS - they name
- * rectangles the window is no longer cropped to, so the next person to reuse a
- * class would size a box against a region that does not exist.
- *
- * .chat-log survives in the scrollbar group at the top of this file: it is a
- * selector in a shared rule, and removing it there is a separate decision about
- * that rule's membership. */
-
+/* --- NO CHAT SLOT -------------------------------------------------------- */
+/* The 对话 tab's mount point, its "no plugin here" hint and the frame fill inside it are
+ * gone with the panel. The conversation is the chat plugin's FLOATING SURFACE now, and its
+ * frames are sized by the geometry Go computed for them (see the plugin-surface section
+ * below) - not by a flex child inside a tab body that no longer exists. */
 /* --- plugin surface ------------------------------------------------------- */
 
 /* The host's plugin frames, and the floating surface's mount point.
  *
- * The base `.plugin-frame` rule is shared with the 对话 slot (see `.chat-slot >
- * .plugin-frame` above): both places mount a sandboxed plugin iframe into a box
- * the host sizes, and neither may size itself from the plugin's content - the
- * panel is cropped to a fixed 380x520 rectangle, so a page that grew its frame
- * would put the drawn box and the window region out of step.
+ * The frames are sized by the geometry Go computed for them - the same rectangles the
+ * native window region was cropped to - and never from the plugin's own content. That is
+ * the rule the 对话 slot used to share with this section, and the slot is gone with the
+ * panel: a floating surface is the only place a plugin iframe is mounted now, and the
+ * plugin declares its rectangles (manifest `surface`) instead of growing a container.
  *
  * The mount point is a pass-through: it covers the window and takes no clicks
  * itself, so the desktop stays reachable everywhere a plugin did not declare a

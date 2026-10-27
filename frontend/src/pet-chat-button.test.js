@@ -119,9 +119,11 @@ describe('pet-chat: painted by hover, and only then', () => {
     expect(hover).toMatch(/visibility:\s*visible/);
   });
 
-  it('an anchored pet (panel open) does not offer it', () => {
-    expect(rule('#pet.anchored .pet-chat')).toMatch(/visibility:\s*hidden/);
-    expect(rule('#pet.anchored .pet-chat')).toMatch(/pointer-events:\s*none/);
+  it('there is no anchored pet any more, because there is no panel to anchor it to', () => {
+    // The rule used to hide the button while the panel was open - the pet was the panel's
+    // anchor then, and the panel already carried a 对话 tab. Both are gone, so nothing sets
+    // that state and a rule for it would be styling something the page cannot reach.
+    expect(css).not.toMatch(/\.anchored/);
   });
 
   it('it moves by opacity alone, so nothing is drawn outside the box mid-animation', () => {
@@ -159,18 +161,22 @@ describe('pet-chat: a click opens the conversation, a press starts no drag', () 
 describe('pet-chat: a click on the pet toggles the panel at once', () => {
   beforeEach(resetPage);
 
-  it('acts on the first click, without waiting for a second one', async () => {
+  it('a click on the pet opens NOTHING - not a panel, not the conversation', async () => {
+    // The click used to toggle the panel, and before that it was held for the system's
+    // double-click interval so two clicks would not unwind as open-then-close. The panel is
+    // gone and both of its destinations are plugin surfaces reached from the pet's menu and
+    // from the hover button, so a bare click has no target left.
     const { calls } = await mountApp();
     const pet = $('pet');
     pointer(pet, 'pointerdown', 40, 40);
     pointer(pet, 'pointerup', 40, 40);
     await tick();
 
-    expect(callsTo(calls, 'TogglePanel').length).toBe(1);
     expect(callsTo(calls, 'OpenChatPluginSurface').length).toBe(0);
+    expect(calls.some((c) => /Panel/.test(c.name))).toBe(false);
   });
 
-  it('a double click is two toggles now, never a chat surface', async () => {
+  it('a double click is the same nothing', async () => {
     const { calls } = await mountApp();
     const pet = $('pet');
     for (let i = 0; i < 2; i += 1) {
@@ -178,8 +184,8 @@ describe('pet-chat: a click on the pet toggles the panel at once', () => {
       pointer(pet, 'pointerup', 40, 40);
     }
     await tick();
-    expect(callsTo(calls, 'TogglePanel').length).toBe(2);
     expect(callsTo(calls, 'OpenChatPluginSurface').length).toBe(0);
+    expect(calls.some((c) => /Panel/.test(c.name))).toBe(false);
   });
 
   it('the click/double-click arbitration is gone from main.js', () => {

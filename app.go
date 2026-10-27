@@ -30,7 +30,6 @@ type App struct {
 	mu        sync.Mutex
 	hwnd      desktop.Window // native window handle, resolved after startup
 	scale     float64        // DPI scale factor of the window's monitor
-	panelOpen bool
 	petRect   desktop.Bounds // the pet's own rect in physical px
 	// petOffsetX/Y is the pet's position inside the window, and winSizeW/H is the
 	// window's size. Both are constant for a given pet size and side, so they can
@@ -326,11 +325,11 @@ func (a *App) startTray() {
 	tray, err := desktop.NewTray(desktop.TrayOptions{
 		Tooltip:    "PetPC 桌宠",
 		Items:      items,
-		OnActivate: func() { a.TogglePanel() },
+		OnActivate: func() { a.toggleTodoSurface() },
 		OnCommand: func(id uintptr) {
 			switch id {
 			case desktop.TrayCmdTogglePanel:
-				a.TogglePanel()
+				a.toggleTodoSurface()
 			case desktop.TrayCmdRemindNow:
 				if _, err := a.RemindNow(); err != nil {
 					log.Printf("pet: remind now: %v", err)
@@ -480,18 +479,21 @@ func clampToWork(x, y, w, h int, work desktop.Bounds) (int, int) {
 //     and the panel is already rendered when it appears, so opening it is
 //     instantaneous.
 type Layout struct {
-	PanelOpen bool    `json:"panelOpen"`
-	WindowW   float64 `json:"windowW"`
-	WindowH   float64 `json:"windowH"`
-	PetX      float64 `json:"petX"`
-	PetY      float64 `json:"petY"`
-	PetW      float64 `json:"petW"`
-	PetH      float64 `json:"petH"`
-	PanelX    float64 `json:"panelX"`
-	PanelY    float64 `json:"panelY"`
-	PanelW    float64 `json:"panelW"`
-	PanelH    float64 `json:"panelH"`
-	// PanelOnRight is true when the panel sits to the right of the pet.
+	WindowW float64 `json:"windowW"`
+	WindowH float64 `json:"windowH"`
+	PetX    float64 `json:"petX"`
+	PetY    float64 `json:"petY"`
+	PetW    float64 `json:"petW"`
+	PetH    float64 `json:"petH"`
+	// No PanelOpen member. It said whether the panel was showing, and the panel is gone; what
+	// the four Panel* offsets below still are is the SLOT beside the pet - the rectangle a
+	// plugin's floating surface may occupy - so they stay, and they stay named for the slot
+	// they define rather than for a section that no longer exists.
+	PanelX float64 `json:"panelX"`
+	PanelY float64 `json:"panelY"`
+	PanelW float64 `json:"panelW"`
+	PanelH float64 `json:"panelH"`
+	// PanelOnRight is true when that slot sits to the right of the pet.
 	PanelOnRight bool    `json:"panelOnRight"`
 	Scale        float64 `json:"scale"`
 
@@ -573,7 +575,6 @@ func (a *App) applyWindowGeometry() (Layout, error) {
 	}
 
 	a.mu.Lock()
-	open := a.panelOpen
 	pet := a.petRect
 	hasBubble := a.bubble != nil
 	pluginSurface := a.pluginSurface
@@ -694,20 +695,19 @@ func (a *App) applyWindowGeometry() (Layout, error) {
 
 	// Crop the window to the BOUNDING BOXES of what the page paints.
 	//
-	// While nothing is beside the pet that is just the pet. While the panel is open it is
-	// the union of the panel and the pet, and while a bubble is up it is the union of that
-	// bubble and the pet.
+	// While nothing is beside the pet that is just the pet. While a plugin's surface is up it
+	// is the union of that surface's rectangles and the pet, and while a bubble is up it is the
+	// union of that bubble and the pet. (The panel used to be the third case, and it is gone.)
 	//
-	// The union matters because the window is a fixed size larger than what is drawn (the
-	// pet is shorter than the panel, so there are unpainted margins above and below it
-	// beside the panel). Clearing the region exposed those margins, and with the DWM frame
-	// extended over the client area they rendered as a translucent glass strip - the pale
-	// band along the top edge of the pet's column. Cropping keeps every visible pixel one
-	// that the page actually drew.
+	// The union matters because the window is a fixed size larger than what is drawn (the pet
+	// is shorter than the slot beside it, so there are unpainted margins above and below it).
+	// Clearing the region exposed those margins, and with the DWM frame extended over the
+	// client area they rendered as a translucent glass strip - the pale band along the top
+	// edge of the pet's column. Cropping keeps every visible pixel one that the page drew.
 	//
-	// Boxes, NOT shapes: the panel's rounded corners and the bubble's radius stay in the CSS,
-	// and the region is deliberately square. Handing the region a radius used to be how the
-	// corners were cut, and it is what made them jagged - a GDI region is a 1-bit mask, so
+	// Boxes, NOT shapes: the bubble's radius and a plugin's rounded rectangles stay in the
+	// CSS, and the region is deliberately square. Handing the region a radius used to be how
+	// the corners were cut, and it is what made them jagged - a GDI region is a 1-bit mask, so
 	// the OS drew a staircase over the browser's anti-aliased edge (see SetWindowRegion in
 	// internal/desktop). The page's own alpha now defines the shape, and because the window
 	// is translucent the corner pixels composite to the desktop.
@@ -718,11 +718,6 @@ func (a *App) applyWindowGeometry() (Layout, error) {
 	var regions []desktop.Bounds
 	var surfaceView *PluginSurfaceView
 	switch {
-	case open:
-		regions = []desktop.Bounds{
-			{X: panelX, Y: panelY, Width: panelW, Height: panelH},
-			{X: petX, Y: petY, Width: petW, Height: petH},
-		}
 	case pluginSurface != nil:
 		// A plugin floating surface: the plugin's declared rectangles, clamped
 		// into the window, plus the pet.
@@ -796,7 +791,6 @@ func (a *App) applyWindowGeometry() (Layout, error) {
 	// real position.
 	petScreen := desktop.Bounds{X: petScreenX, Y: petScreenY, Width: petW, Height: petH}
 	layout := Layout{
-		PanelOpen:    open,
 		WindowW:      float64(totalW) / s,
 		WindowH:      float64(totalH) / s,
 		PetX:         float64(petX) / s,
@@ -936,18 +930,29 @@ type DragState struct {
 // the pet (it always has room for the panel), so the frontend must move the pet
 // by the pointer delta and let Go place the window around it.
 func (a *App) StartDrag() (DragState, error) {
+	// Dragging folds the slot away, because a card that stays put while the pet moves is a card
+	// pointing at nothing. The panel used to be folded here; it is gone, so what remains is the
+	// bubble and any floating surface - and both are folded by the same helper the rest of the
+	// window code uses.
 	a.mu.Lock()
-	open := a.panelOpen
-	a.mu.Unlock()
-	// Dragging happens with the panel folded away.
-	if open {
-		if _, err := a.SetPanelOpen(false); err != nil {
-			return DragState{}, err
-		}
+	hadBubble := a.bubble != nil
+	hadSurface := a.pluginSurface != nil
+	if hadBubble {
+		a.setBubbleLocked(nil)
 	}
-	a.mu.Lock()
+	if hadSurface {
+		a.setPluginSurfaceLocked(nil)
+	}
 	pet := a.petRect
 	a.mu.Unlock()
+	if hadBubble {
+		a.emitBubble(BubbleNone, false)
+	}
+	if hadSurface {
+		// No surface event exists to emit: the frontend renders the surface from the LAYOUT,
+		// and this state change is already reflected there by setPluginSurfaceLocked. The
+		// re-crop happens on the caller's next window pass.
+	}
 	if pet.Width <= 0 {
 		pet.Width, pet.Height = a.petPixelSize()
 	}
@@ -1003,14 +1008,12 @@ func (a *App) EndDrag() (Layout, error) {
 // the position. The window is re-placed (and re-cropped) around the pet.
 func (a *App) SnapNow() (Layout, error) {
 	a.mu.Lock()
-	open := a.panelOpen
 	pet := a.petRect
 	a.mu.Unlock()
-	// Re-placing the window while the panel is open would move the panel too, so
-	// the pet is only snapped when it is on its own.
-	if open {
-		return a.GetLayout()
-	}
+	// Snapping used to be refused while the panel was open, because re-placing the window
+	// would move the panel with it. There is no panel to move: the slot beside the pet is
+	// empty unless a plugin's surface is up, and a surface is placed FROM the new pet
+	// position by the same geometry pass, so snapping with one open is coherent.
 
 	hwnd, err := a.resolveWindow()
 	if err != nil {
@@ -1056,70 +1059,93 @@ func clampY(y, h int, work desktop.Bounds) int {
 
 // --- panel ----------------------------------------------------------------
 
-// SetPanelOpen shows or hides the todo panel by cropping the window.
+// No SetPanelOpen and no TogglePanel any more: the panel they opened is gone from
+// index.html, and the two bindings existed only to show and hide it.
 //
-// The window itself never changes size or position here, so the webview's
-// viewport is untouched and the pet cannot shift. Only the visible region
-// changes, which Windows applies atomically.
+// WHAT THEY ALSO DID moved to the things that still need it, which is why this is a deletion
+// rather than a rename:
 //
-// Opening the panel folds both other occupants away: all three share the same
-// slot, and the region can only describe one of them
-// (docs/reminder-pomodoro.md 8.2).
-func (a *App) SetPanelOpen(open bool) (Layout, error) {
+//   - "opening the panel folds the other occupants away" is still the rule for every other
+//     slot occupant, and showBubble / setPluginSurfaceLocked already implement it in both
+//     directions. There is no third occupant left to fold for.
+//   - "opening the panel on a hidden pet shows the pet" was the tray's way back from a hidden
+//     pet. The tray entry that called it (打开待办面板) now opens the todo plugin's SURFACE,
+//     through OpenPluginSurface - which already shows a hidden pet (surfaceOpensOnAHiddenPet).
+//   - the window is still re-cropped; every remaining path calls applyWindowGeometry.
+
+// toggleTodoSurface is what the tray icon's click and 打开待办 do.
+//
+// It closes the todo plugin's surface if that one is up, and otherwise opens it - the same
+// one-gesture-two-directions shape the panel had, now against the surface that replaced it.
+// The plugin is found by the slot it CLAIMS rather than by id, for the same reason the pet's
+// menu resolves it that way: the host must not know which plugin is "the todo one".
+//
+// With no claimant, or with a claimant that cannot open (disabled, unrevoked), OpenPluginSurface
+// says why in a bubble - a tray click that did nothing would be indistinguishable from a
+// broken icon.
+func (a *App) toggleTodoSurface() {
 	a.mu.Lock()
-	wasBubble := a.bubble != nil
-	wasHidden := a.hidden
-	if open {
-		// Fold any bubble away through the helper that keeps the layout in step:
-		// the frontend renders the bubble from the layout, so a stale one would be
-		// drawn on top of the panel.
-		a.setBubbleLocked(nil)
-		// The plugin floating surface is the third occupant of this slot, so
-		// opening the panel folds it away too - the region can only describe one
-		// of them, and a surface left in the layout would crop the window around
-		// rectangles the page is no longer placing an iframe into.
-		a.setPluginSurfaceLocked(nil)
-		// Opening the panel implies showing the pet. A hidden window has no
-		// visible panel, so the tray's "打开待办面板" on a hidden pet would
-		// otherwise do nothing at all - and the menu entry is one of the ways back,
-		// so it must not be a dead end.
-		a.hidden = false
-	}
-	a.panelOpen = open
+	current := a.pluginSurface
 	a.mu.Unlock()
-	if open && wasBubble {
-		a.emitBubble(BubbleNone, false)
+	if current != nil && current.PluginID == a.todoSlotPluginID() {
+		if _, err := a.ClosePluginSurface(); err != nil {
+			log.Printf("pet: close todo surface: %v", err)
+		}
+		return
 	}
-	if open && wasHidden {
-		if hwnd, err := a.resolveWindow(); err == nil {
-			if err := desktop.Show(hwnd); err != nil {
-				log.Printf("pet: show on panel open: %v", err)
-			} else {
-				a.emitVisibility()
-			}
+	id := a.todoSlotPluginID()
+	if id == "" {
+		// Nothing claims the slot: the honest answer is the same bubble the chat slot's own
+		// resolver produces, pointing at the control center.
+		if _, err := a.showBubble(&BubbleView{
+			Kind:  BubbleReminder,
+			Title: "待办插件还没装好：打开控制中心装上并授权它。",
+		}); err != nil {
+			a.DebugLog("todo slot: re-crop after the explanation bubble failed: " + err.Error())
+		}
+		return
+	}
+	if _, err := a.OpenPluginSurface(id); err != nil {
+		// OpenPluginSurface refuses in its own words (not enabled, no grant, no rectangles).
+		// The refusal travels as a bubble so the user can read it: the tray is outside the
+		// window, and a log line there is invisible.
+		a.DebugLog("todo slot: " + err.Error())
+		if _, berr := a.showBubble(&BubbleView{Kind: BubbleReminder, Title: err.Error()}); berr != nil {
+			a.DebugLog("todo slot: re-crop after the refusal bubble failed: " + berr.Error())
 		}
 	}
-	// Closing the panel no longer has to re-ask anything: the question that needed
-	// it (the plan prompt) is the pomodoro plugin's now, and it is asked in the
-	// plugin's own surface, which the panel never folds away (design.md §4.1).
-	return a.applyWindowGeometry()
 }
 
-// TogglePanel flips the panel and returns the new layout.
-func (a *App) TogglePanel() (Layout, error) {
-	a.mu.Lock()
-	open := a.panelOpen
-	a.mu.Unlock()
-	return a.SetPanelOpen(!open)
+// todoSlotPluginID returns the id of the plugin that claims the 日程 slot, or "".
+//
+// It mirrors chatSlotPlugin's rule exactly (installed, enabled, pet.surface granted, claims
+// the slot) because a slot is a named mount point with ONE resolution rule - two rules for
+// two slots would drift, and the drift would show up as a menu cell that opens nothing for
+// one plugin and something for another.
+func (a *App) todoSlotPluginID() string {
+	rows, err := a.PluginsInstalled()
+	if err != nil {
+		return ""
+	}
+	for _, row := range rows {
+		if !row.Enabled || row.PanelSlot != plugins.PanelSlotTodos {
+			continue
+		}
+		if !hasPermission(row.Granted, plugins.PermPetSurface) {
+			continue
+		}
+		return row.ID
+	}
+	return ""
 }
 
 // SetScale changes the pet size, keeping the pet's bottom-right corner in place
 // so it appears to grow from there.
 //
 // This is the one operation that genuinely changes the window size, because the
-// window has to be large enough for the panel. It happens from the settings
-// panel, where a single viewport change is not noticeable, and the pet is
-// re-placed immediately afterwards.
+// window has to be large enough for a plugin's surface beside the pet. It happens
+// from the control center, where a single viewport change is not noticeable, and the
+// pet is re-placed immediately afterwards.
 func (a *App) SetScale(scale float64) (Layout, error) {
 	if scale < store.MinScale || scale > store.MaxScale {
 		return Layout{}, fmt.Errorf("缩放比例需在 %.1f 到 %.1f 之间", store.MinScale, store.MaxScale)
@@ -1135,29 +1161,40 @@ func (a *App) SetScale(scale float64) (Layout, error) {
 // State is the full snapshot the frontend renders from.
 type State struct {
 	Config         store.Config `json:"config"`
-	Todos          []store.Todo `json:"todos"`
-	Stats          store.Stats  `json:"stats"`
 	PetImageURL    string       `json:"petImageUrl"`
 	HasCustomImage bool         `json:"hasCustomImage"`
 	DataDir        string       `json:"dataDir"`
 	Autostart      bool         `json:"autostart"`
 	Now            string       `json:"now"`
+	// No Todos and no Stats member: the list (and the open / overdue / dueSoon counters
+	// derived from it) is the todo plugin's own `storage` now. Sending the host's copy would
+	// put a SECOND list on screen - and after the migration the host's copy is frozen at
+	// whatever it looked like on the last launch, which is worse than empty.
 	// No Pomodoro, Records or RecordTotals member: the timer, its archive and the
 	// "N sessions / M minutes" counters all belong to the pomodoro plugin, which
-	// keeps them in its own storage. Sending an empty snapshot would make the panel
-	// draw a timer the host no longer runs.
+	// keeps them in its own storage.
 	// No Reminder member: it existed to draw the "next reminder at" strip, and the
 	// host stopped computing a next reminder when the todo plugin took reminders
 	// over. Sending it would be sending a time nobody can honour.
 	// Hotkeys carries the global shortcut state: the switches, the labels and
 	// whether the OS actually accepted the registration. It never contains a
-	// credential, and it is a view rather than the raw specs because the panel has
-	// to answer "did it take?" - which only the OS knows.
+	// credential, and it is a view rather than the raw specs because the control
+	// center has to answer "did it take?" - which only the OS knows.
 	Hotkeys desktop.HotkeyView `json:"hotkeys"`
 	// PetVisible is false while the pet is hidden with the shortcut or the tray.
-	// It is sent so the panel can say so; there is no way to hide the pet from the
-	// panel itself.
 	PetVisible bool `json:"petVisible"`
+	// TodoBadge is what the pet's corner badge draws: how many entries are open and whether
+	// any of them is overdue or due soon.
+	//
+	// It is NOT the old `Stats`: that counted the host's own list, which is a snapshot frozen
+	// at migration time now. This is computed from the list the TODO PLUGIN publishes (see
+	// sharedTodoList), because the badge is the one thing drawn on the pet itself that has to
+	// know what is on the user's list.
+	//
+	// It rides on State rather than on a binding of its own for the reason the old counters
+	// did: it changes when the list changes, and every list change already produces a new
+	// State. A second call would be a second thing to keep in step.
+	TodoBadge store.Stats `json:"todoBadge"`
 	// Warnings reports non-fatal problems found while loading data files (for
 	// example a corrupt todos.json that had to be reset).
 	Warnings []string `json:"warnings,omitempty"`
@@ -1184,10 +1221,12 @@ func (a *App) GetState() (State, error) {
 			cfg = updated
 		}
 	}
+	// The badge's numbers come from the todo plugin's own published list, computed here so
+	// the page never has to parse another plugin's data.
+	dueSoon, overdue, openCount := reminderCounts(a.sharedTodoList(), time.Now())
 	return State{
 		Config:         cfg,
-		Todos:          a.store.Todos(),
-		Stats:          a.store.Stats(),
+		TodoBadge:      store.Stats{Open: openCount, Overdue: overdue, DueSoon: dueSoon},
 		PetImageURL:    a.PetImageURL(),
 		HasCustomImage: a.store.ImagePath() != "",
 		DataDir:        a.store.Dir(),
@@ -1274,118 +1313,17 @@ func newID() string {
 	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), os.Getpid())
 }
 
-// AddTodo appends a new entry and returns the refreshed state.
-func (a *App) AddTodo(in TodoInput) (State, error) {
-	title := strings.TrimSpace(in.Title)
-	if title == "" {
-		return State{}, fmt.Errorf("标题不能为空")
-	}
-	due, err := parseDue(in.Due)
-	if err != nil {
-		return State{}, err
-	}
-	todos := a.store.Todos()
-	todos = append(todos, store.Todo{
-		ID:        newID(),
-		Title:     title,
-		Notes:     strings.TrimSpace(in.Notes),
-		Due:       due,
-		CreatedAt: time.Now(),
-	})
-	if err := a.store.SaveTodos(todos); err != nil {
-		return State{}, err
-	}
-	return a.GetState()
-}
-
-// UpdateTodo edits an existing entry.
-func (a *App) UpdateTodo(in TodoInput) (State, error) {
-	title := strings.TrimSpace(in.Title)
-	if title == "" {
-		return State{}, fmt.Errorf("标题不能为空")
-	}
-	due, err := parseDue(in.Due)
-	if err != nil {
-		return State{}, err
-	}
-	todos := a.store.Todos()
-	found := false
-	for i := range todos {
-		if todos[i].ID != in.ID {
-			continue
-		}
-		todos[i].Title = title
-		todos[i].Notes = strings.TrimSpace(in.Notes)
-		todos[i].Due = due
-		found = true
-		break
-	}
-	if !found {
-		return State{}, fmt.Errorf("未找到该待办")
-	}
-	if err := a.store.SaveTodos(todos); err != nil {
-		return State{}, err
-	}
-	return a.GetState()
-}
-
-// ToggleTodo flips the done flag.
-func (a *App) ToggleTodo(id string) (State, error) {
-	todos := a.store.Todos()
-	found := false
-	for i := range todos {
-		if todos[i].ID != id {
-			continue
-		}
-		todos[i].Done = !todos[i].Done
-		if todos[i].Done {
-			now := time.Now()
-			todos[i].DoneAt = &now
-		} else {
-			todos[i].DoneAt = nil
-		}
-		found = true
-		break
-	}
-	if !found {
-		return State{}, fmt.Errorf("未找到该待办")
-	}
-	if err := a.store.SaveTodos(todos); err != nil {
-		return State{}, err
-	}
-	return a.GetState()
-}
-
-// DeleteTodo removes an entry.
-func (a *App) DeleteTodo(id string) (State, error) {
-	todos := a.store.Todos()
-	out := make([]store.Todo, 0, len(todos))
-	for _, t := range todos {
-		if t.ID != id {
-			out = append(out, t)
-		}
-	}
-	if err := a.store.SaveTodos(out); err != nil {
-		return State{}, err
-	}
-	return a.GetState()
-}
-
-// ClearDone removes every completed entry.
-func (a *App) ClearDone() (State, error) {
-	todos := a.store.Todos()
-	out := make([]store.Todo, 0, len(todos))
-	for _, t := range todos {
-		if !t.Done {
-			out = append(out, t)
-		}
-	}
-	if err := a.store.SaveTodos(out); err != nil {
-		return State{}, err
-	}
-	return a.GetState()
-}
-
+// No todo bindings here any more: AddTodo / UpdateTodo / ToggleTodo / DeleteTodo /
+// ClearDone were the panel's CRUD, and the panel is gone because the LIST is the todo
+// plugin's own `storage` now (openspec/changes/todo-pomodoro-as-plugins, stages 1 and 3).
+//
+// They were kept one stage longer than the data moved, on purpose: while the panel still
+// existed it needed a way to read something, and the migration is what fills the plugin's
+// storage on the first launch. Keeping them past the panel would be two writable copies of
+// one list - the one thing `todos.*`'s retirement was supposed to end.
+//
+// `parseDue` and `newID` above go with them? No - `newID` is still used by the plugin
+// request ids, and `parseDue` went with the last caller. See the note on each.
 // --- settings -------------------------------------------------------------
 
 // ChoosePetImage opens a file dialog, copies the chosen picture into the data
@@ -1482,7 +1420,6 @@ func (a *App) ResetToDefaultPosition() (Layout, error) {
 
 	// Fold the panel away so the pet is placed on its own.
 	a.mu.Lock()
-	a.panelOpen = false
 	// The floating surface occupies the same slot, so it goes with it; leaving
 	// it up would put a card beside a pet that has just been moved somewhere
 	// else.

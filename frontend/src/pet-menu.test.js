@@ -190,20 +190,30 @@ describe('pet menu: what each cell does', () => {
     return mounted;
   };
 
-  it('日程 opens the todo panel and re-reads the state it renders from', async () => {
-    const { calls, emit } = await mountApp();
-    showMenu(emit);
-    await tick();
-    // The boot sequence has already read the state once, so the assertion is about
-    // the DELTA the click adds - not about the app's own startup traffic.
-    const readsBefore = callsTo(calls, 'GetState').length;
-
-    await clickCell('todos');
-
-    const opens = callsTo(calls, 'SetPanelOpen');
+  it('日程 opens the surface of whichever plugin claims the slot', async () => {
+    // The cell used to open the PANEL's 待办 tab. There is no panel and no tab: the list is
+    // the todo plugin's data, and the cell resolves whichever plugin claims the slot - the
+    // same rule the 对话 and 番茄钟 cells follow.
+    const claim = {
+      id: 'com.example.todo', name: '示例待办', version: '1.1.0', author: 'shixiansi',
+      description: '', enabled: true,
+      permissions: ['pet.surface'], granted: ['pet.surface'], pending: [], netHosts: [],
+      panel: false, panelSlot: 'todos', surface: true, background: true,
+      entry: 'panel.html', dir: 'C:\\data\\plugins\\com.example.todo', error: '',
+    };
+    const { calls } = await openAndClick('todos', {
+      handlers: { PluginsInstalled: () => [claim] },
+    });
+    const opens = callsTo(calls, 'OpenPluginSurface');
     expect(opens.length).toBe(1);
-    expect(opens[0].args).toEqual([true]);
-    expect(callsTo(calls, 'GetState').length).toBe(readsBefore + 1);
+    expect(opens[0].args).toEqual(['com.example.todo']);
+    expect(calls.some((c) => /Panel/.test(c.name))).toBe(false);
+  });
+
+  it('日程 falls back to the control center when nothing claims the slot', async () => {
+    const { calls } = await openAndClick('todos', { handlers: { PluginsInstalled: () => [] } });
+    expect(callsTo(calls, 'OpenPluginSurface').length).toBe(0);
+    expect(callsTo(calls, 'OpenPluginMarket').length).toBe(1);
   });
 
   it('对话 opens the conversation surface (the same call the hover button makes)', async () => {

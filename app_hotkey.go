@@ -222,7 +222,6 @@ func (a *App) HidePet() error {
 	// Fold the panel, the bubble and the floating surface away without
 	// re-cropping: the window is about to be hidden, and a geometry call would
 	// resolve the window and re-crop it for a frame nobody ever sees.
-	a.panelOpen = false
 	a.setPluginSurfaceLocked(nil)
 	a.setBubbleLocked(nil)
 	a.hidden = true
