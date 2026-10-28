@@ -43,6 +43,10 @@ const els = {
   // on it does.
   chatButton: $('pet-chat'),
   badge: $('badge'),
+  // The line a plugin draws on the pet itself (the pomodoro countdown). Separate from the
+  // badge above: that one counts the todo plugin's list and sits in the corner, this one is
+  // centred above the head and shows whatever string a plugin last set.
+  clock: $('pet-clock'),
   toast: $('toast'),
 
   // TWO mount points and nothing else: the floating surface's, and the headless frame's.
@@ -96,9 +100,10 @@ const els = {
 /**
  * Drag diagnostics.
  *
- * Pointer handling is entirely in the webview, so this is the only way to see
- * drag events from the Go side. Enable by launching with PETPC_DEBUG=1; the app
- * then appends to debug.log in the data directory.
+ * Pointer handling is entirely in the webview, so this is the only way to see drag
+ * events from the Go side. The line lands in <dataDir>\logs\pet.log at DEBUG level,
+ * which the shipping level (INFO) drops: PETPC_DEBUG=1 or PETPC_LOG_LEVEL=debug brings
+ * it back, and the control center's 日志 page reads the same file.
  */
 const debug = (msg) => {
   App.DebugLog(msg).catch(() => {});
@@ -173,8 +178,15 @@ function toast(message) {
 
 /** Logs and surfaces a rejected backend call. */
 function fail(err) {
+  const message = typeof err === 'string' ? err : err?.message || '操作失败';
   console.error(err);
-  toast(typeof err === 'string' ? err : err?.message || '操作失败');
+  // The same sentence goes to the host's log at ERROR level, because the toast is the
+  // only thing the USER sees and it lasts 3.2 s. A binding that threw while nobody was
+  // watching used to leave no evidence anywhere at all, and "点了一下，什么也没发生" is
+  // the report that costs the most to answer. The 日志 page in the control center shows
+  // this line next to the host's own, which is what makes it diagnosable.
+  App.PageLog('error', message).catch(() => {});
+  toast(message);
 }
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -450,6 +462,28 @@ function scheduleBubbleHide(b) {
 
 // --- rendering ------------------------------------------------------------
 
+/**
+ * Draws the plugin-supplied line above the pet's head, or hides it.
+ *
+ * The text is OPAQUE here: `24:59`, `专注 24:59`, `3 项` - the page never parses it, never
+ * decides what it means, and never asks which plugin sent it. That is the whole reason the
+ * capability exists as `pet.badge` (a string) rather than as "show the pomodoro timer": the
+ * host stays ignorant of what a pomodoro is (app_pet_badge.go).
+ *
+ * Empty text hides the element rather than leaving an empty pill on the pet - a plugin that
+ * pauses or finishes clears by sending "".
+ */
+function renderClock(text) {
+  const value = typeof text === 'string' ? text : '';
+  if (!value) {
+    els.clock.classList.add('hidden');
+    els.clock.textContent = '';
+    return;
+  }
+  els.clock.textContent = value;
+  els.clock.classList.remove('hidden');
+}
+
 function renderBadge() {
   if (!state) return;
   // From the TODO PLUGIN's published list, computed by Go: the host has no stats of its own any
@@ -713,6 +747,13 @@ async function refresh() {
   try {
     applyState(await App.GetState());
     applyLayout(await App.GetLayout());
+    // The plugin's line on the pet is separate state (a string, not part of State), so it is
+    // read here rather than folded into applyState - a reload in the middle of a countdown must
+    // not come back with a blank pet. Deliberately not awaited inside the try: an older binary
+    // or the test harness may not have the binding, and that must not fail the whole refresh.
+    App.PetBadge?.()
+      .then(renderClock)
+      .catch(() => {});
   } catch (err) {
     fail(err);
   }
@@ -993,6 +1034,13 @@ function wire() {
   //
   // The conversation is opened by a BINDING now (OpenChatPluginSurface), because it is the
   // chat plugin's floating surface and the host has no tab to select.
+
+  // The line a plugin draws on the pet itself. Go only emits when the VISIBLE text changed,
+  // so a per-second timer push costs one message per second at most, and a paused timer
+  // sends "" once.
+  EventsOn('pet:badge', (payload) => {
+    renderClock(payload?.text ?? '');
+  });
 
   // The pet was hidden or shown from outside the page (the global shortcut, or
   // the tray). The window is hidden natively - the page is not told to hide

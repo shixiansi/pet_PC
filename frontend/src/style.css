@@ -189,6 +189,37 @@ body {
 
 /* --- badge --------------------------------------------------------------- */
 
+/* The plugin's line on the pet (the pomodoro countdown), centred above the head and INSIDE
+   #pet's box. Inside because while nothing else is up the window is cropped to exactly this
+   rectangle: anything above it would be cut away by the native region, and enlarging the region
+   to fit it would leave a strip the page never paints that still eats clicks (AGENTS.md 3.2).
+
+   `font-variant-numeric: tabular-nums` is the reason this rule exists at all: in a proportional
+   font `24:59` and `11:11` are different widths, so the clock would jitter sideways every time a
+   digit changed. Centring uses left/right + text-align rather than `translateX(-50%)` - no
+   transform on a box whose rectangle is what the window region is made of. A border rather than a
+   box-shadow for the same reason: a shadow paints outside the box and gets cropped, which looks
+   like a half-drawn pill. */
+.pet-clock {
+  position: absolute;
+  top: 2px;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: fit-content;
+  padding: 1px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(20, 22, 28, 0.82);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 15px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .badge {
   position: absolute;
   top: 4px;

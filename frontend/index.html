@@ -13,6 +13,13 @@
          hangs off its box. -->
     <div id="pet" title="拖动移动 · 单击打开对话 · 悬停出现对话按钮">
       <img id="pet-image" alt="桌宠" draggable="false" />
+      <!-- The one line a plugin may draw on the pet itself (the pomodoro's countdown).
+           It sits INSIDE #pet's box, centred above the head, for the same reason the
+           conversation button does: while nothing else is up the window is cropped to
+           exactly the pet's rectangle, so anything above the box would be cut away by the
+           native region. The host only knows a STRING here - it never parses `24:59`, and
+           it does not know which plugin set it (see app_pet_badge.go). -->
+      <span id="pet-clock" class="pet-clock hidden"></span>
       <!-- The open-todo count, inside the pet box so it cannot draw outside the window
            region. It counts what the TODO PLUGIN publishes (its `todo-list` snapshot),
            because the list is that plugin's data now. -->
