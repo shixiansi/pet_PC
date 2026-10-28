@@ -45,6 +45,16 @@ const marketMainJs = fs.readFileSync(
 const css = fs.readFileSync(path.join(root, 'frontend/src/style.css'), 'utf8');
 const appJs = fs.readFileSync(path.join(root, 'frontend/wailsjs/go/main/App.js'), 'utf8');
 const appDts = fs.readFileSync(path.join(root, 'frontend/wailsjs/go/main/App.d.ts'), 'utf8');
+// The chat plugin's document, read for the auto-hide guard's flag (see the check at the end).
+// `market/` is a separate repo, so a missing checkout must not crash the gate: the check that uses
+// this reports a plain failure instead.
+const chatPluginJs = (() => {
+  try {
+    return fs.readFileSync(path.join(root, 'market/plugins/com.shixiansi.plugin-chat/app.js'), 'utf8');
+  } catch {
+    return '';
+  }
+})();
 const modelsTs = fs.readFileSync(path.join(root, 'frontend/wailsjs/go/models.ts'), 'utf8');
 // The main app file, read here because the tray menu and its command handling
 // live in it - the shortcut feature's mouse fallback is checked against it.
@@ -1913,6 +1923,30 @@ check(
   sameSet(jsdomMethods, realMethods),
   `missing: ${onlyIn(realMethods, jsdomMethods).join(', ')} | surplus: ` +
     `${onlyIn(jsdomMethods, realMethods).join(', ')}`,
+);
+
+// --- the chat plugin's auto-hide guard --------------------------------------
+//
+// The surface closes itself 3 s after an answer once the composer has lost focus. That timer is
+// skipped while "another question is in flight", and WHICH FLAG says that is the whole point:
+//
+//   - `busy` is set and cleared by the frame that sent the request - the input frame, which is the
+//     only one that can also see the composer's focus;
+//   - `asking` is cleared by the ANSWER frame's end-of-exchange timer, and `endExchange` returns
+//     immediately in every other role, so in the input frame it stayed true FOR EVER after the
+//     first message. The hide was therefore skipped every single time - the user's 「完全不会收起」.
+check(
+  'the chat surface auto-hides on a flag its own frame clears (busy, not asking)',
+  (() => {
+    const start = chatPluginJs.indexOf('function armAutoHide');
+    if (start < 0) return false;
+    const body = chatPluginJs.slice(start, chatPluginJs.indexOf('\n}\n', start));
+    return /if \(composerFocused\(\)\) return;/.test(body) &&
+      /if \(busy\) return;/.test(body) &&
+      !/if \(asking\) return;/.test(body) &&
+      /request\('surface\.hide'/.test(body);
+  })(),
+  'the auto-hide guards on a flag the input frame never clears, so it can never fire',
 );
 
 for (const line of notes) console.log(line);
