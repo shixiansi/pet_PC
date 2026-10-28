@@ -168,6 +168,47 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 复现不出来**：Wails 的绑定返回**纯 JSON**（会被代理），而 dev 桩里的行是 `createFrom`
 建的**类实例**（Svelte 不代理类实例）——桩必须摊平成纯数据，否则它和真宿主不是同一个世界。
 
+**两个宿主各服务哪些方法，以及文档靠什么知道自己在哪。** 桌宠服务全部 13 项权限；控制中心
+服务 `storage.*` / `config.*` / `audio.*` / `net.fetch` / **`plugin.share.*`**，不服务
+`bubble.say` / `surface.*` / `llm.chat` / `events.subscribe` / `todos.*` / `timer.*`——那些要的
+是宠物窗口、宠物的计时器、宠物的模型预算。**别再把"挂不了"当成解法**：这三个插件的界面
+（待办列表、番茄钟记录、对话历史）只在控制中心的插件页里有地方放，而上一轮因为 `share.set`
+不支持就干脆不挂它们，等于把界面藏起来；正确做法是把**规则**搬到 `internal/plugins/share.go`
+让两个宿主共用（`RegisterShare`）。
+
+文档判断"我在哪个窗口"**只用 `init.surface.slot`**：桌宠给 `chat` / `todos` / `pomodoro` /
+`background`，控制中心给 `workshop`。`kind` 不能用来判断——常驻帧的 `kind` 也是 `panel`。
+在 `workshop` 里缺的能力要**说出口**（对话插件把输入框变成只读并写明去哪发，番茄钟隐藏计时
+按钮并写明计时在桌宠上），一个点了没反应的控件比没有控件更糟。
+
+**对外的契约只有一份，而且它住在插件仓**：[`market/docs/plugin-dev.md`](market/docs/plugin-dev.md)
+（GitHub：<https://github.com/shixiansi/pet-pc-plugins/blob/main/docs/plugin-dev.md>），配套的自检
+工具是 `market/docs/plugin-testkit/`（一个小目录，插件作者整个拷进自己的仓就能跑，不需要本仓库、
+也不需要宿主代码）：
+
+| 文件 | 是什么 |
+| --- | --- |
+| `plugin-check.mjs` | 四组静态/协议检查（jsdom）。CI 与作者都用它 |
+| `fake-host.mjs` | **假宿主**：协议、13 项权限表、35 个方法表、结果表。上面那个与下面的预览页共用这一份——两套假宿主必然分叉，而分叉的假宿主比没有更坏 |
+| `preview.mjs` / `preview.html` | **排版预览器**：把 entry 装进声明的矩形，用系统 Edge/Chrome 无头跑，`--check` 越界就 FAIL、`--shot` 出图、`--state gate` 直达「等你回答」那一屏、`--click "#ask-ok"` 点一下再截。清单声明 `background` 时**连隐藏的常驻帧一起挂**——插件的行为有一半住在那儿，只挂一个帧会让"点了没反应"变成工具看不见的事 |
+
+**预览器的定位是开发工具，不是门禁**：它需要一台装着 Edge/Chrome 的机器，而且它服务的对象是
+插件作者（`market/` 那个公开仓），所以**不进 `.dev/check-all.ps1`**，本仓的 CI 也不跑它。它补的
+是 jsdom 永远补不上的那一半——`getBoundingClientRect()` 在 jsdom 里恒为 0，于是"按钮被卡片下边缘
+切掉"这类问题在整条链路上没有一处看得见（2026-10-28 番茄钟为此连翻五次车）。
+
+**它为什么不在这里**：本仓是**私有**的，插件仓是**公开**的。契约放在本仓，就等于只对"已经有
+宿主源码的人"可见——而他们正是最不需要它的人。这也意味着**本仓不许再放第二份**：
+根目录的 `docs/plugin-dev.md` 只是一句指针，谁想"顺手复制一份过来"就是又开了一个腐坏源。
+
+手册是写给别人（以及别人的模型）看的自包含说明：manifest 字段与校验、桥的每条消息、
+13 项权限与 35 个方法的 payload/返回/上限、几何与主题、打包与发布。所以：**改动 manifest 的
+字段或规则、桥的消息、任何能力方法的签名或上限、退休一个接口，都要同时改插件仓里那份手册和
+工具里那张方法表**。退休一个接口时**从文档里删干净**，不要留一张"已退休接口"的表：那份文档的
+读者是没看过旧资料的人（以及模型），死名字只会被当成真 API 记住——这条是用户当场指出来的，
+第一版就写错了。文档第 2 节的示例插件是逐字跑过的：一个 jsdom 脚本把它当真实插件驱动过一遍
+（握手 → storage → bubble.say → 拒绝路径）。
+
 ### 3.4 音频按文件播放，绝不用内存
 
 `PlayWAVFile(path)`。`SND_MEMORY` 需要调用方缓冲区活过调用、而 GC 不知道——
@@ -192,6 +233,31 @@ DPAPI（[internal/desktop/crypto_windows.go](internal/desktop/crypto_windows.go)
 `binary` 就是为了保住摘要（`core.autocrlf` 会改写文本型 zip 的字节）。
 **不要用文本工具编辑它们**；两处字节不同时，`TestBuiltinSampleAgreesWithTheMarketCatalogue`
 会红——它是真失败，不是噪音。
+
+### 3.8 日志：一直在写、有等级、没有正文
+
+`internal/logging`。两个程序各写 `<dataDir>\logs\<程序>.log`（`pet.log` / `market.log`），
+默认 INFO，超过 2 MB 轮转并保留一代 `.1`。三条不许破：
+
+- **不许再给日志加开关。** 旧的 `debug.log` 只在 `PETPC_DEBUG=1` 时存在，于是每份报告都
+  缺证据、每次排查都要用户重启一次程序。降噪用等级（`PETPC_LOG_LEVEL=warn`），不加门。
+- **一次插件调用一行，但等级由方法决定、重复会被合并。** 数据面（`storage.*` / `share.*` /
+  `config.*` / `memory.*`）是 **DEBUG**——插件读写自己的文件是管道，不是事件；动作面（气泡、
+  浮层、音频、模型、网络、进程、订阅）是 **INFO**——那是人能看见或要花钱的事；失败一律 **WARN**。
+  **纯显示**的 `pet.badge` 也记 DEBUG：倒计时每秒推一次，INFO 里只会是噪音（它被拒时仍然是 WARN）。
+  这条规则的第一版是"全都 INFO"，在真机上把日志写成了 99.5% 的轮询（9729 行 `share.get` +
+  2842 行 `storage.get` + 580 行 `config.get`，对 32 行 `llm.chat`），用户直接问"这个等级放这些
+  能看个啥"。另外同一 `(插件, 方法, 等级)` 5 秒内只写一行、合并数附在下一行上
+  （`internal/logging.Throttle`），因为轮询既可能读也可能写。分类表在
+  `internal/plugins.DataMethod`，两个宿主共用；新方法忘了分类就默认按"动作"记 INFO。
+- **正文与密钥绝不进日志。** payload 只记字节数，回复只记字数，`Settings.String()` 只写
+  `key=set`。日志是给 issue 贴的（`Market.Diagnostics` 直接复制它），一处
+  `log.Debug("llm", payload)` 就让每份报告都不能外发。
+
+守它的检查：`internal/logging`（格式往返/等级/轮转/伪造行）、`internal/llm/log_test.go`、
+`app_log_test.go`、`tools/plugin-market/logapi_test.go`，以及 `.dev/check-frontend.cjs` 的
+「the log is always on」那一条（它盯着 `PETPC_DEBUG` 的门不许回来）。
+格式与取舍见 [docs/logging.md](docs/logging.md)；用户可见的说法在 README「日志」。
 
 ## 4. 怎么验证
 
@@ -274,6 +340,13 @@ Coopanion 一类项目是 **AGPL-3.0**。可以读设计、可以理解协议格
 - **改了 `.go` 就必须重建，否则用户看到的永远是上一个二进制。** 「好像没变化」的第一个
   怀疑对象不是代码，是时间戳：`Get-Item build\bin\*.exe` 和刚改过的 `.go` 对一下。
   2026-10-26 一天之内这件事发生了三次（桌宠两次、市场程序一次），每次都被当成"功能没做"。
+- **`wails build -s` 会跳过前端构建，exe 里嵌的还是旧 `frontend/dist`。** 2026-10-28 就这么
+  踩了一次：`index.html`/`main.js`/`style.css` 都改完、`go test` 与 `check-frontend` 全绿、
+  exe 也重建了，但加的元素就是不出现——因为 `-s` 只编译 Go，`dist` 还停在改动之前，exe 里那份
+  页面根本没有那个元素。**改了 `frontend/` 就必须 `wails build`（不带 `-s`）**；`-s` 只在
+  "我只动了 Go、前端确实没变"时用。验证办法：`Select-String frontend\dist\index.html -Pattern
+  <新元素的 id>`，或直接扫 exe 的字节串。静态门禁读的是 `frontend/src`，它**看不见**这件事，
+  能看见的是 `.dev/check-all.ps1` 里那几道真机门禁。
 - **两个程序是分开的：重建桌宠不会重建市场程序（控制中心）。** 而控制中心的界面是**编译期**
   嵌进它自己的 exe 的（`//go:embed all:frontend/dist`，而 `frontend/dist` 是 `cc/dist` 的副本）。
   所以只改了 `cc/` 之后，`wails build` 桌宠、甚至跑一遍桌宠的前端构建，都不会让用户看到任何变化——
