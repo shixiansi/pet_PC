@@ -11,9 +11,11 @@ package main
 // NOT shared is the capability SET, and the boundary is a real product fact rather
 // than an oversight:
 //
-//	served here    audio.*, storage.*, config.*, net.fetch
-//	                - they operate on the plugin's own directory, its own settings
-//	                  and the network, all of which this program has.
+//	served here    audio.*, storage.*, config.*, net.fetch, plugin.share
+//	                - they operate on the plugin's own directory, its own settings,
+//	                  the network, and the cross-plugin tray (which is a folder inside
+//	                  plugin-data either program can reach), all of which this program
+//	                  has.
 //
 //	not served     todos.*, timer.*, bubble.say, surface.*, llm.chat, events.subscribe
 //	                - each needs something only the PET has: the todo file, the
@@ -21,8 +23,26 @@ package main
 //	                  geometry, the pet's own LLM budget, and the timer that emits
 //	                  the events.
 //
-// A plugin that calls one of those from here gets "本程序不支持该方法". That is the
-// honest answer, and it is why the registry is per program instead of one table
+// # WHY THE FLOATING-SURFACE PLUGINS ARE MOUNTED ANYWAY
+//
+// `plugin.share` used to be on the second list, and the consequence was that mounting a
+// plugin's own document here broke: the todo, pomodoro and chat documents publish or read
+// a shared key from inside their page, so the user saw 「插件 … 调用了本程序不支持的方法
+// share.set」 in the middle of the plugin's own interface, and the fix at the time was to
+// refuse to mount any plugin that declared a surface (`mountable()` in the control
+// center). That refused the three plugins whose pages the user actually wanted, and it
+// refused them for a reason that was not true: the tray is a folder in plugin-data, not a
+// pet.
+//
+// So the tray moved to internal/plugins/share.go and is served by BOTH programs. What a
+// document still cannot do here is the genuinely pet-shaped half - draw beside the pet,
+// start its timer, spend the pet's model budget - and a document that is designed for a
+// window (rather than for the pet's column) is expected to notice: `init.surface.slot` is
+// "workshop" here, and the chat plugin uses that to say plainly that this window shows
+// the record and the sending happens beside the pet (see its app.js).
+//
+// A plugin that calls one of the remaining methods from here gets "本程序不支持该方法".
+// That is the honest answer, and it is why the registry is per program instead of one table
 // shared by both: a shared table would advertise capabilities that could only fail
 // later, deeper in, with a nil dereference instead of an explanation.
 //
@@ -42,8 +62,10 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"PetPC/internal/desktop"
+	"PetPC/internal/logging"
 	"PetPC/internal/plugins"
 )
 
@@ -107,6 +129,11 @@ func (m *Market) marketRegistry() *plugins.Registry {
 	// legal in both: keys may name folders now, and a second copy of that rule is a
 	// second chance to get it wrong.
 	plugins.RegisterPrivateStore(r)
+	// The cross-plugin tray, served from the shared rule in internal/plugins. The 插件
+	// page mounts the bundled plugins' own documents, and three of them publish or read a
+	// key from inside their page - so without this the page shows a plugin's interface
+	// with a host error in the middle of it (see this file's header).
+	plugins.RegisterShare(r, gateAdapter{m.manager})
 	r.Register("config.get", plugins.Method{Perm: plugins.PermPluginConfig, Run: marketConfigGet})
 	r.Register("config.set", plugins.Method{Perm: plugins.PermPluginConfig, Run: marketConfigSet})
 
@@ -123,8 +150,57 @@ func (m *Market) marketRegistry() *plugins.Registry {
 // frame posts the same protocol message to whichever program mounted it, so the
 // binding it calls has to look the same from the page's side. The GATE is the
 // shared one; only the table differs.
+//
+// Every request leaves one line, for the reason the pet's own gate does: a plugin
+// whose workshop stays empty produces no evidence anywhere else, and "它在工坊里
+// 什么也做不了" is unanswerable without knowing whether the request arrived, was
+// refused, or failed inside the method.
 func (m *Market) PluginRequest(pluginID, method, payload string) (string, error) {
-	return m.marketRegistry().Dispatch(pluginID, method, payload)
+	start := time.Now()
+	out, err := m.marketRegistry().Dispatch(pluginID, method, payload)
+	elapsed := time.Since(start)
+
+	// Same level rule as the pet's gate (see internal/plugins.DataMethod): reading the
+	// plugin's own file is plumbing (DEBUG), an ACTION is the story (INFO), a refusal is WARN.
+	lv := logging.LevelInfo
+	if plugins.DataMethod(method) {
+		lv = logging.LevelDebug
+	}
+	if err != nil {
+		// WARN rather than ERROR: "本程序不支持该方法" is the normal answer for a
+		// capability only the pet serves, and the line says so in the error text.
+		lv = logging.LevelWarn
+	}
+	if allow, swallowed := m.pluginCallLog().Allow(pluginID + "|" + method + "|" + lv.String()); !allow {
+		return out, err
+	} else if swallowed > 0 {
+		if err != nil {
+			m.log.Pluginf(lv, "plugin", pluginID, "%s 没有执行（payload %d B，in %dms；同类另有 %d 次已合并）：%v",
+				method, len(payload), elapsed.Milliseconds(), swallowed, err)
+			return "", err
+		}
+		m.log.Pluginf(lv, "plugin", pluginID, "%s ok（payload %d B → %d B，in %dms；同类另有 %d 次已合并）",
+			method, len(payload), len(out), elapsed.Milliseconds(), swallowed)
+		return out, nil
+	}
+	if err != nil {
+		m.log.Pluginf(lv, "plugin", pluginID, "%s 没有执行（payload %d B，in %dms）：%v",
+			method, len(payload), elapsed.Milliseconds(), err)
+		return "", err
+	}
+	m.log.Pluginf(lv, "plugin", pluginID, "%s ok（payload %d B → %d B，in %dms）",
+		method, len(payload), len(out), elapsed.Milliseconds())
+	return out, nil
+}
+
+// pluginCallLog returns the throttle for the per-call lines, creating it on first use.
+func (m *Market) pluginCallLog() *logging.Throttle {
+	m.callsMu.Lock()
+	defer m.callsMu.Unlock()
+	if m.callsLog == nil {
+		m.callsLog = logging.NewThrottle(logging.DefaultThrottleWindow, nil)
+	}
+	return m.callsLog
 }
 
 // ServePluginAsset serves a plugin's own files, and the bridge script.

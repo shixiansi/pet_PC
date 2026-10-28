@@ -108,18 +108,18 @@ check(
 );
 check('开始：图片卡在，且说得出当前用的是默认图片', text().includes('更换图片') && text().includes('默认图片'));
 
-await open('待办');
-check('待办：标题来自 store.Todo.title', text().includes('写周报') && text().includes('整理纸箱'));
-check('待办：完成数来自 store.Todo.done', text().includes('1 项未完成 / 共 2 项'));
-
-// 「专注」 and 「记录」 used to be checked here. Both pages are gone: they read and wrote the
-// pet's timer settings and its record archive, and those retired with the host timer (the
-// timer's own settings and its records belong to the pomodoro plugin now). The rail must not
-// grow them back, so the absence is what gets asserted instead.
+// ── the rail's two retirements ───────────────────────────────────────────────────────
+//
+// 「待办」 read the pet's `todos.json`, which stopped being the list when it moved into the
+// todo plugin's own storage. The list is drawn by the plugin's document, on the 插件 page, so
+// the absence here is the assertion - a page reading a file nobody writes is worse than none.
+//
+// 「专注」 and 「记录」 went the other way earlier, with the host timer (their settings and
+// archive belong to the pomodoro plugin). Same treatment: the rail must not grow them back.
 check(
-  'rail 上没有「专注」和「记录」了（它们的配置与档案归番茄钟插件）',
+  'rail 上没有「待办」「专注」「记录」了（列表/计时器/档案都归插件自己的界面）',
   ![...w.document.querySelectorAll('nav button')].some(
-    (b) => b.textContent.trim() === '专注' || b.textContent.trim() === '记录',
+    (b) => ['待办', '专注', '记录'].includes(b.textContent.trim()),
   ),
 );
 
@@ -156,8 +156,8 @@ check('插件：帧的 sandbox 恰好是 allow-scripts（没有 allow-same-origi
   chatFrame?.getAttribute('sandbox') === 'allow-scripts');
 check('插件：帧的地址是 /plugin-asset/<id>/<entry>?theme=',
   (chatFrame?.getAttribute('src') || '') === '/plugin-asset/com.shixiansi.plugin-chat/index.html?theme=dark');
-check('插件：权限文案来自 []LabelPair', text().includes('读取待办列表'));
-check('插件：权限计数来自 Granted（6/7）', text().includes('6/7'));
+check('插件：权限文案来自 []LabelPair', text().includes('调用你已配置的大模型（流式返回）'));
+check('插件：权限计数来自 Granted（4/5）', text().includes('4/5'));
 
 // --- THE HANDSHAKE, simulated ---------------------------------------------------------
 //
@@ -195,7 +195,7 @@ check('插件：init 的载荷能过结构化克隆（$state 的 Proxy 过不去
 check('插件：init 带的是宿主的授权集合（Granted，大写 G），不是空数组',
   Array.isArray(init?.granted) && init.granted.includes('llm.chat'));
 check('插件：init 说明自己在 workshop 槽位', init?.surface?.kind === 'panel' && init?.surface?.slot === 'workshop');
-check('插件：init 的权限表也是纯数组', Array.isArray(init?.permissions) && init.permissions.includes('todos.write'));
+check('插件：init 的权限表也是纯数组', Array.isArray(init?.permissions) && init.permissions.includes('pet.surface'));
 // A second `ready` must not produce a second init (the grant list would be applied twice).
 if (frameWin) {
   w.dispatchEvent(new w.MessageEvent('message', { data: { v: 1, type: 'ready' }, source: frameWin }));
@@ -264,8 +264,87 @@ check('插件：停用那一行的权限计数是 0/3', text().includes('0/3'));
 // No declared settings, no button: a 设置 that opens an empty form is a control that lies.
 check('插件：没有声明设置项的插件不出现「设置」', !chip('设置'));
 
+// A plugin that declares SURFACE blocks must be mounted here too. This is the regression
+// guard for the whole round: `mountable()` used to refuse these, so the todo / pomodoro /
+// chat pages showed no interface at all -- and the smoke test stayed green because the fake
+// rows had no `surface`. The refusal's real cause was the MARKET not serving `plugin.share`.
+await pick('番茄钟插件');
+const pomoFrame = frame();
+check('插件：声明了浮层面的插件也在这里挂界面（这是上一轮拒绝挂载的那个形状）',
+  Boolean(pomoFrame));
+check('插件：它的帧也走同一个沙箱与 URL 约定',
+  pomoFrame?.getAttribute('sandbox') === 'allow-scripts' &&
+    (pomoFrame?.getAttribute('src') || '') ===
+      '/plugin-asset/com.shixiansi.plugin-pomodoro/panel.html?theme=dark');
+check('插件：番茄钟现在有声明出来的设置项，所以有「设置」', Boolean(chip('设置')));
+chip('设置')?.click();
+await settle();
+check('插件：番茄钟的设置里能看到「专注时长」并带出宿主的默认值',
+  text().includes('专注时长') && field('focusMinutes')?.value === '25');
+w.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape' }));
+await settle();
+
 await pick('com.example.broken');
 check('插件：manifest 坏掉的行点开后说出原因', text().includes('manifest.json: 第 4 行'));
+
+// --- the update chip ------------------------------------------------------------------
+//
+// A plugin's INTERFACE ships with the plugin, so an installed package that is behind shows the
+// OLD behaviour while the page around it looks finished. The stub's catalogue offers 1.7.5 for a
+// row installed at 1.7.4, and the voice row is current - so "an update is offered for everything"
+// fails as loudly as "none is offered at all".
+await pick('对话插件');
+const updateChip = [...w.document.querySelectorAll('button.chip')].find((b) =>
+  b.textContent.includes('更新到 v'));
+check('插件：装着的版本落后时会出现「更新到 v…」（界面跟着插件走）', Boolean(updateChip));
+check('插件：它指名的是目录里的那个版本', (updateChip?.textContent || '').includes('v1.7.5'));
+
+await pick('语音插件');
+check('插件：已是最新时没有「更新」按钮（一个永远不动的按钮等于装饰）',
+  ![...w.document.querySelectorAll('button.chip')].some((b) => b.textContent.includes('更新到 v')));
+
+await pick('对话插件');
+[...w.document.querySelectorAll('button.chip')].find((b) => b.textContent.includes('更新到 v'))?.click();
+await settle();
+check('插件：点更新后给出确认，并且那一行换成了新版本', text().includes('已更新到 v1.7.5'));
+check('插件：更新之后按钮自己消失了', ![...w.document.querySelectorAll('button.chip')].some((b) => b.textContent.includes('更新到 v')));
+
+// --- the 日志 page -------------------------------------------------------------------
+//
+// This page's whole value is that it shows the HOST's lines, so the checks are about the
+// three things a screenshot cannot tell you: the levels are rendered as levels (a WARN row
+// is distinguishable from an ERROR row), the filters actually reach the query, and the file
+// list names the two files the two programs write. The stub APPLIES the query on purpose -
+// a fake that ignored it would make a filter wired to nothing look perfect here.
+await open('日志');
+check('日志：行来自宿主的日志（等级 + 子系统 + 插件 + 正文四段都在）',
+  text().includes('llm.chat') && text().includes('com.shixiansi.plugin-chat'));
+check('日志：等级是按等级画的，不是普通文字',
+  Boolean(w.document.querySelector('li.lv-warn')) && Boolean(w.document.querySelector('li.lv-error')));
+check('日志：默认是「信息及以上」，调试行不占地方（但可以切到全部）',
+  w.document.querySelectorAll('ol.log li').length > 0 &&
+    ![...w.document.querySelectorAll('li.lv-debug')].length);
+check('日志：文件列表列出两个程序各两个文件', text().includes('pet.log') && text().includes('market.log'));
+check('日志：说明里写清了哪两个程序在写、以及里面没有什么',
+  text().includes('PETPC_LOG_LEVEL') && text().includes('没有') && text().includes('密钥'));
+
+// Switching the level to 全部 must bring the DEBUG row in: that is the difference between a
+// <select> that is bound and one that merely exists.
+const levelSelect = w.document.querySelectorAll('select')[0];
+levelSelect.value = 'debug';
+levelSelect.dispatchEvent(new w.Event('change', { bubbles: true }));
+await settle();
+check('日志：等级切到「全部」后调试行出现了', Boolean(w.document.querySelector('li.lv-debug')));
+
+// A search that matches nothing must SAY so rather than showing an empty box.
+const searchBox = w.document.querySelector('input[type="search"]');
+searchBox.value = '没有这个字符串';
+searchBox.dispatchEvent(new w.Event('input', { bubbles: true }));
+await settle();
+check('日志：搜索无结果时给出原因，而不是一块空白', text().includes('没有匹配的日志行'));
+searchBox.value = '';
+searchBox.dispatchEvent(new w.Event('input', { bubbles: true }));
+await settle();
 
 await open('高级');
 check('高级：模型配置来自 store.Config', text().includes('deepseek') && text().includes('deepseek-chat'));
@@ -284,7 +363,7 @@ if (diagButton) {
   await settle();
   const after = text();
   check('高级：诊断报告列出了文件与插件', after.includes('== 文件 ==') && after.includes('== 已装插件 =='));
-  check('高级：诊断报告说明了日志为什么不在', after.includes('PETPC_DEBUG'));
+  check('高级：诊断报告带上了日志区与两个日志文件', after.includes('== 日志 ==') && after.includes('logs/pet.log'));
 }
 
 check('访问过的每一页都没有报错行', !/已装列表：|权限文案：|读取中…/.test(text()));

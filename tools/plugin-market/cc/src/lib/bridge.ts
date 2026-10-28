@@ -41,7 +41,6 @@ export type PermissionLabel = main.LabelPair;
 export type PluginConfig = main.PluginConfig;
 export type ConfigEditor = main.ConfigEditor;
 export type Config = store.Config;
-export type Todo = store.Todo;
 export type HotkeyView = desktop.HotkeyView;
 
 // Three rows, three shapes the host really produces:
@@ -60,7 +59,7 @@ const FAKE_ROWS: PluginRow[] = [
     ID: 'com.shixiansi.plugin-chat',
     Version: '1.4.1',
     Enabled: true,
-    Granted: ['llm.chat', 'pet.bubble', 'pet.surface', 'plugin.config', 'storage', 'todos.read'],
+    Granted: ['llm.chat', 'pet.bubble', 'pet.surface', 'plugin.config'],
     InstalledAt: '2026-10-18T09:20:00+08:00',
     Manifest: {
       id: 'com.shixiansi.plugin-chat',
@@ -68,7 +67,7 @@ const FAKE_ROWS: PluginRow[] = [
       version: '1.4.1',
       author: 'shixiansi',
       description: '在桌宠旁聊天，并把对话记进自己的私有目录。',
-      permissions: ['llm.chat', 'pet.bubble', 'pet.surface', 'plugin.config', 'storage', 'todos.read', 'todos.write'],
+      permissions: ['llm.chat', 'pet.bubble', 'pet.surface', 'plugin.config', 'storage'],
       panel: true,
       panelSlot: 'chat',
       entry: 'index.html',
@@ -114,6 +113,43 @@ const FAKE_ROWS: PluginRow[] = [
       entry: 'index.html',
     },
     Dir: 'C:\\Users\\fan\\AppData\\Roaming\\PetPC\\plugins\\com.shixiansi.plugin-voice',
+    Error: '',
+  }),
+  // A SURFACE plugin, and the reason it is here: the page used to refuse these outright
+  // (they declare rectangles measured from the pet, which this window does not have), so the
+  // three plugins whose pages the user actually wanted — todo, pomodoro, chat — showed no
+  // interface at all. They mount now; what a document cannot do here is pet-shaped, and it
+  // says so itself. Without this row in the stub, `mountable()` could go back to refusing
+  // surfaces and the smoke test would stay green.
+  plugins.Installed.createFrom({
+    ID: 'com.shixiansi.plugin-pomodoro',
+    Version: '2.2.0',
+    Enabled: true,
+    Granted: ['storage', 'plugin.config', 'plugin.share'],
+    InstalledAt: '2026-10-21T20:10:00+08:00',
+    Manifest: {
+      id: 'com.shixiansi.plugin-pomodoro',
+      name: '番茄钟插件',
+      version: '2.2.0',
+      author: 'shixiansi',
+      description: '桌宠旁的番茄钟：自己的状态机与记录，计时在常驻帧里跑，浮层面只是视图。',
+      permissions: ['storage', 'plugin.config', 'plugin.share', 'events', 'pet.surface', 'pet.bubble'],
+      panelSlot: 'pomodoro',
+      background: true,
+      surface: [{ dx: 160, dy: -160, w: 380, h: 260, radius: 14 }],
+      // The four keys `machine.js` reads, declared so the page's 设置 button has something
+      // honest to open. They used to be hard-coded defaults with NO declaration at all,
+      // which is exactly why the plugin had no settings to show.
+      config: [
+        { key: 'focusMinutes', label: '专注时长（分钟）', type: 'number', default: '25' },
+        { key: 'shortBreakMinutes', label: '短休息（分钟）', type: 'number', default: '5' },
+        { key: 'longBreakMinutes', label: '长休息（分钟）', type: 'number', default: '15' },
+        { key: 'longBreakEvery', label: '每几个专注后来一次长休息', type: 'number', default: '4' },
+        { key: 'autoStartNextPhase', label: '一个阶段结束后自动开始下一段', type: 'bool', default: 'true' },
+      ],
+      entry: 'panel.html',
+    },
+    Dir: 'C:\\Users\\fan\\AppData\\Roaming\\PetPC\\plugins\\com.shixiansi.plugin-pomodoro',
     Error: '',
   }),
   // The row the .exe kept showing as an empty object: an id with no manifest. It is here
@@ -214,24 +250,6 @@ const FAKE_CONFIG: Config = store.Config.createFrom({
   llmDailyBudget: 200,
 });
 
-const FAKE_TODOS: Todo[] = [
-  store.Todo.createFrom({
-    id: 'a',
-    title: '写周报',
-    notes: '第三节讲清楚为什么不做多窗口',
-    due: '2026-10-27T18:00:00+08:00',
-    done: false,
-    createdAt: '2026-10-26T09:12:00+08:00',
-  }),
-  store.Todo.createFrom({
-    id: 'b',
-    title: '整理纸箱',
-    done: true,
-    createdAt: '2026-10-20T20:00:00+08:00',
-    doneAt: '2026-10-21T10:30:00+08:00',
-  }),
-];
-
 // A dev-only delay so a "读取中" state is actually observable instead of flashing past.
 const later = <T>(v: T, ms = 120): Promise<T> => new Promise((r) => setTimeout(() => r(v), ms));
 
@@ -248,6 +266,77 @@ export const Grant = (id: string, granted: string[]): Promise<void | unknown> =>
   DEV ? later(undefined) : host.Grant(id, granted);
 export const SetEnabled = (id: string, on: boolean): Promise<void | unknown> =>
   DEV ? later(undefined) : host.SetEnabled(id, on);
+
+// --- 市场目录：只为了回答「有没有更新」 ------------------------------------------
+//
+// The catalogue is here for ONE reason so far, and it is not browsing: a plugin's interface
+// ships WITH the plugin. The bundled documents learned new behaviour in this round (a list that
+// converges between two windows, the pomodoro's records view, the chat plugin's read-only
+// composer in a management window) - and an older installed package would show none of it while
+// the page around it looked finished. So the page has to be able to say "v2.2.0 is out" and to
+// install it.
+//
+// Browsing and installing something you do NOT have is still the open half of stage 3
+// (docs/plugin-market.md §2.8). The update goes through `Market.Update`, which keeps the plugin
+// enabled and keeps the permissions the user already granted.
+export type MarketView = plugins.MarketView;
+export type MarketEntry = plugins.MarketEntry;
+
+// Two entries in the shape the host sends (`installed` / `installedVersion` are filled in by the
+// manager): the chat row the page lists at 1.7.4 has 1.7.5 available, and the voice row is
+// current - so a page that offered an update for everything would fail the smoke test.
+const FAKE_MARKET: MarketView = plugins.MarketView.createFrom({
+  base: 'https://gh-proxy.com/https://raw.githubusercontent.com/shixiansi/pet-pc-plugins/main',
+  fallback: false,
+  notice: '',
+  entries: [
+    {
+      id: 'com.shixiansi.plugin-chat',
+      name: '对话插件',
+      version: '1.7.5',
+      author: 'shixiansi',
+      description: '在面板里与桌宠旁和大模型对话的官方插件。',
+      permissions: ['llm.chat', 'pet.surface', 'plugin.config', 'storage'],
+      download: 'https://example.invalid/chat-1.7.5.zip',
+      sha256: '0'.repeat(64),
+      installed: true,
+      installedVersion: '1.7.4',
+    },
+    {
+      id: 'com.shixiansi.plugin-voice',
+      name: '语音插件',
+      version: '1.0.1',
+      author: 'shixiansi',
+      description: '把提醒念出来。',
+      permissions: ['audio', 'events', 'storage'],
+      download: 'https://example.invalid/voice-1.0.1.zip',
+      sha256: '0'.repeat(64),
+      installed: true,
+      installedVersion: '1.0.1',
+    },
+  ],
+});
+
+export const Catalogue = (): Promise<MarketView> => (DEV ? later(FAKE_MARKET) : host.Catalogue());
+
+/**
+ * Installs the newer package over the installed one.
+ *
+ * In dev the fake rows are MUTATED so a refresh shows the new version: a stub that resolved but
+ * changed nothing would leave the 更新 chip on screen after a successful update, which is exactly
+ * the "the button did nothing" impression this page exists to avoid.
+ */
+export const Update = (id: string): Promise<void | unknown> => {
+  if (!DEV) return host.Update(id);
+  const entry = FAKE_MARKET.entries.find((e) => e.id === id);
+  const row = FAKE_ROWS.find((r) => r.ID === id);
+  if (entry && row) {
+    row.Version = entry.version;
+    if (row.Manifest) row.Manifest.version = entry.version;
+    entry.installedVersion = entry.version;
+  }
+  return later(undefined);
+};
 
 // --- 插件的配置编辑器（manifest.config） ----------------------------------------------
 //
@@ -334,14 +423,22 @@ function fakeConfig(id: string): Promise<PluginConfig> {
 // The plugin page mounts each plugin's document in a sandboxed frame (`lib/plugin-frame.ts`),
 // and every call that document makes comes back through `Market.PluginRequest` - the SAME
 // dispatcher the pet uses, with THIS program's capability table (audio / storage / config /
-// net.fetch; `todos.*`, `timer.*`, `events.subscribe` and the like are refused here, on
-// purpose: they need things only the pet has).
+// net.fetch / plugin.share). What is still refused is the genuinely pet-shaped half:
+// `todos.*`, `timer.*`, `bubble.say`, `surface.*`, `llm.chat`, `events.subscribe`. A document
+// that is designed for this window says what it cannot do in its own words; the pomodoro
+// hides its timer controls here and the chat plugin's composer explains where to send.
 //
-// There is deliberately no dev fake for it. In a browser nothing can reach it: the frame's
-// `src` is `/plugin-asset/...`, which only the .exe's AssetServer serves, so no document boots
-// and no `ready` is ever posted. A plausible-looking fake would be worse than none - one that
-// answered `todos.list` from FAKE_TODOS would let a workshop look correct in `npm run dev`
-// while the .exe refuses the very same call.
+// `plugin.share` is the one that had to move, and the history is worth keeping: it used to be
+// refused, which made the todo/pomodoro documents show a host error in the middle of their own
+// page, and the workaround was to refuse to mount any plugin that declared a `surface` at all.
+// The tray is a folder inside plugin-data - this program owns it too - so the rule moved to
+// internal/plugins/share.go and both hosts serve it.
+//
+// There is deliberately no dev fake for `PluginRequest`. In a browser nothing can reach it: the
+// frame's `src` is `/plugin-asset/...`, which only the .exe's AssetServer serves, so no document
+// boots and no `ready` is ever posted. A plausible-looking fake would be worse than none - one
+// that answered `storage.get` from a constant would let a workshop look correct in `npm run dev`
+// while the .exe answers with the plugin's real file.
 /** One plugin call, answered by the shared gate. Returns the method's JSON as a string. */
 export const PluginRequest = (id: string, method: string, payload: string): Promise<string> => {
   if (!DEV) return host.PluginRequest(id, method, payload);
@@ -399,7 +496,6 @@ export const SetReminderWindow = (from: string, to: string): Promise<Config> =>
 export const SetReminderDisplay = (items: number, autoHideSec: number): Promise<Config> =>
   DEV ? savedConfig({ reminderMaxItems: items, reminderAutoHideSec: autoHideSec }) : host.SetReminderDisplay(items, autoHideSec);
 
-export const Todos = (): Promise<Todo[]> => (DEV ? later(FAKE_TODOS) : host.Todos());
 export const DataDir = (): Promise<string> => (DEV ? later('C:\\fake\\PetPC') : host.DataDir());
 
 // --- 高级页的诊断面 --------------------------------------------------------------
@@ -409,17 +505,18 @@ export type HostKeyState = main.HostKey;
 // The same text the Go side builds, shortened but not reshaped: a fake that drops the
 // "不存在的文件也要说出来" lines would let the page look right while the real report is empty.
 const FAKE_REPORT = `PetPC 诊断报告
-生成时间: 2026-10-26 18:40:12
+生成时间: 2026-10-28 18:40:12
 数据目录: C:\\fake\\PetPC
 
 == 文件 ==
-settings.json                 412 B  2026-10-26 18:31:04
-config.json                   188 B  2026-10-26 18:38:51
+settings.json                 412 B  2026-10-28 18:31:04
+config.json                   188 B  2026-10-28 18:38:51
 plugins.json                  264 B  2026-10-18 09:20:11
 plugin-market.json             64 B  2026-10-02 21:05:44
-todos.json                    398 B  2026-10-26 09:12:00
+todos.json                    398 B  2026-10-28 09:12:00
 llm-key.bin                   452 B  2026-10-18 09:21:30
-debug.log                    不存在
+logs/pet.log                18422 B  2026-10-28 18:40:02
+logs/market.log               812 B  2026-10-28 18:39:58
 
 == 已装插件 ==
 com.shixiansi.plugin-chat  v1.4.1  启用  权限 7（已授 6）  对话插件
@@ -432,8 +529,16 @@ com.example.broken  v0.0.3  停用  权限 0（已授 0）
 == 密钥 ==
 llm-key.bin 存在（DPAPI 密文，本程序不解密）
 
-== 日志尾 ==
-debug.log 不存在：它只在桌宠以 PETPC_DEBUG=1 启动时才被写，平时是正常的。
+== 日志 ==
+目录: C:\\fake\\PetPC\\logs（轮转上限 2048 KB，每个程序两个文件）
+pet.log                    18422 B  2026-10-28 18:40:02
+pet.log.1                      0 B  2026-10-28 09:12:44
+market.log                   812 B  2026-10-28 18:39:58
+market.log.1                   0 B  2026-10-28 09:12:44
+
+2026-10-28 18:38:51.004 INFO  pet - 启动：数据目录 C:\\fake\\PetPC，日志级别 INFO，日志文件 C:\\fake\\PetPC\\logs\\pet.log
+2026-10-28 18:39:12.331 INFO  plugin com.shixiansi.plugin-chat llm.chat ok（payload 84 B → 196 B，in 812ms）
+2026-10-28 18:39:58.010 INFO  market com.shixiansi.plugin-chat 授权已保存：[llm.chat pet.bubble pet.surface plugin.config storage]
 `;
 
 export const HostKey = (): Promise<HostKeyState> =>
@@ -441,3 +546,64 @@ export const HostKey = (): Promise<HostKeyState> =>
     ? later(main.HostKey.createFrom({ Path: 'C:\\fake\\PetPC\\llm-key.bin', Present: true }))
     : host.HostKey();
 export const Diagnostics = (): Promise<string> => (DEV ? later(FAKE_REPORT) : host.Diagnostics());
+
+// --- 日志页 -------------------------------------------------------------------------
+//
+// The REAL read is two files in the data directory (`internal/logging.Read`), because half
+// the interesting lines are written by the OTHER process - the pet. So there is nothing to
+// mock away here: the fake is a plausibly-shaped list of rows, and what it must get right is
+// that the page's FILTERS still work in the browser.
+//
+// That is why `fakeLog` applies the query instead of ignoring it: a stub that returned the
+// same five rows for every filter would let a page whose level/scope/search were wired to
+// nothing look perfectly correct in `npm run dev` - the exact class of bug this whole file
+// exists to prevent.
+export type LogView = main.LogView;
+export type LogQuery = main.LogQuery;
+export type LogLine = main.LogLine;
+export type LogFileView = main.LogFileView;
+
+// The levels a real log contains, including one WARN (a retried model call) and one ERROR (a
+// plugin refused for a permission) - the two rows whose colour and left stripe are the whole
+// point of having levels, and the two a fake made only of INFO rows would never exercise.
+const FAKE_LOG_ROWS: Array<[at: string, level: string, scope: string, plugin: string, message: string]> = [
+  ['2026-10-28 14:31:02.118', 'ERROR', 'page', '', '操作失败：未获权限 llm.chat'],
+  ['2026-10-28 14:31:02.101', 'WARN', 'plugin', 'com.shixiansi.plugin-chat', 'llm.chat 没有执行（payload 84 B，in 0ms）：插件 com.shixiansi.plugin-chat 未获权限 llm.chat'],
+  ['2026-10-28 14:30:58.442', 'WARN', 'llm', 'com.shixiansi.plugin-chat', 'llm.chat 一轮 in 2380ms（尝试 2 次）：0 字，tokens in=812 out=0，finish=，工具调用 0 个'],
+  ['2026-10-28 14:30:56.004', 'INFO', 'plugin', 'com.shixiansi.plugin-chat', 'config.get ok（payload 0 B → 196 B，in 1ms）'],
+  ['2026-10-28 14:30:41.771', 'INFO', 'reminder', '', '提醒气泡已弹出：2 条，手动=false'],
+  ['2026-10-28 14:30:12.003', 'DEBUG', 'llm', 'com.shixiansi.plugin-chat', 'POST https://api.deepseek.com/v1/chat/completions model=deepseek-chat 消息 3 条 工具 2 个 温度 0.8 max_tokens=800'],
+  ['2026-10-28 14:29:58.500', 'INFO', 'market', 'com.shixiansi.plugin-chat', '授权已保存：[llm.chat pet.bubble pet.surface plugin.config storage]'],
+  ['2026-10-28 14:29:41.000', 'INFO', 'pet', '', '启动：数据目录 C:\\fake\\PetPC，日志级别 INFO，日志文件 C:\\fake\\PetPC\\logs\\pet.log'],
+];
+
+const FAKE_LOG_LEVELS: Record<string, number> = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
+
+function fakeLog(q: LogQuery): LogView {
+  const min = FAKE_LOG_LEVELS[(q.level || 'debug').toUpperCase()] ?? 0;
+  const search = (q.search || '').trim().toLowerCase();
+  const scope = (q.scope || '').trim();
+  const rows = FAKE_LOG_ROWS.filter(
+    (r) =>
+      (FAKE_LOG_LEVELS[r[1]] ?? 0) >= min &&
+      (scope === '' || r[2] === scope) &&
+      (search === '' || r[4].toLowerCase().includes(search) || r[3].toLowerCase().includes(search)),
+  );
+  return asHostSends(
+    main.LogView.createFrom({
+      // Newest first, like the Go side sends them.
+      entries: rows.slice().reverse().map(([at, level, scope_, plugin, message]) => ({ at, level, scope: scope_, plugin, message })),
+      files: [
+        { name: 'pet.log', path: 'C:\\fake\\PetPC\\logs\\pet.log', bytes: 18422, modified: '2026-10-28 14:31:02' },
+        { name: 'pet.log.1', path: 'C:\\fake\\PetPC\\logs\\pet.log.1', bytes: 2097120, modified: '2026-10-28 09:12:44' },
+        { name: 'market.log', path: 'C:\\fake\\PetPC\\logs\\market.log', bytes: 812, modified: '2026-10-28 14:29:58' },
+        { name: 'market.log.1', path: 'C:\\fake\\PetPC\\logs\\market.log.1', bytes: 0, modified: '' },
+      ],
+      scopes: [...new Set(FAKE_LOG_ROWS.map((r) => r[2]))].sort(),
+      dir: 'C:\\fake\\PetPC\\logs',
+      note: rows.length === 0 ? '没有匹配的日志行：试试把等级调到「全部」，或者清空搜索与范围。' : '',
+    }) as unknown as LogView,
+  );
+}
+
+export const LogTail = (q: LogQuery): Promise<LogView> => (DEV ? later(fakeLog(q)) : host.LogTail(q));

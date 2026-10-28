@@ -9,8 +9,10 @@
     RememberSelection,
     GetConfig,
     SaveConfig,
+    Catalogue,
+    Update,
   } from '../lib/bridge';
-  import type { PluginRow, PluginConfig, ConfigEditor } from '../lib/bridge';
+  import type { PluginRow, PluginConfig, ConfigEditor, MarketView, MarketEntry } from '../lib/bridge';
 
   // The row type is the GENERATED one (wailsjs/go/models.ts -> plugins.Installed), not a
   // hand-written description of it. That is the whole fix: this page used to declare
@@ -22,6 +24,19 @@
   let labels = $state<Record<string, string>>({});
   let loaded = $state(false);
   let error = $state('');
+  /** A one-off confirmation ("已更新到 v1.7.5"), cleared by the next action. */
+  let notice = $state('');
+  /** True while a package is being downloaded and unpacked. */
+  let updating = $state(false);
+  /**
+   * The market catalogue, or null.
+   *
+   * Fetched in the BACKGROUND and allowed to fail: it goes over the network, so "no catalogue"
+   * (offline, mirror down) is an ordinary state and must not turn the plugin page into an error
+   * screen. What it buys is one thing: an installed plugin whose interface is OLDER than the
+   * published package can say so, because a document's behaviour ships with the document.
+   */
+  let market = $state<MarketView | null>(null);
 
   // Which plugin the detail side shows, and whether the list column is folded away so its
   // interface gets the whole page. Both are page state, not host state: the selection is
@@ -72,6 +87,8 @@
       /* not fatal: the page just opens with nothing selected */
     }
     await refresh();
+    // Not awaited: the catalogue comes over the network, and this page is usable without it.
+    void loadCatalogue();
   }
 
   // Every binding call is awaited SEPARATELY, behind a timeout, and the reason is the bug
@@ -168,40 +185,115 @@
   /**
    * Whether this plugin's own interface can be hosted here at all.
    *
-   * The gate is "installed, enabled, it ships a document, and that document is not laid out
-   * relative to the pet".
+   * The gate is "installed, enabled, and it ships a document". Nothing else.
    *
-   * The last clause is what keeps a floating-surface plugin out of this page. `surface` blocks are
-   * coordinates measured from the PET's top-left corner, and this window has no pet: mounting such a
-   * document here gives it rectangles it cannot honour, and - the case that was reported - a
-   * document that talks to its own other frame through `plugin.share`, which this program does not
-   * serve. The user saw 「插件 com.shixiansi.plugin-pomodoro 调用了本程序不支持的方法 share.set」
-   * in the middle of the plugin page. The fix is not to teach this program a pet-shaped channel; it
-   * is to stop mounting a document that was never meant for this window.
+   * IT USED TO ALSO REFUSE every plugin that declared `surface` blocks, and the reasoning
+   * behind that is worth keeping because it was half right: a surface block is a rectangle
+   * measured from the PET's corner, this window has no pet, and one plugin's document
+   * called `share.set` from inside this page and got 「本程序不支持该方法」 - so "do not
+   * mount a document that was never meant for this window" sounded right.
    *
-   * The three bundled plugins that DO need this page declare `panel: false`, no `surface` and
-   * `background: true` precisely because their interface lives HERE (see
-   * openspec/changes/plugin-page-workspace). A disabled plugin gets no frame either: switching a
-   * plugin off has to stop it running, not just stop it being listed.
+   * It was wrong in the part that mattered. The reported symptom was a plugin page with a
+   * host error in the middle of it, and the cause was the MARKET not serving `plugin.share`
+   * - a tray of files in plugin-data, which this program owns just as much as the pet does.
+   * Refusing to mount the four bundled plugins that do real work (todo, pomodoro, chat,
+   * voice) hid their interfaces from the only window that has room for them, and left the
+   * 待办 page reading a file the plugin no longer writes.
+   *
+   * So: the tray is served here now (internal/plugins/share.go, both hosts), and a document
+   * that is inside this window learns where it is from `surface.slot === 'workshop'`. The
+   * genuinely pet-shaped half - drawing beside the pet, starting the timer that runs there,
+   * spending the pet's model budget - is still refused, and a document that could not
+   * degrade honestly says so in its own words (the pomodoro hides its timer controls here
+   * and the chat plugin's composer explains itself).
+   *
+   * A disabled plugin gets no frame either: switching a plugin off has to stop it running,
+   * not just stop it being listed.
    */
   function mountable(r: PluginRow | null): boolean {
     if (!r || !r.Manifest || !r.Enabled || !r.Manifest.entry) return false;
-    const surface = r.Manifest.surface;
-    return !(surface && surface.length > 0);
+    return true;
   }
 
-  /** Why there is no interface, in the user's words - four different things to do. */
+  /** Why there is no interface, in the user's words - three different things to do. */
   function noInterfaceWhy(r: PluginRow | null): string {
     if (!r) return '';
     if (r.Error) return '界面不可用：' + r.Error;
     if (!r.Manifest) return '这个插件的 manifest 读不出来，界面没有加载。';
     if (!r.Enabled) return '插件已停用，界面不运行。打开「启用」它才会跑。';
     if (!r.Manifest.entry) return '这个插件没有声明界面（manifest 里没有 entry）。';
-    const surface = r.Manifest.surface;
-    if (surface && surface.length > 0) {
-      return '这个插件的界面是桌宠旁边的浮层面，只能在桌宠上打开（右键桌宠 → 番茄钟 / 日程 / 对话）。';
-    }
     return '';
+  }
+
+  /**
+   * Version comparison for the 更新 chip.
+   *
+   * Numeric, segment by segment - NOT a second copy of the semver rules: `internal/plugins`
+   * owns the question "is this an upgrade" when a package is installed, and it is the one that
+   * refuses nonsense. This only decides whether to DRAW a chip, and a chip that appears for a
+   * version the manager would refuse is a chip that fails when pressed - which the error path
+   * already reports honestly.
+   */
+  function versionParts(v: string): number[] {
+    return String(v || '')
+      .split('.')
+      .map((p) => Number.parseInt(p, 10) || 0);
+  }
+
+  function isNewer(candidate: string, installed: string): boolean {
+    const a = versionParts(candidate);
+    const b = versionParts(installed);
+    for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+      const x = a[i] ?? 0;
+      const y = b[i] ?? 0;
+      if (x !== y) return x > y;
+    }
+    return false;
+  }
+
+  /**
+   * The catalogue entry that is a genuine UPGRADE for this row, or null.
+   *
+   * `installedVersion` comes from the manager, so a row whose on-disk version the catalogue does
+   * not know about (a locally built package) simply offers nothing.
+   */
+  function updateFor(r: PluginRow | null): MarketEntry | null {
+    if (!r || !market) return null;
+    const entry = market.entries.find((e) => e.id === r.ID && e.installed);
+    if (!entry) return null;
+    const installed = entry.installedVersion || r.Version || '';
+    return isNewer(entry.version, installed) ? entry : null;
+  }
+
+  /** Runs the update, then refreshes BOTH sides: the row's version and the chip's reason to exist. */
+  async function applyUpdate() {
+    if (!selected) return;
+    const target = updateFor(selected);
+    if (!target) return;
+    const id = selected.ID;
+    notice = '';
+    updating = true;
+    try {
+      await Update(id);
+      notice = '已更新到 v' + target.version;
+      error = '';
+      await refresh();
+      await loadCatalogue();
+    } catch (e) {
+      // Not fatal to the page: the old package is still installed and still runs.
+      error = '更新 ' + id + ' 失败：' + why(e);
+    } finally {
+      updating = false;
+    }
+  }
+
+  async function loadCatalogue() {
+    try {
+      market = await Catalogue();
+    } catch {
+      // Offline, mirror down, no catalogue configured: the page works without it.
+      market = null;
+    }
   }
 
   function select(r: PluginRow) {
@@ -468,6 +560,25 @@
         </div>
 
         <div class="ops">
+          <!-- A newer published package, when there is one. It is here because a plugin's
+               INTERFACE ships with the plugin: the bundled documents changed behaviour this round
+               (a list that converges between two windows, the pomodoro's records, the chat
+               plugin's read-only composer in a management window), and an older installed package
+               would show none of it while this page looked finished. Only the upgrade direction is
+               offered: `Market.Update` keeps the plugin enabled and keeps the granted permissions,
+               and a downgrade is a decision this button is not for. -->
+          {#if updateFor(selected)}
+            <button
+              type="button"
+              class="chip update"
+              disabled={updating}
+              onclick={applyUpdate}
+              title="从市场目录安装这个更晚的版本；启用状态与你已授予的权限都保持不变"
+            >
+              {updating ? '更新中…' : '更新到 v' + updateFor(selected)?.version}
+            </button>
+          {/if}
+
           <label class="switch" title="启用或停用这个插件">
             <input
               type="checkbox"
@@ -543,6 +654,9 @@
       {/if}
     {/if}
 
+    {#if notice}
+      <p class="ok">{notice}</p>
+    {/if}
     {#if error}
       <p class="err">{error}</p>
     {/if}
@@ -880,6 +994,9 @@
 
   .hint { margin: var(--space-2) 0 0; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
   .err { margin: 0; color: var(--danger); font-size: 12px; }
+  /* The update confirmation sits where the error does: both are the result of the action the
+     user just took, and the detail column is where they looked for it. */
+  .ok { margin: 0; color: var(--ok); font-size: 12px; }
 
   /* --- the settings dialog ---------------------------------------------------------- */
 

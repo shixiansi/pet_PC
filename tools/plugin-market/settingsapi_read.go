@@ -1,26 +1,16 @@
 package main
 
-import (
-	"fmt"
-
-	"PetPC/internal/store"
-)
-
 // Read-only views of the pet's data.
 //
-// These exist so a page can SHOW what the pet knows without this program becoming a
-// second writer of those files. todos.json belongs to the pet (openspec/changes/
-// ui-rebuild, design: one writer per file), so the control center reads it and nothing
-// more until a reload protocol is designed for the other direction.
-
-// Todos returns the todo list in the panel's order.
-func (m *Market) Todos() ([]store.Todo, error) {
-	s, err := store.New(m.dataDir)
-	if err != nil {
-		return nil, fmt.Errorf("读取待办失败：%w", err)
-	}
-	return s.Todos(), nil
-}
+// DataDir is the survivor, and it is not "a view of the pet's state": it is where this
+// program's Settings page tells the user their files are.
+//
+// `Todos()` used to live here, reading `todos.json` so the control center's 待办 page could
+// list it. Both are gone, and the reason is worth keeping: the list stopped being the
+// PET's data. It moved into the todo plugin's own `storage` (one migration, one writer -
+// the plugin), so a page reading `todos.json` was showing a file nothing writes any more.
+// The list belongs to the plugin, so it is drawn by the plugin's own document - the same
+// one the pet mounts beside itself - inside the plugin page's workspace.
 
 // DataDir is where everything lives, so the advanced page can show it rather than
 // describe it - "your data is in %APPDATA%\PetPC" is the one sentence users need and
