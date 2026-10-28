@@ -420,7 +420,19 @@ function scheduleBubbleHide(b) {
 
 function renderBadge() {
   if (!state) return;
-  // From the TODO PLUGIN's published list, computed by Go: the host has no stats of its own\n  // any more (State.Stats went with the host's todo store).\n  const { open, overdue, dueSoon } = state.todoBadge || {};
+  // From the TODO PLUGIN's published list, computed by Go: the host has no stats of its own any
+  // more (State.Stats went with the host's todo store).
+  //
+  // Defaulted field by field rather than `|| {}` on the whole object: a snapshot that carries the
+  // object but omits one counter would otherwise compare `undefined > 0` and lose the badge's
+  // colour without failing anywhere.
+  //
+  // THIS LINE WAS ONCE A COMMENT. A rewritten comment ended up with literal backslash-n instead of
+  // real newlines, so `const { open, ... }` was swallowed by the `//` above it - which made `open`
+  // resolve to the GLOBAL `window.open`, and the badge rendered `function open() { [native code] }`
+  // on the pet's shoulder. A missing declaration in sloppy-mode-looking code is a ReferenceError in
+  // a module; here it was not even that, because a global with the same name existed.
+  const { open = 0, overdue = 0, dueSoon = 0 } = state.todoBadge || {};
   if (!open) {
     els.badge.classList.add('hidden');
   } else {

@@ -168,23 +168,39 @@
   /**
    * Whether this plugin's own interface can be hosted here at all.
    *
-   * The gate is "installed, enabled, and it ships a document" - NOT "it declares a panel".
-   * The three bundled plugins that need this page most declare `panel: false` and
+   * The gate is "installed, enabled, it ships a document, and that document is not laid out
+   * relative to the pet".
+   *
+   * The last clause is what keeps a floating-surface plugin out of this page. `surface` blocks are
+   * coordinates measured from the PET's top-left corner, and this window has no pet: mounting such a
+   * document here gives it rectangles it cannot honour, and - the case that was reported - a
+   * document that talks to its own other frame through `plugin.share`, which this program does not
+   * serve. The user saw 「插件 com.shixiansi.plugin-pomodoro 调用了本程序不支持的方法 share.set」
+   * in the middle of the plugin page. The fix is not to teach this program a pet-shaped channel; it
+   * is to stop mounting a document that was never meant for this window.
+   *
+   * The three bundled plugins that DO need this page declare `panel: false`, no `surface` and
    * `background: true` precisely because their interface lives HERE (see
-   * openspec/changes/plugin-page-workspace). A disabled plugin gets no frame: switching a
+   * openspec/changes/plugin-page-workspace). A disabled plugin gets no frame either: switching a
    * plugin off has to stop it running, not just stop it being listed.
    */
   function mountable(r: PluginRow | null): boolean {
-    return Boolean(r && r.Manifest && r.Enabled && r.Manifest.entry);
+    if (!r || !r.Manifest || !r.Enabled || !r.Manifest.entry) return false;
+    const surface = r.Manifest.surface;
+    return !(surface && surface.length > 0);
   }
 
-  /** Why there is no interface, in the user's words - three different things to do. */
+  /** Why there is no interface, in the user's words - four different things to do. */
   function noInterfaceWhy(r: PluginRow | null): string {
     if (!r) return '';
     if (r.Error) return '界面不可用：' + r.Error;
     if (!r.Manifest) return '这个插件的 manifest 读不出来，界面没有加载。';
     if (!r.Enabled) return '插件已停用，界面不运行。打开「启用」它才会跑。';
     if (!r.Manifest.entry) return '这个插件没有声明界面（manifest 里没有 entry）。';
+    const surface = r.Manifest.surface;
+    if (surface && surface.length > 0) {
+      return '这个插件的界面是桌宠旁边的浮层面，只能在桌宠上打开（右键桌宠 → 番茄钟 / 日程 / 对话）。';
+    }
     return '';
   }
 

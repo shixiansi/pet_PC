@@ -1510,8 +1510,16 @@ check(
   // interface left on screen would keep its document alive with its permissions intact.
   // Two places have to agree: the page decides whether to render the host at all, and the
   // host itself refuses to mount without an entry.
-  /function mountable\(r: PluginRow \| null\): boolean \{\s*return Boolean\(r && r\.Manifest && r\.Enabled && r\.Manifest\.entry\);/
+  //
+  // The page's rule gained a FOURTH clause: a plugin that declares `surface` blocks is not
+  // mountable here at all. Those rectangles are measured from the PET's corner, and this window has
+  // no pet - mounting such a document gave it geometry it could not honour and a document that
+  // spoke to its own other frame through `plugin.share`, which this program does not serve. The
+  // user met that as 「插件 com.shixiansi.plugin-pomodoro 调用了本程序不支持的方法 share.set」 in
+  // the middle of the plugin page. So the check now pins the pet-relative exclusion too.
+  /function mountable\(r: PluginRow \| null\): boolean \{\s*if \(!r \|\| !r\.Manifest \|\| !r\.Enabled \|\| !r\.Manifest\.entry\) return false;/
     .test(ccPluginsPage) &&
+    /return !\(surface && surface\.length > 0\);/.test(ccPluginsPage) &&
     /\{#if mountable\(selected\)\}/.test(ccPluginsPage) &&
     /if \(!id \|\| !entry \|\| !inst\?\.Enabled\) return '';/.test(ccPluginFrameHost) &&
     /if \(!target \|\| !mountKey\) return;/.test(ccPluginFrameHost) &&

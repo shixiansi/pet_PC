@@ -44,6 +44,18 @@ type App struct {
 	// shown records whether the window has been revealed yet, so the startup
 	// reveal stays idempotent across a frontend reload.
 	shown bool
+	// geomReady is closed once the window has been placed AND cropped at least once.
+	//
+	// The frontend asks to be revealed as soon as it has painted, and the placement runs in a
+	// goroutine that first has to find the native window (WaitForWindow, up to 5s). Those two race,
+	// and the losing order is the bad one: the window is revealed with NO region and NO placement,
+	// so the user gets an uncropped rectangle at Wails' default size with a 0x0 pet in it, and
+	// nothing looks right until something re-crops - which is why "drag the pet once" appeared to
+	// fix it. Ready waits for this instead of revealing into that state.
+	geomReady chan struct{}
+	// geomOnce guards the single close above: every geometry pass after the first is a re-crop,
+	// not a new readiness event.
+	geomOnce sync.Once
 	// tray is the notification-area icon. It owns its own thread and message
 	// loop, so it is only touched at startup and shutdown.
 	tray *desktop.Tray
@@ -186,8 +198,9 @@ func NewApp() (*App, error) {
 		return nil, err
 	}
 	return &App{
-		store: st,
-		scale: 1,
+		store:     st,
+		scale:     1,
+		geomReady: make(chan struct{}),
 	}, nil
 }
 
@@ -392,6 +405,20 @@ func (a *App) Ready() error {
 	hwnd, err := a.resolveWindow()
 	if err != nil {
 		return err
+	}
+	// WAIT FOR THE PLACEMENT AND THE CROP. `restorePosition` runs in the startup goroutine and
+	// first has to find the native window, so on a cold start it loses the race against the
+	// page's own "I have painted, reveal me". Revealing into that gap is what produced the
+	// reported first-launch state: an uncropped rectangle at Wails' default size with a 0x0 pet
+	// in it, which only looked right once something re-cropped (a drag).
+	//
+	// The timeout is a floor, not a target: if the window could never be resolved the pet still
+	// has to appear, because an invisible pet is a worse bug than an uncropped one. It logs
+	// instead of failing so the reveal is never silently skipped.
+	select {
+	case <-a.geomReady:
+	case <-time.After(6 * time.Second):
+		log.Printf("pet: revealing before the first geometry pass (window not placed in time)")
 	}
 	// Re-assert transparency: the frame was stripped while the window was
 	// hidden, and the first show is what DWM uses to build the composition.
@@ -843,6 +870,9 @@ func (a *App) applyWindowGeometry() (Layout, error) {
 	if a.ctx != nil {
 		a.emitEvent("pet:layout", layout)
 	}
+	// The window now exists, is placed, and is cropped. This is the signal Ready() waits for:
+	// revealing before it produced an uncropped rectangle with nothing drawn in it.
+	a.geomOnce.Do(func() { close(a.geomReady) })
 	return layout, nil
 }
 

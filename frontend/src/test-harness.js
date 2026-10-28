@@ -152,7 +152,13 @@ export function baseLayout(over = {}) {
 }
 
 /** The state snapshot the fake backend answers GetState with. */
-export function baseState(over = {}) {  return {
+export function baseState(over = {}) {
+  // `config` is merged key by key (a test usually wants to nudge one switch); every OTHER field
+  // REPLACES its default. That distinction fixes a real miss: `baseState({ todoBadge })` used to
+  // drop its argument on the floor, so a test asking for "three open entries" silently got zero and
+  // the badge stayed hidden - which is why nothing caught it printing a function.
+  const { config: configOver, ...restOver } = over;
+  return {
     config: {
       petScale: 1, snapToEdge: true, edgeMargin: 8,
       // No pomodoro* keys: the timer, its phase lengths and its "sound" switch belong
@@ -166,9 +172,13 @@ export function baseState(over = {}) {  return {
       // the chat plugin, so the pet's state does not carry it any more. Leaving
       // it here would let a renderer that still reads it pass in jsdom while the
       // real GetState has already stopped sending it.
-      ...(over.config || {}),
+      ...(configOver || {}),
     },
-    todos: [], stats: { total: 0, open: 0, overdue: 0, dueSoon: 0 },
+    // todoBadge, not the old stats and todos: State carries neither any more (the host's todo
+    // store is gone). A fixture still holding them was why the badge rendered
+    // "function open() { [native code] }" in the field while every test passed - the renderer read
+    // a field the fixture never provided, and no assertion looked at the badge's text.
+    todoBadge: { open: 0, overdue: 0, dueSoon: 0 },
     petImageUrl: '', hasCustomImage: false, dataDir: 'C:\\data', autostart: false,
     now: new Date().toISOString(),
     // No pomodoro / records / recordTotals / voice block: State carries none of them
@@ -176,6 +186,7 @@ export function baseState(over = {}) {  return {
     // counters are the pomodoro plugin's, and speech is the voice plugin's.
     hotkeys: { enabled: false, show: '', hide: '', active: false, note: '' },
     petVisible: true,
+    ...restOver,
   };
 }
 
