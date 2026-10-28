@@ -100,8 +100,29 @@ type Client struct {
 	// nil uses the real delays.
 	RetryBackoff []time.Duration
 
+	// Logf, when set, receives one diagnostic line per interesting step of a call:
+	// the endpoint and model being asked, the HTTP status, a retry and its reason,
+	// the finished stream's frame count and token usage.
+	//
+	// It NEVER receives the request messages or the reply text, and it must not:
+	// this package is the one place that holds both, and the log it feeds is a file
+	// the user may paste into a bug report (the control center's 诊断报告). What is
+	// logged is SHAPE - which endpoint, which status, how many frames, how many
+	// tokens - because that is what separates "the key is wrong" from "the gateway
+	// answered in a dialect nobody can parse".
+	//
+	// Nil is silent and is the default, so a test or a second caller costs nothing.
+	Logf func(format string, args ...any)
+
 	mu              sync.Mutex
 	noStreamOptions bool
+}
+
+// logf writes one line, if anyone is listening.
+func (c *Client) logf(format string, args ...any) {
+	if c.Logf != nil {
+		c.Logf(format, args...)
+	}
 }
 
 // NewClient returns a client with sensible transport timeouts.
@@ -166,15 +187,20 @@ func (c *Client) chat(ctx context.Context, s Settings, msgs []Message, tools []T
 		backoff = DefaultRetryBackoff
 	}
 	for attempt := 1; attempt <= len(backoff)+1; attempt++ {
+		if attempt > 1 {
+			c.logf("第 %d 次尝试（上一次：%s）", attempt, lastErr.Message)
+		}
 		res, err := c.attempt(ctx, s, msgs, tools, h)
 		res.Attempts = attempt
 
 		if err == nil {
 			res.ElapsedMS = time.Since(start).Milliseconds()
+			c.logf("完成：%d 字，%d 个工具调用，finish=%s，耗时 %dms", len([]rune(res.Text)), len(res.ToolCalls), res.FinishReason, res.ElapsedMS)
 			return res, nil
 		}
 		lastErr = err
 		lastErr.Attempts = attempt
+		c.logf("失败（可重试=%v，已收到 %d 字）：%s", err.Retryable, len([]rune(res.Text)), err.Message)
 
 		// A retry is only safe while nothing has been shown. Once text has
 		// reached the transcript, sending the request again would make the reply
@@ -184,6 +210,7 @@ func (c *Client) chat(ctx context.Context, s Settings, msgs []Message, tools []T
 			res.ElapsedMS = time.Since(start).Milliseconds()
 			return res, err
 		}
+		c.logf("等 %s 后重试", backoff[attempt-1])
 		if !sleepCtx(ctx, backoff[attempt-1]) {
 			res.Attempts = attempt
 			res.ElapsedMS = time.Since(start).Milliseconds()
@@ -233,11 +260,18 @@ func (c *Client) attempt(ctx context.Context, s Settings, msgs []Message, tools 
 		req.Header.Set("Authorization", "Bearer "+s.APIKey)
 	}
 
+	// The shape of the request, never its content: the endpoint and model answer
+	// "which service is this install actually talking to", the message count
+	// answers "was the history attached", and neither can leak the user's words.
+	c.logf("POST %s model=%s 消息 %d 条 工具 %d 个 温度 %g max_tokens=%d",
+		endpoint, s.Model, len(msgs), len(tools), s.Temperature, s.MaxTokens)
+
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
 		return res, classifyTransport(ctx, s.BaseURL, err)
 	}
 	defer resp.Body.Close()
+	c.logf("HTTP %d（Content-Type: %s）", resp.StatusCode, resp.Header.Get("Content-Type"))
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
@@ -249,6 +283,7 @@ func (c *Client) attempt(ctx context.Context, s Settings, msgs []Message, tools 
 		// omits the field.
 		if resp.StatusCode == http.StatusBadRequest && strings.Contains(detail, "stream_options") {
 			c.disableStreamOptions()
+			c.logf("这个端点不认 stream_options，下一次尝试会去掉它")
 			return res, retryableError(KindRequest, resp.StatusCode,
 				"该服务不支持 stream_options，已自动重试。", nil)
 		}
@@ -280,10 +315,16 @@ func (c *Client) consume(ctx context.Context, body io.Reader, h Handlers) (Resul
 		raw     bytes.Buffer
 		dec     = NewDecoder()
 		readBuf = make([]byte, 4096)
+		// frames counts what the decoder produced, for the one summary line at the
+		// end: "0 frames from a 200 response" is the signature of a gateway that
+		// answered in a dialect this client cannot read, and it is invisible from
+		// the reply alone (it is empty either way).
+		frames int
 	)
 
 	handle := func(events []Event) *ChatError {
 		for _, ev := range events {
+			frames++
 			if ev.Done {
 				res.FinishReason = orDefault(res.FinishReason, "stop")
 				continue
@@ -363,6 +404,11 @@ func (c *Client) consume(ctx context.Context, body io.Reader, h Handlers) (Resul
 	}
 
 	res = finishResult(res, text.String(), reason.String(), textC, reasonC)
+	if res.Usage != nil {
+		c.logf("流结束：%d 个 SSE 事件，%d 字，tokens in=%d out=%d", frames, len([]rune(res.Text)), res.Usage.PromptTokens, res.Usage.CompletionTokens)
+	} else {
+		c.logf("流结束：%d 个 SSE 事件，%d 字，服务端没报用量", frames, len([]rune(res.Text)))
+	}
 
 	// The non-streaming fallback. A server that ignores `stream: true` answers
 	// with one ordinary JSON body, which produces no SSE events at all; without
@@ -370,6 +416,7 @@ func (c *Client) consume(ctx context.Context, body io.Reader, h Handlers) (Resul
 	// answered correctly.
 	if res.Text == "" && res.Reasoning == "" {
 		if text, usage, finish, model, ok := parseNonStreaming(raw.Bytes()); ok {
+			c.logf("这不是 SSE：按一次性 JSON 回复处理（%d 字节）", raw.Len())
 			res.Text = text
 			res.Usage = usage
 			res.FinishReason = orDefault(finish, "stop")

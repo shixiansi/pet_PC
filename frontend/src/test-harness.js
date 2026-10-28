@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Loads the REAL page into jsdom and returns handles for asserting on it.
  *
  * The app is one module that grabs its elements at import time and then wires
@@ -53,7 +53,7 @@ function installBridge(handlers = {}) {
     'DebugLog', 'DismissBubble', 'DragTo',
     'EndDrag', 'GetLayout', 'GetState', 'HidePet',
     'HidePetForUser', 'OpenChatPluginSurface', 'OpenPetMenu', 'OpenPluginMarket',
-    'OpenPluginSurface', 'OpenTodoFromBubble', 'SetPluginSurfaceBlocks',
+    'OpenPluginSurface', 'OpenTodoFromBubble', 'PageLog', 'PetBadge', 'SetPluginSurfaceBlocks',
     'PetImageURL', 'PluginMarketCandidates',
     'PluginMarketPath', 'PluginRequest', 'PluginsInstalled', 'Quit', 'Ready', 'RemindNow', 'ResetPetImage', 'ResetToDefaultPosition', 'SaveHotkeySettings', 'SaveReminderSettings', 'SetAutostart', 'SetBubbleHover',
     'SetReminderEnabled', 'SetScale',

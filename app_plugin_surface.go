@@ -477,7 +477,7 @@ func (a *App) OpenPluginSurface(pluginID string) (Layout, error) {
 	// geometry pass will crop to it.
 	layout, err := a.applyWindowGeometry()
 	if err != nil {
-		a.DebugLog("plugin surface: re-crop failed: " + err.Error())
+		a.log.Warnf("plugin", "浮层面：重新裁剪窗口失败：%v", err)
 		layout = a.currentLayout()
 	}
 	return layout, nil
@@ -509,7 +509,7 @@ func (a *App) ClosePluginSurface() (Layout, error) {
 	layout, err := a.applyWindowGeometry()
 	if err != nil {
 		// The surface is gone from the state either way; only the crop failed.
-		a.DebugLog("plugin surface: re-crop after close failed: " + err.Error())
+		a.log.Warnf("plugin", "浮层面：关闭之后重新裁剪窗口失败：%v", err)
 		return a.currentLayout(), nil
 	}
 	return layout, nil
@@ -562,7 +562,7 @@ func (a *App) syncPluginSurface() bool {
 		a.setPluginSurfaceLocked(nil)
 	}
 	a.mu.Unlock()
-	a.DebugLog("plugin surface: dropped, " + cur.PluginID + " no longer qualifies")
+	a.log.Infof("plugin", "浮层面收掉：%s 已经不再符合条件（停用、撤销权限或卸载）", cur.PluginID)
 	return true
 }
 

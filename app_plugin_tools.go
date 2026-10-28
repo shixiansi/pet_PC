@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"PetPC/internal/llm"
+	"PetPC/internal/logging"
 	"PetPC/internal/plugins"
 )
 
@@ -153,12 +154,41 @@ func (a *App) runPluginTool(pluginID, requestID string, call llm.ToolCall) (stri
 
 	out, err := a.invokePluginTool(pluginID, t, args)
 
+	// One line per tool call, and it is the only record of "the model did something
+	// on your behalf": the frame the plugin receives carries the name and the verdict
+	// but disappears with this request, and the arguments are deliberately NOT in
+	// either (see the comment above). The line therefore says which tool, whether it
+	// worked, and how big the arguments were - enough to tell "the model asked for
+	// nothing" from "the tool refused".
+	lv := logging.LevelInfo
+	if err != nil {
+		lv = logging.LevelWarn
+	}
+	result := "成功"
+	if err != nil {
+		result = "失败：" + err.Error()
+	}
+	a.log.Pluginf(lv, "llm", pluginID, "工具 %s 执行%s（参数 %d 字节，返回 %d 字节）",
+		call.Function.Name, result, len(args), len(out))
+
 	frame := map[string]any{"requestId": requestID, "name": call.Function.Name, "ok": err == nil}
 	if err != nil {
 		frame["error"] = err.Error()
 	}
 	a.emitPluginEvent(pluginID, "llm.tool", frame)
 	return out, err
+}
+
+// toolNames renders a tool list for a log line.
+//
+// The NAMES and only the names: a schema is a paragraph, and four of them in one log
+// line would push the endpoint and the model off the page.
+func toolNames(specs []llm.ToolSpec) []string {
+	out := make([]string, 0, len(specs))
+	for _, s := range specs {
+		out = append(out, s.Function.Name)
+	}
+	return out
 }
 
 // invokePluginTool runs the tool body and renders its value as the result text.
@@ -211,11 +241,11 @@ func pluginToolSpecs(a *App, granted, want []string) ([]llm.ToolSpec, error) {
 		}
 		t, ok := catalog[name]
 		if !ok {
-			a.DebugLog(fmt.Sprintf("plugin llm: 工具 %s 是宿主不认识的工具名，已跳过（插件比宿主新？）", name))
+			a.log.Warnf("llm", "工具 %s 是宿主不认识的工具名，已跳过（插件比宿主新？）", name)
 			continue
 		}
 		if !plugins.HasGranted(granted, t.perm) {
-			a.DebugLog(fmt.Sprintf("plugin llm: 工具 %s 需要 %s，未授予，不提供给模型", name, t.perm))
+			a.log.Infof("llm", "工具 %s 需要 %s，用户没授予，因此不提供给模型", name, t.perm)
 			continue
 		}
 		specs = append(specs, llm.ToolSpec{

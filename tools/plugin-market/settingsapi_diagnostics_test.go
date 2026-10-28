@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"PetPC/internal/logging"
 )
 
 // These cover the two things a diagnostic report can get wrong and never notice: claiming a
@@ -51,23 +53,28 @@ func TestDiagnosticsNamesTheFilesThatAreNotThere(t *testing.T) {
 func TestDiagnosticsCarriesTheLogTailAndSaysWhyItMayBeEmpty(t *testing.T) {
 	m, dir := diagMarket(t)
 
-	// No log at all: the report has to say WHY, because "no log" is the normal state - the
-	// pet only writes one when PETPC_DEBUG is set.
+	// No log at all: the report has to say WHY, and "why" is no longer "you forgot a
+	// flag" - the logs are always written now. An empty one means neither program has
+	// run against this data directory.
 	report, err := m.Diagnostics()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(report, "PETPC_DEBUG") {
-		t.Errorf("a missing debug.log was not explained:\n%s", report)
+	if !strings.Contains(report, "还没有日志") {
+		t.Errorf("an absent log was not explained:\n%s", report)
+	}
+	if !strings.Contains(report, "logs/pet.log") || !strings.Contains(report, "logs/market.log") {
+		t.Errorf("the file table does not name both logs:\n%s", report)
 	}
 
-	var lines []string
+	// 60 real lines through the SHARED writer, so this also pins the format the 日志
+	// page parses: a report built from a hand-written string would pass while the page
+	// showed nothing.
+	lg := logging.Open(dir, logging.PetLog, logging.Options{Level: logging.LevelDebug})
 	for i := 0; i < 60; i++ {
-		lines = append(lines, "line "+fmt.Sprintf("%02d", i))
+		lg.Infof("pet", "line %02d", i)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "debug.log"), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+
 	report, err = m.Diagnostics()
 	if err != nil {
 		t.Fatal(err)

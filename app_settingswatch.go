@@ -81,7 +81,7 @@ func (a *App) startSettingsWatch() {
 				if cfg.PetScale != appliedScale {
 					appliedScale = cfg.PetScale
 					if _, err := a.applyScale(cfg.PetScale); err != nil {
-						a.DebugLog("settings: 外部改动缩放后重新布局失败: " + err.Error())
+						a.log.Warnf("settings", "外部改动了缩放，重新布局失败：%v", err)
 					}
 				}
 				// Re-registering is the ONLY way the switch can take effect in this
@@ -91,7 +91,7 @@ func (a *App) startSettingsWatch() {
 				if cfg.GlobalHotkeys != appliedHotkeys {
 					appliedHotkeys = cfg.GlobalHotkeys
 					a.applyHotkeys()
-					a.DebugLog("settings: 外部改动全局快捷键开关，已重新登记")
+					a.log.Info("settings", "外部改动了全局快捷键开关，已重新登记")
 				}
 				// The picture is drawn by the WEBVIEW from a URL, so a new file on disk
 				// changes nothing on its own - unlike the scale, there is no geometry to
@@ -104,7 +104,7 @@ func (a *App) startSettingsWatch() {
 						"petImageUrl":    a.PetImageURL(),
 						"hasCustomImage": img != "",
 					})
-					a.DebugLog("settings: 外部改动桌宠图片，已通知页面重画")
+					a.log.Info("settings", "外部改动了桌宠图片，已通知页面重画")
 				}
 			}
 		}

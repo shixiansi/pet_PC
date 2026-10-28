@@ -1,8 +1,6 @@
 package main
 
 import (
-	"log"
-
 	"PetPC/internal/plugins"
 )
 
@@ -33,8 +31,7 @@ import (
 // migration reports it as success.
 func (a *App) migrateChatData() {
 	if err := plugins.MigrateChatData(a.store.Dir(), a.pluginKeeper()); err != nil {
-		log.Printf("pet: 迁移对话数据失败：%v", err)
-		a.DebugLog("plugin migrate: " + err.Error())
+		a.log.Warnf("plugin", "迁移对话插件的数据失败（下次启动会重试）：%v", err)
 	}
 }
 

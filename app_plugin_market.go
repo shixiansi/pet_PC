@@ -189,7 +189,7 @@ func (a *App) OpenPluginMarket() (State, error) {
 	a.pluginMarket.mu.Lock()
 	a.pluginMarket.launched = proc
 	a.pluginMarket.mu.Unlock()
-	a.DebugLog("plugin market: launched " + path)
+	a.log.Info("market", "已启动控制中心："+path)
 
 	// The state snapshot is returned rather than a bare nil so the caller's
 	// wiring is the same shape as every other settings action, and the button
@@ -207,6 +207,6 @@ func (a *App) startPluginMarketFromEnv() {
 		return
 	}
 	if _, err := a.OpenPluginMarket(); err != nil {
-		a.DebugLog("plugin market: 启动钩子失败：" + err.Error())
+		a.log.Warnf("market", "启动钩子（%s）没能打开控制中心：%v", pluginMarketOpenEnv, err)
 	}
 }

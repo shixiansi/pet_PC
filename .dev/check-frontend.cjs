@@ -253,6 +253,10 @@ const goFiles = [
   'app_plugin_migrate.go',
   'app_plugin_surface.go',
   'app_settingswatch.go',
+  // app_pet_badge.go emits pet:badge (the line a plugin draws on the pet itself). Listed for the
+  // reason above: a new file that emits events and is not here makes its event look like a
+  // subscription nothing ever sends.
+  'app_pet_badge.go',
 ].map((f) => fs.readFileSync(path.join(root, f), 'utf8'));
 const goSource = goFiles.join('\n');
 const emitted = new Set([...goSource.matchAll(/emitEvent\(\s*([A-Za-z_]\w*)/g)].map((m) => m[1]));
@@ -911,7 +915,7 @@ check(
   // A bubble is painted inside the window, so on a hidden pet it is a
   // notification nobody can see. The question reveal is the ONE exception, and
   // it is deliberate: a gate that parks the timer is not a notification.
-  /if a\.petHidden\(\) \{[\s\S]{0,120}reminder: suppressed \(the pet is hidden\)/.test(
+  /if a\.petHidden\(\) \{[\s\S]{0,160}这次提醒没有弹：桌宠是隐藏的/.test(
     fs.readFileSync(path.join(root, 'app_reminder.go'), 'utf8'),
   ) &&
     !/revealForQuestion/.test(fs.readFileSync(path.join(root, 'app_reminder.go'), 'utf8')),
@@ -1521,15 +1525,19 @@ check(
   // Two places have to agree: the page decides whether to render the host at all, and the
   // host itself refuses to mount without an entry.
   //
-  // The page's rule gained a FOURTH clause: a plugin that declares `surface` blocks is not
-  // mountable here at all. Those rectangles are measured from the PET's corner, and this window has
-  // no pet - mounting such a document gave it geometry it could not honour and a document that
-  // spoke to its own other frame through `plugin.share`, which this program does not serve. The
-  // user met that as 「插件 com.shixiansi.plugin-pomodoro 调用了本程序不支持的方法 share.set」 in
-  // the middle of the plugin page. So the check now pins the pet-relative exclusion too.
+  // There was a FOURTH clause here for one round: a plugin that declares `surface` blocks was not
+  // mountable at all, because those rectangles are measured from the PET's corner and one such
+  // document had spoken to its other frame through `plugin.share`, which this program did not
+  // serve - the user met that as 「插件 … 调用了本程序不支持的方法 share.set」 in the middle of the
+  // plugin page.
+  //
+  // The clause is gone, and the assertion is now the NEGATIVE one: the tray is served by this
+  // program too (internal/plugins/share.go, registered in pluginhost.go), and a document learns
+  // where it is from `surface.slot`. What must still hold is the part this check was really for:
+  // a disabled plugin gets no document.
   /function mountable\(r: PluginRow \| null\): boolean \{\s*if \(!r \|\| !r\.Manifest \|\| !r\.Enabled \|\| !r\.Manifest\.entry\) return false;/
     .test(ccPluginsPage) &&
-    /return !\(surface && surface\.length > 0\);/.test(ccPluginsPage) &&
+    !/return !\(surface && surface\.length > 0\);/.test(ccPluginsPage) &&
     /\{#if mountable\(selected\)\}/.test(ccPluginsPage) &&
     /if \(!id \|\| !entry \|\| !inst\?\.Enabled\) return '';/.test(ccPluginFrameHost) &&
     /if \(!target \|\| !mountKey\) return;/.test(ccPluginFrameHost) &&
@@ -1959,6 +1967,122 @@ check(
     );
   })(),
   'the auto-hide waits for a blur that may never arrive, or guards on a flag this frame never clears',
+);
+
+// --- the 日志 page, and the log behind it ------------------------------------
+//
+// Three of these are wiring rather than taste:
+//
+//  1. the page reads the HOST's log through the one binding, because half of the lines are
+//     written by the OTHER process (the pet). A page with its own in-memory buffer could only
+//     ever show this program's half - and the questions people actually ask ("对话插件不回话")
+//     are about the pet's half;
+//  2. every level has a rule of its own. "分级" that paints nothing is a word in a <select>;
+//  3. the dev stub APPLIES the query. A stub that returned the same rows for every filter is
+//     exactly how a page whose filters are wired to nothing looks perfect in a browser - the
+//     failure this whole file exists to catch (see bridge.ts's header).
+const ccLogsPage = fs.readFileSync(path.join(root, 'tools/plugin-market/cc/src/pages/Logs.svelte'), 'utf8');
+const ccApp = fs.readFileSync(path.join(root, 'tools/plugin-market/cc/src/App.svelte'), 'utf8');
+const petAppGo = fs.readFileSync(path.join(root, 'app.go'), 'utf8');
+check(
+  'the control center has a 日志 page, and it reads the host log',
+  /id: 'logs', label: '日志'/.test(ccApp) &&
+    /LogTail\(/.test(ccLogsPage) &&
+    /LogTail\(/.test(ccBridge) &&
+    /export function LogTail/.test(
+      fs.readFileSync(path.join(root, 'tools/plugin-market/frontend/wailsjs/go/main/Market.d.ts'), 'utf8'),
+    ),
+  'the 日志 page is missing from the rail, does not call LogTail, or the Go binding is gone',
+);
+check(
+  'every log level the page promises has a rule that paints it',
+  // The four levels are drawn as `lv-<lowercase>`; a level with no rule renders as plain
+  // text, which makes ERROR look like INFO in a list of 500 rows.
+  ['debug', 'info', 'warn', 'error'].every((lv) =>
+    new RegExp(`\\.lv-${lv} \\.level \\{[^}]*color:`).test(ccLogsPage)) &&
+    ['.lv-warn', '.lv-error'].every((c) => new RegExp(`\\${c} \\{[^}]*box-shadow`).test(ccLogsPage)),
+  'a level has no colour (or no warning stripe), so the level column carries no information',
+);
+check(
+  'the dev stub filters, so a filter wired to nothing cannot look correct in a browser',
+  // The three knobs the page exposes must each be read by the fake: level, scope, search.
+  /FAKE_LOG_LEVELS\[r\[1\]\]/.test(ccBridge) &&
+    /r\[2\] === scope/.test(ccBridge) &&
+    /r\[4\]\.toLowerCase\(\)\.includes\(search\)/.test(ccBridge),
+  'the log stub ignores the query, so the page\'s filters are unpinned',
+);
+check(
+  'the log is always on: neither program gates it behind PETPC_DEBUG any more',
+  // The old DebugLog opened debug.log only when PETPC_DEBUG was set, which is why every
+  // report arrived with no evidence. The two programs now open their own file unconditionally
+  // (the level is what varies), and a re-introduced gate here would silently undo that.
+  /logging\.Open\(dir, logging\.PetLog/.test(petAppGo) &&
+    /logging\.Open\(dir, logging\.MarketLog/.test(fs.readFileSync(path.join(root, 'tools/plugin-market/market.go'), 'utf8')) &&
+    !/PETPC_DEBUG"\) == ""/.test(petAppGo) &&
+    !/debug\.log/.test(ccLogsPage),
+  'one program stopped opening its log, or a PETPC_DEBUG gate came back',
+);
+
+// --- the plugin page mounts the plugin's own document ---------------------------------
+//
+// One round went wrong here, and the wrongness was two decisions propping each other up: the
+// market did not serve `plugin.share`, so mounting a document that publishes a shared key put
+// 「本程序不支持该方法」 in the middle of the plugin's own page - and the fix was to refuse to
+// mount any plugin that declared a `surface`. That refused exactly the three plugins whose
+// pages the user wanted (todo / pomodoro / chat), and it left the 待办 page reading
+// `todos.json`, a file the todo plugin stopped writing when the list moved into its storage.
+//
+// So the tray moved to internal/plugins/share.go and both hosts serve it. This checks the
+// three pieces that have to stay in step: the market registers the tray, `mountable()` gates on
+// "installed + enabled + ships a document" and nothing else, and no 待办 page has crept back.
+check(
+  'the plugin page mounts every installed plugin\'s own document',
+  (() => {
+    const at = ccPluginsPage.indexOf('function mountable');
+    if (at < 0) return false;
+    const body = ccPluginsPage.slice(at, ccPluginsPage.indexOf('\n  }', at));
+    return (
+      /!r\.Enabled/.test(body) &&
+      /!r\.Manifest\.entry/.test(body) &&
+      // No surface refusal: a block of coordinates measured from the pet is not a reason to
+      // hide a plugin's page from the only window with room for it.
+      !/surface/.test(body) &&
+      /plugins\.RegisterShare\(r, gateAdapter\{m\.manager\}\)/.test(marketPluginHost) &&
+      // The pet's forwards live in app_plugins.go (that is where its capability table is),
+      // not in app.go.
+      /plugins\.ShareSet\(a\.pluginManager\(\)/.test(
+        fs.readFileSync(path.join(root, 'app_plugins.go'), 'utf8'),
+      )
+    );
+  })(),
+  'the plugin page refuses a surface plugin again, or a host stopped serving the tray',
+);
+check(
+  "the todo list has one home: the plugin's document, not a control-center page",
+  !/id: 'todos'/.test(ccApp) &&
+    !/export const Todos/.test(ccBridge) &&
+    !/func \(m \*Market\) Todos\(/.test(
+      fs.readFileSync(path.join(root, 'tools/plugin-market/settingsapi_read.go'), 'utf8'),
+    ) &&
+    !fs.existsSync(path.join(root, 'tools/plugin-market/cc/src/pages/Todos.svelte')),
+  'a 待办 page (or its binding) came back, so two programs draw one list',
+);
+check(
+  'an installed plugin can be UPDATED from its page',
+  // A plugin's interface ships with the plugin, so an installed package that is behind shows the
+  // old behaviour while the page around it looks finished - this round's documents would simply
+  // not arrive. The page therefore reads the catalogue (best effort, offline allowed) and offers
+  // the upgrade; the binding it must call is `Market.Update`, which keeps the plugin enabled and
+  // keeps the permissions the user granted.
+  /Catalogue\b/.test(ccPluginsPage) &&
+    /Update\(/.test(ccPluginsPage) &&
+    /export const Update = /.test(ccBridge) &&
+    /export function Update/.test(
+      fs.readFileSync(path.join(root, 'tools/plugin-market/frontend/wailsjs/go/main/Market.d.ts'), 'utf8'),
+    ) &&
+    // A DOWNGRADE must not be offered: only the "newer" direction has a button.
+    /isNewer\(entry\.version, installed\)/.test(ccPluginsPage),
+  'the plugin page cannot offer a newer package, so an older plugin keeps its old interface',
 );
 
 for (const line of notes) console.log(line);

@@ -1,8 +1,6 @@
 package main
 
 import (
-	"log"
-
 	"PetPC/internal/desktop"
 	"PetPC/internal/store"
 )
@@ -76,7 +74,7 @@ func (a *App) applyHotkeys() {
 			a.hotkeys.view = desktop.DisabledHotkeyView()
 			a.hotkeyMu.Unlock()
 		}
-		a.DebugLog("hotkeys: disabled")
+		a.log.Info("hotkey", "全局快捷键已关闭（组合键已交还系统）")
 		return
 	}
 
@@ -85,7 +83,7 @@ func (a *App) applyHotkeys() {
 	a.hotkeyMu.Unlock()
 
 	if mgr == nil {
-		a.DebugLog("hotkeys: unavailable on this platform")
+		a.log.Info("hotkey", "这个平台没有全局快捷键")
 		return
 	}
 	view := mgr.Register(planned)
@@ -93,9 +91,9 @@ func (a *App) applyHotkeys() {
 	a.hotkeys.view = view
 	a.hotkeyMu.Unlock()
 	for _, p := range view.Problems {
-		log.Printf("pet: hotkey %s", p)
+		a.log.Warnf("hotkey", "%s", p)
 	}
-	a.DebugLog("hotkeys: registered active=" + boolText(view.Active))
+	a.log.Infof("hotkey", "全局快捷键已登记，生效=%v", view.Active)
 }
 
 // initHotkeys starts the manager, if the feature is switched on.
@@ -108,7 +106,7 @@ func (a *App) initHotkeys() {
 		a.hotkeyMu.Lock()
 		a.hotkeys.view = desktop.DisabledHotkeyView()
 		a.hotkeyMu.Unlock()
-		a.DebugLog("hotkeys: off at startup")
+		a.log.Info("hotkey", "启动时全局快捷键是关的")
 		return
 	}
 
@@ -121,15 +119,13 @@ func (a *App) initHotkeys() {
 	a.hotkeys.view = view
 	a.hotkeyMu.Unlock()
 	if err != nil {
-		log.Printf("pet: global hot keys unavailable: %v", err)
-		a.DebugLog("hotkeys: FAILED: " + err.Error())
+		a.log.Errorf("hotkey", "全局快捷键不可用：%v", err)
 		return
 	}
 	for _, p := range view.Problems {
-		log.Printf("pet: hotkey %s", p)
-		a.DebugLog("hotkeys: " + p)
+		a.log.Warnf("hotkey", "%s", p)
 	}
-	a.DebugLog("hotkeys: ready active=" + boolText(view.Active))
+	a.log.Infof("hotkey", "全局快捷键就绪，生效=%v", view.Active)
 }
 
 // onHotkey handles a shortcut press.
@@ -141,10 +137,10 @@ func (a *App) initHotkeys() {
 func (a *App) onHotkey(action desktop.HotkeyAction) {
 	switch action {
 	case desktop.HotkeyShow:
-		a.DebugLog("hotkeys: show")
+		a.log.Debug("hotkey", "快捷键：显示桌宠")
 		a.ShowPet()
 	case desktop.HotkeyHide:
-		a.DebugLog("hotkeys: hide")
+		a.log.Debug("hotkey", "快捷键：隐藏桌宠")
 		a.HidePet()
 	}
 }
@@ -366,12 +362,4 @@ func (a *App) HidePetForUser() (State, error) {
 		return State{}, err
 	}
 	return a.GetState()
-}
-
-// boolText renders a bool for the debug log.
-func boolText(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
 }

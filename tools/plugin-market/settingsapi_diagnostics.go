@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"PetPC/internal/desktop"
+	"PetPC/internal/logging"
 )
 
 // hostKeyFile is the file the PET keeps its LLM API key in, DPAPI-encrypted
@@ -26,6 +27,10 @@ const hostKeyFile = "llm-key.bin"
 // the pomodoro plugin's private directory (plugin-data/com.shixiansi.plugin-pomodoro/) when the
 // host timer retired. A file this page reports on has to be a file one of these two programs
 // still writes.
+//
+// The two log files are listed here (rather than only in the 日志 section below) so the file
+// table answers "has anything ever been logged at all" without parsing a line: a pet.log that
+// keeps growing and a pet.log that stopped an hour ago are different diagnoses.
 var dataFiles = []string{
 	"settings.json",
 	"config.json",
@@ -33,16 +38,13 @@ var dataFiles = []string{
 	"plugin-market.json",
 	"todos.json",
 	hostKeyFile,
-	"debug.log",
+	"logs/pet.log",
+	"logs/market.log",
 }
 
-// logTailLines and logTailBytes bound what a report may contain. A debug.log that grew to a
-// megabyte must not make the page unreadable, and a report that has to be scrolled is a
-// report nobody reads.
-const (
-	logTailLines = 40
-	logTailBytes = 8 << 10
-)
+// logTailLines bounds the log tail a report may contain. A report that has to be scrolled is
+// a report nobody reads, and the full log is one click away in the 日志 page.
+const logTailLines = 40
 
 // HostKey is what this program may honestly say about the pet's LLM key.
 //
@@ -125,14 +127,66 @@ func (m *Market) Diagnostics() (string, error) {
 		fmt.Fprintf(&b, "%s 不存在（宿主里还没有配置大模型密钥）\n", filepath.Base(key.Path))
 	}
 
-	b.WriteString("\n== 日志尾 ==\n")
-	tail, note := readLogTail(filepath.Join(m.dataDir, "debug.log"))
-	if note != "" {
-		b.WriteString(note + "\n")
-	}
-	b.WriteString(tail)
+	b.WriteString("\n== 日志 ==\n")
+	writeLogSection(&b, m.dataDir)
 
 	return b.String(), nil
+}
+
+// writeLogSection prints where the logs are, how big they are, and their tail.
+//
+// The tail is REAL log lines (internal/logging.Read parses the same file each program
+// writes), formatted the way the 日志 page shows them, and bounded by logTailLines. A
+// report is copied into a chat window, so the section has to be short enough to read and
+// honest about what it left out.
+//
+// The level note is not an excuse, it is the second half of the diagnosis: the logs are
+// always written now (INFO and above), so an empty one means "neither program has run
+// yet" or "the log directory is not writable" - never "you forgot a flag".
+func writeLogSection(b *strings.Builder, dir string) {
+	fmt.Fprintf(b, "目录: %s（轮转上限 %d KB，每个程序两个文件）\n", loggingDir(dir), logging.DefaultMaxBytes/1024)
+	files := logging.Files(dir, logging.PetLog, logging.MarketLog)
+	any := false
+	for _, f := range files {
+		switch {
+		case f.Err != "":
+			fmt.Fprintf(b, "%-24s 读不出来：%s\n", f.Name, f.Err)
+		case !f.Exists():
+			fmt.Fprintf(b, "%-24s 不存在\n", f.Name)
+		default:
+			any = true
+			fmt.Fprintf(b, "%-24s %9d B  %s\n", f.Name, f.Bytes, f.Modified.Format("2006-01-02 15:04:05"))
+		}
+	}
+
+	entries, err := logging.Read(dir, []string{logging.PetLog, logging.MarketLog}, logging.Query{
+		MinLevel: logging.LevelDebug,
+		Limit:    logTailLines,
+	})
+	if err != nil {
+		b.WriteString("读日志失败：" + err.Error() + "\n")
+		return
+	}
+	if len(entries) == 0 {
+		if any {
+			b.WriteString("（日志文件存在，但里面没有一行可读的记录）\n")
+		} else {
+			b.WriteString("（还没有日志：桌宠和控制中心都没在这个数据目录里跑过。默认级别 INFO 一直在写，不需要任何环境变量。）\n")
+		}
+		return
+	}
+	b.WriteString("\n")
+	if len(entries) >= logTailLines {
+		fmt.Fprintf(b, "（只显示最后 %d 行；完整日志在控制中心的「日志」页，或上面的文件里）\n", logTailLines)
+	}
+	for _, e := range entries {
+		plugin := e.Plugin
+		if plugin == "" {
+			plugin = "-"
+		}
+		fmt.Fprintf(b, "%s %-5s %s %s %s\n",
+			e.At.Format("2006-01-02 15:04:05.000"), e.Level.String(), e.Scope, plugin, e.Message)
+	}
 }
 
 // writeFileLine prints one line per file: size and mtime, or why it is not there.
@@ -140,41 +194,10 @@ func (m *Market) Diagnostics() (string, error) {
 // Missing files are listed rather than skipped. "todos.json 不存在" is information - it says
 // the pet has never written one - whereas a list that silently omits it says nothing at all.
 func writeFileLine(b *strings.Builder, dir, name string) {
-	info, err := os.Stat(filepath.Join(dir, name))
+	info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(name)))
 	if err != nil {
 		fmt.Fprintf(b, "%-24s 不存在\n", name)
 		return
 	}
 	fmt.Fprintf(b, "%-24s %9d B  %s\n", name, info.Size(), info.ModTime().Format("2006-01-02 15:04:05"))
-}
-
-// readLogTail returns the last lines of debug.log, and a note when there is nothing to show.
-//
-// The note is not an excuse, it is the second half of the diagnosis: debug.log only exists
-// at all when the pet runs with PETPC_DEBUG set (see App.DebugLog), so an empty log usually
-// means "the flag was off", not "nothing happened". Saying that here is the difference
-// between a report somebody can act on and a section that looks broken.
-func readLogTail(path string) (tail, note string) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", "debug.log 不存在：它只在桌宠以 PETPC_DEBUG=1 启动时才被写，平时是正常的。"
-	}
-	if info.Size() == 0 {
-		return "", "debug.log 存在但是空的：设了 PETPC_DEBUG 之后才会有内容。"
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", "debug.log 读不出来：" + err.Error()
-	}
-	if len(data) > logTailBytes {
-		// Cutting at a byte boundary can split a UTF-8 rune; the replacement character that
-		// costs is cheaper than a report that fails to render.
-		data = data[len(data)-logTailBytes:]
-	}
-	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if len(lines) > logTailLines {
-		lines = lines[len(lines)-logTailLines:]
-		note = fmt.Sprintf("（前面还有内容，只显示最后 %d 行）", logTailLines)
-	}
-	return strings.Join(lines, "\n") + "\n", note
 }

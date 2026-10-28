@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,6 +21,7 @@ import (
 
 	"PetPC/internal/desktop"
 	"PetPC/internal/llm"
+	"PetPC/internal/logging"
 	"PetPC/internal/plugins"
 	"PetPC/internal/store"
 )
@@ -396,6 +396,9 @@ var pluginMethods = map[string]pluginMethod{
 	"surface.show":   {perm: plugins.PermPetSurface, run: pluginSurfaceShow},
 	"surface.hide":   {perm: plugins.PermPetSurface, run: pluginSurfaceHide},
 	"surface.blocks": {perm: plugins.PermPetSurface, run: pluginSurfaceBlocks},
+	// pet.badge draws one line of text inside the pet's own box (app_pet_badge.go). Gated by
+	// pet.surface on purpose: same authority, and no new authorisation dialog on update.
+	"pet.badge":      {perm: plugins.PermPetSurface, run: pluginBadge},
 	"llm.chat":       {perm: plugins.PermLLMChat, run: pluginLLMChat},
 	"llm.profile":    {perm: plugins.PermLLMBorrow, run: pluginLLMProfile},
 	"config.get":     {perm: plugins.PermPluginConfig, run: pluginConfigGet},
@@ -433,7 +436,71 @@ var pluginMethods = map[string]pluginMethod{
 // no request sent, no index saved, no layout emitted and no private value
 // stored. That is what makes "you declined this permission" mean something,
 // rather than being a message printed after the work was already done.
+//
+// A request leaves one line, and that is a property of the gate rather than of the
+// individual capabilities: one place records "who asked for what, was it allowed, how
+// long did it take". Before this, a plugin that silently did nothing produced NO
+// evidence anywhere - the page shows the plugin's own iframe, the host's stderr goes
+// nowhere on Windows, and the user's report was "它没反应". The line carries the
+// method, the resulting error (which is the program's own Chinese sentence and already
+// names the reason), the byte counts and the duration; the PAYLOAD is never logged,
+// because it holds the user's text.
+//
+// THE LEVEL COMES FROM THE METHOD, and that is a correction rather than a detail: at
+// INFO every call, the log of a real machine held 9729 `share.get` + 2842 `storage.get`
+// + 580 `config.get` lines against 32 `llm.chat` lines. Reading a plugin's own file is
+// plumbing (DEBUG); what a plugin DID - a bubble, a surface, a model call, a request to
+// the network - is the story (INFO). Failures are WARN either way.
+//
+// Repeats are collapsed: a plugin that polls would otherwise still fill the file at
+// whatever level, so the throttle lets one line through per (plugin, method, level) in
+// five seconds and the next line says how many it folded in.
 func (a *App) PluginRequest(pluginID, method, payload string) (string, error) {
+	start := time.Now()
+	out, err := a.dispatchPluginRequest(pluginID, method, payload)
+	elapsed := time.Since(start)
+
+	lv := logging.LevelInfo
+	if plugins.DataMethod(method) {
+		lv = logging.LevelDebug
+	}
+	if err != nil {
+		// WARN rather than ERROR: a refusal is the gate working (an ungranted permission,
+		// a plugin the user switched off), and the user can act on it. The text says which
+		// of the two happened.
+		lv = logging.LevelWarn
+	}
+	allow, swallowed := a.pluginCallLog().Allow(pluginID + "|" + method + "|" + lv.String())
+	if !allow {
+		return out, err
+	}
+	folded := ""
+	if swallowed > 0 {
+		folded = fmt.Sprintf("；同类另有 %d 次已合并", swallowed)
+	}
+	if err != nil {
+		a.log.Pluginf(lv, "plugin", pluginID, "%s 没有执行（payload %d B，in %dms%s）：%v",
+			method, len(payload), elapsed.Milliseconds(), folded, err)
+		return "", err
+	}
+	a.log.Pluginf(lv, "plugin", pluginID, "%s ok（payload %d B → %d B，in %dms%s）",
+		method, len(payload), len(out), elapsed.Milliseconds(), folded)
+	return out, nil
+}
+
+// pluginCallLog returns the throttle for the per-call log lines, creating it on first use.
+func (a *App) pluginCallLog() *logging.Throttle {
+	a.callsMu.Lock()
+	defer a.callsMu.Unlock()
+	if a.calls == nil {
+		a.calls = logging.NewThrottle(logging.DefaultThrottleWindow, nil)
+	}
+	return a.calls
+}
+
+// dispatchPluginRequest is the gate itself, split out so PluginRequest can time and
+// log every outcome in one place instead of three.
+func (a *App) dispatchPluginRequest(pluginID, method, payload string) (string, error) {
 	row, ok := a.pluginManager().Get(pluginID)
 	if !ok || !row.Enabled || row.Manifest == nil {
 		return "", fmt.Errorf("插件 %s 未启用", pluginID)
@@ -594,7 +661,7 @@ func pluginBubbleSay(a *App, _ string, payload []byte) (any, error) {
 	// is the crop, and reporting that as "bubble.say failed" would tell the
 	// plugin the opposite of what happened.
 	if _, err := a.showBubble(&BubbleView{Kind: BubbleReminder, Title: text, ShowTodoAction: in.TodoAction}); err != nil {
-		a.DebugLog("plugin bubble: re-crop failed: " + err.Error())
+		a.log.Warnf("plugin", "插件气泡：重新裁剪窗口失败：%v", err)
 	}
 	return map[string]any{"ok": true}, nil
 }
@@ -938,6 +1005,24 @@ func pluginPrivateStore(run func(dir string, payload []byte) (any, error)) func(
 // It calls the SAME function the OpenPluginSurface binding does rather than
 // growing a second switch for the capability: two ways to open one surface is
 // two ways for the state and the window region to disagree.
+// pluginBadge sets (or clears, with an empty text) the line the pet draws inside its own box.
+func pluginBadge(a *App, id string, payload []byte) (any, error) {
+	var in struct {
+		Text string `json:"text"`
+	}
+	if len(payload) > 0 {
+		if err := json.Unmarshal(payload, &in); err != nil {
+			return nil, fmt.Errorf("参数不是合法的 JSON：%v", err)
+		}
+	}
+	runes := []rune(in.Text)
+	if len(runes) > MaxBadgeRunes {
+		return nil, fmt.Errorf("徽章文字最多 %d 个字符，收到 %d 个", MaxBadgeRunes, len(runes))
+	}
+	a.setPetBadge(id, in.Text)
+	return map[string]any{"text": in.Text}, nil
+}
+
 func pluginSurfaceShow(a *App, id string, _ []byte) (any, error) {
 	if _, err := a.OpenPluginSurface(id); err != nil {
 		return nil, err
@@ -981,6 +1066,17 @@ func pluginSurfaceBlocks(a *App, id string, payload []byte) (any, error) {
 			continue // junk keys are ignored, not fatal: the declaration is the authority
 		}
 		sizes[index] = h
+	}
+	// Say OUT LOUD which requests the declaration will not honour.
+	//
+	// The call succeeds either way - `surface.blocks ok` in the log - which is exactly what made two
+	// rounds of "I asked for a taller card and nothing happened" invisible: the first time because
+	// the rect had no `maxH` at all, the second because the request exceeded it. Both were diagnosed
+	// from a screenshot. A WARN here names the cause instead.
+	if row, ok := a.pluginManager().Get(id); ok && row.Manifest != nil {
+		for _, warning := range plugins.SurfaceSizeWarnings(row.Manifest.Surface, sizes) {
+			a.log.Pluginf(logging.LevelWarn, "plugin", id, "%s", warning)
+		}
 	}
 	if _, err := a.SetPluginSurfaceBlocks(id, req.Hidden, sizes); err != nil {
 		return nil, err
@@ -1051,7 +1147,7 @@ func (a *App) applySurfaceBlocksThrottled() (Layout, error) {
 		a.surfaceSizesAt = time.Now()
 		a.surfaceHiddenMu.Unlock()
 		if _, err := a.applySurfaceBlocksNow(); err != nil {
-			log.Printf("pet: apply surface blocks: %v", err)
+			a.log.Warnf("plugin", "应用浮层面的块尺寸失败：%v", err)
 		}
 	})
 	a.surfaceHiddenMu.Unlock()
@@ -1460,161 +1556,26 @@ func pluginConfigSet(a *App, id string, payload []byte) (any, error) {
 
 // --- cross-plugin sharing ---------------------------------------------------
 
-// maxPluginShareValue bounds one shared value.
+// The cross-plugin tray's three methods are thin forwards.
 //
-// 64 KiB is far more than a job list or a play-URL answer needs and far less than
-// something a plugin could hide behind. The bound exists because these values are the
-// only text that travels BETWEEN plugins: an unbounded channel would be a way to move
-// arbitrary blobs through the host.
-const maxPluginShareValue = 64 << 10
-
-// shareFileName is where one published value lives: in the `share` FOLDER of the
-// PUBLISHER's private directory, so "may write" is a directory that plugin already
-// owns.
+// The RULE moved to internal/plugins/share.go: the market program hosts the same plugin
+// documents now (its 插件 page), and a plugin that publishes through `share.set` got
+// "本程序不支持该方法" in the middle of its own page. Two copies of "who may read whose key"
+// is the same drift risk AGENTS.md §3.1 describes for the gate, so there is one copy - and
+// these three keep their names because the capability table and the tests name them.
 //
-// The folder rather than the directory root is 1.11.0's change: these files are the
-// HOST's business, not the plugin's, and mixing them into the root made a plugin's own
-// data ("stickers/", "history/") and its tray look like the same pile. A value written
-// before that change is still read - see pluginShareGet - so an upgrade mid-conversation
-// loses nothing.
-func shareFileName(name string) string { return filepath.Join("share", name) }
-
-// legacyShareFileName is where a published value lived before the share/ folder.
-func legacyShareFileName(name string) string { return "share-" + name }
-
-// pluginShareSet publishes one value under the caller's own name.
-//
-// Writing your own values needs no declaration, and writing anyone else's is impossible:
-// the directory is the caller's, so the "only your own prefix" rule is enforced by the
-// filesystem rather than by a string check that could be got wrong.
+// The pet still owns the DECISION to serve them: `pluginMethods` is this program's table,
+// and the market's table is its own (see pluginhost.go).
 func pluginShareSet(a *App, id string, payload []byte) (any, error) {
-	var in struct {
-		Name  string `json:"name"`
-		Value string `json:"value"`
-	}
-	if err := decodePayload(payload, &in); err != nil {
-		return nil, err
-	}
-	if !flatNamePattern.MatchString(in.Name) {
-		return nil, fmt.Errorf("share 的 name 非法：%q", in.Name)
-	}
-	if len(in.Value) > maxPluginShareValue {
-		return nil, fmt.Errorf("share 的值超过 %d 字节：%d", maxPluginShareValue, len(in.Value))
-	}
-	dir, err := a.pluginManager().PrivateDir(id)
-	if err != nil {
-		return nil, err
-	}
-	path := filepath.Join(dir, shareFileName(in.Name))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(path, []byte(in.Value), 0o644); err != nil {
-		return nil, err
-	}
-	// The value now lives in share/; the pre-1.11 file, if any, is a duplicate of it.
-	_ = os.Remove(filepath.Join(dir, legacyShareFileName(in.Name)))
-	return map[string]any{"ok": true, "key": plugins.SharedKey(id, in.Name)}, nil
+	return plugins.ShareSet(a.pluginManager(), id, payload)
 }
 
-// pluginShareGet reads one value another plugin published, if the caller declared it.
-//
-// Reading your own values needs no declaration (they are your files). Reading someone
-// else's needs the exact pair in the caller's manifest, and the refusal names the pair
-// and the field: a bare "403" in a plugin log helps nobody.
 func pluginShareGet(a *App, id string, payload []byte) (any, error) {
-	var in struct {
-		Owner string `json:"owner"`
-		Name  string `json:"name"`
-	}
-	if err := decodePayload(payload, &in); err != nil {
-		return nil, err
-	}
-	owner := strings.TrimSpace(in.Owner)
-	if owner == "" {
-		owner = id
-	}
-	if !flatNamePattern.MatchString(in.Name) {
-		return nil, fmt.Errorf("share 的 name 非法：%q", in.Name)
-	}
-	if !plugins.IsValidID(owner) {
-		return nil, fmt.Errorf("share 的 owner 非法：%q", owner)
-	}
-	if owner != id {
-		row, ok := a.pluginManager().Get(id)
-		if !ok || row.Manifest == nil {
-			return nil, fmt.Errorf("插件 %s 未启用", id)
-		}
-		if !plugins.DeclaredShareRead(row.Manifest.ShareRead, owner, in.Name) {
-			return nil, fmt.Errorf("插件 %s 没有声明要读 %s：manifest 的 shareRead 里没有这一项",
-				id, plugins.SharedKey(owner, in.Name))
-		}
-	}
-	dir, err := a.pluginManager().PrivateDir(owner)
-	if err != nil {
-		return nil, err
-	}
-	path := filepath.Join(dir, shareFileName(in.Name))
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		// A value published before share/ existed. Reading it where it is costs one
-		// stat and keeps an upgrade invisible; moving it is best effort, because the
-		// only thing that matters here is the bytes the caller asked for.
-		legacy := filepath.Join(dir, legacyShareFileName(in.Name))
-		if raw, legacyErr := os.ReadFile(legacy); legacyErr == nil {
-			data, err = raw, nil
-			if os.MkdirAll(filepath.Dir(path), 0o755) == nil {
-				_ = os.Rename(legacy, path)
-			}
-		}
-	}
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			// "Nobody published that yet" is an EMPTY value, not an error: every consumer
-			// hits it on its first poll, and treating it as a failure would fill the log
-			// with noise from the normal case.
-			return map[string]any{"value": "", "at": 0, "key": plugins.SharedKey(owner, in.Name)}, nil
-		}
-		return nil, err
-	}
-	if len(data) > maxPluginShareValue {
-		return nil, fmt.Errorf("%s 的值超过 %d 字节，拒绝读取", plugins.SharedKey(owner, in.Name), maxPluginShareValue)
-	}
-	var at int64
-	if info, statErr := os.Stat(path); statErr == nil {
-		at = info.ModTime().UnixMilli()
-	}
-	return map[string]any{"value": string(data), "at": at, "key": plugins.SharedKey(owner, in.Name)}, nil
+	return plugins.ShareGet(a.pluginManager(), id, payload)
 }
 
-// pluginShareRemove deletes one of the caller's OWN published values.
-//
-// Only its own: a consumer clearing someone else's job would make a shared key whose
-// content depends on which plugin ran last, which is the coupling this tray exists to
-// avoid.
 func pluginShareRemove(a *App, id string, payload []byte) (any, error) {
-	var in struct {
-		Name string `json:"name"`
-	}
-	if err := decodePayload(payload, &in); err != nil {
-		return nil, err
-	}
-	if !flatNamePattern.MatchString(in.Name) {
-		return nil, fmt.Errorf("share 的 name 非法：%q", in.Name)
-	}
-	dir, err := a.pluginManager().PrivateDir(id)
-	if err != nil {
-		return nil, err
-	}
-	if err := os.Remove(filepath.Join(dir, shareFileName(in.Name))); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	// A leftover from before share/: removing "my value" has to remove it too, or a
-	// clear would appear to succeed while a stale copy stays readable.
-	if err := os.Remove(filepath.Join(dir, legacyShareFileName(in.Name))); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	return map[string]any{"ok": true}, nil
+	return plugins.ShareRemove(a.pluginManager(), id, payload)
 }
 
 // pluginLLMChat sends one message to the model the CALLING PLUGIN configured -
@@ -1694,9 +1655,11 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 		return nil, err
 	}
 	if cred.lender != "" {
-		// One line in debug.log, because "which endpoint did that reply come from"
-		// is otherwise unanswerable when two plugins can supply it.
-		a.DebugLog(fmt.Sprintf("plugin llm: %s 借用 %s 的模型配置（%s）", id, cred.lender, cred.lenderName))
+		// One line in the log, because "which endpoint did that reply come from"
+		// is otherwise unanswerable when two plugins can supply it - and the
+		// lender's own name is in the line, so a user reading the 日志 page sees
+		// whose budget was spent.
+		a.log.Pluginf(logging.LevelInfo, "llm", id, "借用 %s 的模型配置（%s）", cred.lender, cred.lenderName)
 	}
 
 	// The budget is the host's, not the plugin's: a plugin that could raise its
@@ -1711,15 +1674,18 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 		// free - the same rule the pet's own counter has always followed.
 		refused := usage.PlusAttempt(0, 0)
 		if err := writePluginUsage(dir, refused); err != nil {
-			a.DebugLog("plugin llm: could not record usage: " + err.Error())
+			a.log.Warnf("llm", "记录用量失败（每日上限会因此少算一次）：%v", err)
 		}
+		a.log.Pluginf(logging.LevelWarn, "llm", id, "今天已经用了 %d 次，达到每日上限 %d，这次 llm.chat 被拒绝（拒绝也算一次尝试）",
+			usage.Requests, cfg.LLMDailyBudget)
 		return nil, fmt.Errorf("已达今日请求上限（%d 次）", cfg.LLMDailyBudget)
 	}
+
 	// Counted when the request is SENT, not when it succeeds: a request that
 	// fails still cost a round trip.
 	sent := usage.PlusAttempt(0, 0)
 	if err := writePluginUsage(dir, sent); err != nil {
-		a.DebugLog("plugin llm: could not record usage: " + err.Error())
+		a.log.Warnf("llm", "记录用量失败（每日上限会因此少算一次）：%v", err)
 	}
 
 	requestID := in.RequestID
@@ -1756,6 +1722,26 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 	}
 	settings := a.llmSettings(cfg, key)
 
+	// The tool list is resolved BEFORE the first log line, because "which tools was
+	// this call even offered" is half of what makes a tool-using reply diagnosable.
+	specs, err := pluginToolSpecs(a, row.Granted, in.Tools)
+	if err != nil {
+		return nil, err
+	}
+
+	// One line per llm.chat, BEFORE anything can fail.
+	//
+	// This is the line the whole feature exists for: "模型没回话" used to be
+	// unanswerable from the outside, because the endpoint, the model, the round
+	// count and the budget all live in the PLUGIN's settings while the request is
+	// made by the HOST. The counts (messages, history turns, tools, images) are
+	// enough to recognise a request; the text itself is NOT logged, and neither is
+	// the key - Settings.String has said "key=set" since it was written.
+	started := time.Now()
+	a.log.Pluginf(logging.LevelDebug, "llm", id,
+		"llm.chat 请求 base=%s model=%s：消息 %d 条（历史 %d 轮），工具 %v，图片 %d 张",
+		cfg.LLMBaseURL, cfg.LLMModel, len(msgs), len(in.History), toolNames(specs), len(images))
+
 	// send performs ONE round and accounts for it.
 	//
 	// The budget counts ROUNDS rather than questions, deliberately: a round that ran
@@ -1765,17 +1751,33 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 	// already had: another attempt may have been counted while this one was in flight.
 	send := func(round []llm.Message, tools []llm.ToolSpec) (llm.Result, error) {
 		res, err := a.llmClient().ChatWithTools(ctx, settings, round, tools, handlers)
+		// Attempts > 1 means the transport retried (a 429, a dropped socket): worth
+		// a WARN because it is the difference between "slow" and "broken".
+		lv := logging.LevelDebug
+		if res.Attempts > 1 {
+			lv = logging.LevelWarn
+		}
+		tokens := "没有报用量"
 		if res.Usage != nil {
+			tokens = fmt.Sprintf("tokens in=%d out=%d", res.Usage.PromptTokens, res.Usage.CompletionTokens)
 			latest := readPluginUsage(dir, time.Now())
 			addReportedTokens(&latest, res.Usage.PromptTokens, res.Usage.CompletionTokens)
 			if werr := writePluginUsage(dir, latest); werr != nil {
-				a.DebugLog("plugin llm: could not record tokens: " + werr.Error())
+				a.log.Warnf("llm", "记录 token 用量失败：%v", werr)
 			}
 		}
+		a.log.Pluginf(lv, "llm", id,
+			"llm.chat 一轮 in %dms（尝试 %d 次）：%d 字，%s，finish=%s，工具调用 %d 个",
+			res.ElapsedMS, res.Attempts, len([]rune(res.Text)), tokens, res.FinishReason, len(res.ToolCalls))
 		return res, err
 	}
 	fail := func(err error) (any, error) {
 		message, kind := describeChatError(err)
+		// WARN and not ERROR: a plugin asking the model and being refused (401,
+		// quota, timeout) is a condition the user can fix in the plugin's settings,
+		// and the line names the kind so the 日志 page can be read without guessing.
+		a.log.Pluginf(logging.LevelWarn, "llm", id, "llm.chat 失败 in %dms：%s（kind=%s）",
+			time.Since(started).Milliseconds(), message, kind)
 		a.emitPluginEvent(id, "llm.error", map[string]any{"requestId": requestID, "message": message, "kind": kind})
 		return nil, errors.New(message)
 	}
@@ -1783,13 +1785,10 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 		// The delta frames carried the text as it arrived; the done frame carries the
 		// WHOLE reply, so a plugin that dropped a frame can repair itself instead of
 		// leaving a hole in the middle of a sentence.
+		a.log.Pluginf(logging.LevelInfo, "llm", id, "llm.chat 完成 in %dms：回复 %d 字",
+			time.Since(started).Milliseconds(), len([]rune(text)))
 		a.emitPluginEvent(id, "llm.done", map[string]any{"requestId": requestID, "text": text})
 		return map[string]any{"requestId": requestID, "text": text}, nil
-	}
-
-	specs, err := pluginToolSpecs(a, row.Granted, in.Tools)
-	if err != nil {
-		return nil, err
 	}
 
 	// No usable tools: exactly the request this method has always made.

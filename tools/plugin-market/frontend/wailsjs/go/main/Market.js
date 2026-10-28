@@ -42,6 +42,10 @@ export function Installed() {
   return window['go']['main']['Market']['Installed']();
 }
 
+export function LogTail(arg1) {
+  return window['go']['main']['Market']['LogTail'](arg1);
+}
+
 export function MainSettings() {
   return window['go']['main']['Market']['MainSettings']();
 }
@@ -136,10 +140,6 @@ export function SetTheme(arg1) {
 
 export function Theme() {
   return window['go']['main']['Market']['Theme']();
-}
-
-export function Todos() {
-  return window['go']['main']['Market']['Todos']();
 }
 
 export function Uninstall(arg1) {

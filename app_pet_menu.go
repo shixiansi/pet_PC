@@ -58,7 +58,7 @@ package main
 func (a *App) OpenPetMenu() (Layout, error) {
 	layout, err := a.showBubble(&BubbleView{Kind: BubbleMenu})
 	if err != nil {
-		a.DebugLog("pet menu: re-crop failed: " + err.Error())
+		a.log.Warnf("pet", "桌宠菜单：重新裁剪窗口失败：%v", err)
 		return a.currentLayout(), nil
 	}
 	return layout, nil

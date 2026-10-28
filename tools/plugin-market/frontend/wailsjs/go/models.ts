@@ -232,6 +232,102 @@ export namespace main {
 	        this.Label = source["Label"];
 	    }
 	}
+	export class LogFileView {
+	    name: string;
+	    path: string;
+	    bytes: number;
+	    modified: string;
+	    err: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LogFileView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.bytes = source["bytes"];
+	        this.modified = source["modified"];
+	        this.err = source["err"];
+	    }
+	}
+	export class LogLine {
+	    at: string;
+	    level: string;
+	    scope: string;
+	    plugin: string;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LogLine(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.at = source["at"];
+	        this.level = source["level"];
+	        this.scope = source["scope"];
+	        this.plugin = source["plugin"];
+	        this.message = source["message"];
+	    }
+	}
+	export class LogQuery {
+	    level: string;
+	    scope: string;
+	    search: string;
+	    limit: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new LogQuery(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.level = source["level"];
+	        this.scope = source["scope"];
+	        this.search = source["search"];
+	        this.limit = source["limit"];
+	    }
+	}
+	export class LogView {
+	    entries: LogLine[];
+	    files: LogFileView[];
+	    scopes: string[];
+	    dir: string;
+	    note: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LogView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.entries = this.convertValues(source["entries"], LogLine);
+	        this.files = this.convertValues(source["files"], LogFileView);
+	        this.scopes = source["scopes"];
+	        this.dir = source["dir"];
+	        this.note = source["note"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class PluginConfig {
 	    pluginId: string;
 	    name: string;
@@ -780,52 +876,6 @@ export namespace store {
 	        this.llmProactive = source["llmProactive"];
 	        this.llmProactiveMinGapMin = source["llmProactiveMinGapMin"];
 	        this.llmDailyBudget = source["llmDailyBudget"];
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	
-	export class Todo {
-	    id: string;
-	    title: string;
-	    notes?: string;
-	    // Go type: time
-	    due?: any;
-	    done: boolean;
-	    // Go type: time
-	    createdAt: any;
-	    // Go type: time
-	    doneAt?: any;
-	
-	    static createFrom(source: any = {}) {
-	        return new Todo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.title = source["title"];
-	        this.notes = source["notes"];
-	        this.due = this.convertValues(source["due"], null);
-	        this.done = source["done"];
-	        this.createdAt = this.convertValues(source["createdAt"], null);
-	        this.doneAt = this.convertValues(source["doneAt"], null);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

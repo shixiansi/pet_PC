@@ -213,8 +213,8 @@
   {:else}
     <p class="hint">
       一份可以直接贴出来的文本：数据目录里每个文件的大小与时间、已装插件与它们的 manifest 状态、
-      读取索引时的警告、日志尾。<code>debug.log</code> 只在桌宠以 <code>PETPC_DEBUG=1</code>
-      启动时才会被写，报告会说明它为什么不在。
+      读取索引时的警告、日志尾。日志一直在写（<code>logs\pet.log</code> 与
+      <code>logs\market.log</code>，默认 INFO 级），报告里只有最后 40 行——想看更多，用左栏的「日志」页。
     </p>
   {/if}
 </Card>

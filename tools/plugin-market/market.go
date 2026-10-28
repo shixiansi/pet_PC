@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"PetPC/internal/logging"
 	"PetPC/internal/plugins"
 	"PetPC/internal/store"
 )
@@ -32,6 +33,14 @@ type Market struct {
 	// keeper encrypts declared secrets at rest.
 	keeper plugins.SecretKeeper
 
+	// log is this program's own log, in <dataDir>\logs\market.log.
+	//
+	// Its OWN file rather than a shared one with the pet: two processes appending to
+	// one file cannot rotate it safely (each would rename a file the other still has
+	// open), and the 日志 page merges the two by timestamp anyway - which is the only
+	// thing a user wanted from "one log" in the first place.
+	log *logging.Logger
+
 	// registry is this program's capability table, built on first use.
 	//
 	// It is per program on purpose: see pluginhost.go for why the market serves
@@ -46,6 +55,11 @@ type Market struct {
 
 	mu  sync.Mutex
 	cfg marketConfig
+
+	// callsMu guards the lazy throttle below; callsLog collapses repeated per-call log
+	// lines (one per plugin+method+level per five seconds). See internal/logging.Throttle.
+	callsMu  sync.Mutex
+	callsLog *logging.Throttle
 }
 
 // NewMarket opens the shared data directory and this program's settings.
@@ -72,6 +86,10 @@ func newMarketAt(dir, cfgPathOverride string) (*Market, error) {
 		cfgPath: filepath.Join(dir, "plugin-market.json"),
 		keeper:  marketSecretKeeper{},
 	}
+	// Always on, at the same default as the pet, so a report about "控制中心打不开插件界面"
+	// has something to read without anyone relaunching with a flag. The level override is
+	// the pet's: PETPC_LOG_LEVEL, then PETPC_DEBUG, then INFO.
+	m.log = logging.Open(dir, logging.MarketLog, logging.Options{Level: logLevelFromEnv()})
 	if cfgPathOverride != "" {
 		m.cfgPath = cfgPathOverride
 	}
@@ -103,7 +121,13 @@ func newMarketAt(dir, cfgPathOverride string) (*Market, error) {
 }
 
 // startup records the Wails context.
-func (m *Market) startup(ctx context.Context) { m.ctx = ctx }
+func (m *Market) startup(ctx context.Context) {
+	m.ctx = ctx
+	// The first line of every session names the log file and the level, so an empty
+	// 日志 page can be told apart from a quiet one.
+	m.log.Infof("market", "启动：数据目录 %s，日志级别 %s，日志文件 %s",
+		m.dataDir, m.log.Level(), m.log.Path())
+}
 
 // shutdown exists so the window's lifecycle is explicit; there is nothing to
 // flush, because every binding writes through to disk.
@@ -157,6 +181,7 @@ func (m *Market) Catalogue() (plugins.MarketView, error) {
 func (m *Market) SaveMarketURL(raw string) (plugins.MarketView, error) {
 	trimmed := strings.TrimSpace(raw)
 	if err := checkMarketURL(trimmed); err != nil {
+		m.log.Warnf("market", "拒绝这个市场地址（%s）：%v", trimmed, err)
 		return plugins.MarketView{}, err
 	}
 	m.mu.Lock()
@@ -166,6 +191,7 @@ func (m *Market) SaveMarketURL(raw string) (plugins.MarketView, error) {
 	if err := saveMarketConfig(m.cfgPath, cfg); err != nil {
 		return plugins.MarketView{}, err
 	}
+	m.log.Infof("market", "市场地址已保存：%s", cfg.MarketBaseURL)
 	return m.manager.Market()
 }
 
@@ -179,8 +205,13 @@ func (m *Market) Install(id string) error {
 	if err != nil {
 		return err
 	}
-	_, err = m.manager.Install(entry)
-	return err
+	row, err := m.manager.Install(entry)
+	if err != nil {
+		m.log.Pluginf(logging.LevelWarn, "market", id, "安装失败：%v", err)
+		return err
+	}
+	m.log.Pluginf(logging.LevelInfo, "market", id, "已安装 v%s（未启用，权限都还没授予）", row.Version)
+	return nil
 }
 
 // Update replaces an installed plugin with the newer package the catalogue offers,
@@ -202,8 +233,13 @@ func (m *Market) Update(id string) error {
 	if err != nil {
 		return err
 	}
-	_, err = m.manager.Update(entry)
-	return err
+	row, err := m.manager.Update(entry)
+	if err != nil {
+		m.log.Pluginf(logging.LevelWarn, "market", id, "更新失败：%v", err)
+		return err
+	}
+	m.log.Pluginf(logging.LevelInfo, "market", id, "已更新到 v%s（启用状态与已授予的权限保持不变）", row.Version)
+	return nil
 }
 
 // catalogueEntry finds one catalogue row by id.
@@ -222,19 +258,44 @@ func (m *Market) catalogueEntry(id string) (plugins.MarketEntry, error) {
 
 // Uninstall removes a plugin's files, its private storage and its index entry.
 func (m *Market) Uninstall(id string) error {
-	return m.manager.Uninstall(id)
+	if err := m.manager.Uninstall(id); err != nil {
+		m.log.Pluginf(logging.LevelWarn, "market", id, "卸载失败：%v", err)
+		return err
+	}
+	// WARN and not INFO: this deleted the plugin's private directory, i.e. its settings
+	// and its stored key. That is the most destructive thing this program can do, and
+	// it is not recoverable, so it belongs above the ordinary lifecycle lines.
+	m.log.Pluginf(logging.LevelWarn, "market", id, "已卸载，它的私有目录（设置、密钥、数据）一并删除")
+	return nil
 }
 
 // SetEnabled switches a plugin on or off.
 func (m *Market) SetEnabled(id string, on bool) error {
-	return m.manager.SetEnabled(id, on)
+	if err := m.manager.SetEnabled(id, on); err != nil {
+		m.log.Pluginf(logging.LevelWarn, "market", id, "切换启用状态失败：%v", err)
+		return err
+	}
+	state := "停用"
+	if on {
+		state = "启用"
+	}
+	m.log.Pluginf(logging.LevelInfo, "market", id, "已%s", state)
+	return nil
 }
 
 // Grant records the permissions the user ticked. The manager refuses any name
 // the plugin did not declare.
 func (m *Market) Grant(id string, granted []string) error {
-	_, err := m.manager.GrantPermissions(id, granted)
-	return err
+	row, err := m.manager.GrantPermissions(id, granted)
+	if err != nil {
+		m.log.Pluginf(logging.LevelWarn, "market", id, "保存授权失败：%v", err)
+		return err
+	}
+	// The permission NAMES are logged; nothing else about them is. A user asking "为什么
+	// 那个插件什么也做不了" needs to see exactly what is ticked, and a permission name is
+	// not a secret.
+	m.log.Pluginf(logging.LevelInfo, "market", id, "授权已保存：%v", row.Granted)
+	return nil
 }
 
 // --- plugin settings --------------------------------------------------------
@@ -342,7 +403,14 @@ func (m *Market) SaveConfig(id string, values map[string]string) error {
 		return err
 	}
 	store := plugins.NewConfigStore(dir, *row.Manifest, m.keeper)
-	return store.Write(values)
+	if err := store.Write(values); err != nil {
+		m.log.Pluginf(logging.LevelWarn, "market", id, "保存设置失败：%v", err)
+		return err
+	}
+	// Which KEYS were written, never their values: a plugin's settings hold model
+	// names and folder paths (fine) as well as secrets (never).
+	m.log.Pluginf(logging.LevelInfo, "market", id, "设置已保存（%d 项，键：%v）", len(values), sortedKeys(values))
+	return nil
 }
 
 // RememberSelection stores which plugin the user last had open.

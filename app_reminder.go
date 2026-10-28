@@ -32,7 +32,7 @@ import (
 // middle of a focus phase (docs/reminder-pomodoro.md 5.2). It is also the only reminder the host
 // still sends, because the schedule belongs to the todo plugin.
 func (a *App) RemindNow() (State, error) {
-	a.DebugLog("reminder: manual")
+	a.log.Info("reminder", "手动提醒一次")
 	if !a.showReminderBubble(true) {
 		st, _ := a.GetState()
 		return st, fmt.Errorf("没有需要提醒的待办")
@@ -62,7 +62,7 @@ func (a *App) showReminderBubble(manual bool) bool {
 	surfaceOpen := a.pluginSurface != nil
 	a.mu.Unlock()
 	if surfaceOpen {
-		a.DebugLog("reminder: suppressed（对话浮层面打开中）")
+		a.log.Info("reminder", "这次提醒没有弹：插件浮层面正开着（用户已经在看同一批内容）")
 		return false
 	}
 	// A bubble is drawn inside the window, so with the pet hidden it would be a
@@ -71,7 +71,7 @@ func (a *App) showReminderBubble(manual bool) bool {
 	// deferred: the pet is out of the way on purpose, and it will have another
 	// turn at the next interval.
 	if a.petHidden() {
-		a.DebugLog("reminder: suppressed (the pet is hidden)")
+		a.log.Info("reminder", "这次提醒没有弹：桌宠是隐藏的")
 		return false
 	}
 
@@ -129,7 +129,7 @@ func (a *App) showReminderBubble(manual bool) bool {
 	dueSoon, overdue, open := reminderCounts(todos, now)
 	a.notifyPluginReminderFired(dueSoon, overdue, open)
 
-	a.DebugLog(fmt.Sprintf("reminder: shown (%d items, manual=%v)", len(bubbleItems), manual))
+	a.log.Infof("reminder", "提醒气泡已弹出：%d 条，手动=%v", len(bubbleItems), manual)
 	return true
 }
 
@@ -214,14 +214,15 @@ func (a *App) OpenTodoFromBubble() (Layout, error) {
 
 	id := a.todoSlotPluginID()
 	if id == "" {
-		a.DebugLog("todo slot: no plugin claims it")
+		a.log.Warn("plugin", "待办这一格没有插件认领（待办插件没装、没授权或被停用）")
 		return a.applyWindowGeometry()
 	}
 	if _, err := a.OpenPluginSurface(id); err != nil {
-		a.DebugLog("todo slot: " + err.Error())
+		a.log.Warnf("plugin", "待办浮层面打不开：%v", err)
 	}
 	return a.applyWindowGeometry()
 }
+
 // shutdown stops the background loops.
 //
 // The channel that used to end the pomodoro ticker is gone with the timer itself,

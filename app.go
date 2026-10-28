@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"PetPC/internal/desktop"
+	"PetPC/internal/logging"
 	"PetPC/internal/plugins"
 	"PetPC/internal/store"
 
@@ -27,10 +27,29 @@ type App struct {
 	ctx   context.Context
 	store *store.Store
 
-	mu        sync.Mutex
-	hwnd      desktop.Window // native window handle, resolved after startup
-	scale     float64        // DPI scale factor of the window's monitor
-	petRect   desktop.Bounds // the pet's own rect in physical px
+	// log is this program's log, in <dataDir>\logs\pet.log.
+	//
+	// It is ALWAYS on, which is the difference between this and the debug.log it
+	// replaces: "请把日志发我" used to be followed by "你怎么没开 PETPC_DEBUG" and then
+	// nothing, because reproducing the bug meant asking the user to relaunch a program
+	// they had already relaunched once. Every method tolerates a nil receiver, so a
+	// test that builds App as a bare literal keeps working (see internal/logging).
+	log *logging.Logger
+
+	// calls collapses repeated plugin-call lines (one per plugin+method+level per five
+	// seconds, with a count). Built on first use so a bare App literal keeps working.
+	//
+	// It exists because "one line per call" drowned the log: on a real machine 9729
+	// `share.get` + 2842 `storage.get` + 580 `config.get` lines against 32 `llm.chat`
+	// lines. See internal/logging.Throttle.
+	calls *logging.Throttle
+	// callsMu guards the lazy construction above (PluginRequest runs on plugin goroutines).
+	callsMu sync.Mutex
+
+	mu      sync.Mutex
+	hwnd    desktop.Window // native window handle, resolved after startup
+	scale   float64        // DPI scale factor of the window's monitor
+	petRect desktop.Bounds // the pet's own rect in physical px
 	// petOffsetX/Y is the pet's position inside the window, and winSizeW/H is the
 	// window's size. Both are constant for a given pet size and side, so they can
 	// be reused while dragging to convert a pet position into a window position
@@ -197,15 +216,40 @@ func NewApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	lg := logging.Open(dir, logging.PetLog, logging.Options{Level: logLevelFromEnv()})
 	return &App{
 		store:     st,
+		log:       lg,
 		scale:     1,
 		geomReady: make(chan struct{}),
 	}, nil
 }
 
+// logLevelFromEnv resolves how loud the log is.
+//
+// The default is INFO rather than DEBUG, and that choice is the feature: a shipping
+// install writes the story (started, plugin called, model answered, what failed) without
+// anyone setting anything. DEBUG is for a support session and is reached two ways -
+// PETPC_DEBUG=1, which is the switch every existing documented workflow already names,
+// and PETPC_LOG_LEVEL=debug / info / warn / error, which also wins over PETPC_DEBUG so
+// one can quieten a machine without unsetting the other.
+func logLevelFromEnv() logging.Level {
+	if raw := strings.TrimSpace(os.Getenv("PETPC_LOG_LEVEL")); raw != "" {
+		return logging.LevelOfOrDefault(raw, logging.LevelInfo)
+	}
+	if os.Getenv("PETPC_DEBUG") != "" {
+		return logging.LevelDebug
+	}
+	return logging.LevelInfo
+}
+
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// The first line of every session says which log is being written and how loud it
+	// is. Without it, a report that looks empty cannot be told apart from one taken at
+	// INFO while the interesting events were DEBUG.
+	a.log.Infof("pet", "启动：数据目录 %s，日志级别 %s，日志文件 %s",
+		a.store.Dir(), a.log.Level(), a.log.Path())
 	// Preferences can be changed by the control center while this runs. The store
 	// re-reads settings.json on demand, which covers everything a render reads - but the
 	// pet's SIZE is baked into the geometry below, so it needs the other half: something
@@ -215,7 +259,7 @@ func (a *App) startup(ctx context.Context) {
 	go func() {
 		hwnd, err := desktop.WaitForWindow(5 * time.Second)
 		if err != nil {
-			log.Printf("pet: could not locate main window: %v", err)
+			a.log.Warnf("window", "找不到主窗口（WaitForWindow 超时）：%v", err)
 			return
 		}
 		a.mu.Lock()
@@ -226,20 +270,23 @@ func (a *App) startup(ctx context.Context) {
 		// happen after the window exists, and it must be re-applied after any
 		// operation that recreates the DWM frame.
 		if err := desktop.MakeTransparent(hwnd); err != nil {
-			log.Printf("pet: enable transparency: %v", err)
+			a.log.Warnf("window", "开启透明失败：%v", err)
 		}
 		// Stop Windows painting the class background brush (solid black, since
 		// Wails ignores the alpha) when the window is resized. Without this the
 		// pet flashes a black rectangle on every panel toggle and drag.
 		if err := desktop.SuppressBackgroundErasure(hwnd); err != nil {
-			log.Printf("pet: suppress background erase: %v", err)
+			a.log.Warnf("window", "抑制背景擦除失败：%v", err)
 		}
 		// The pet lives in the notification area, not the taskbar. Wails creates
 		// the window with WS_EX_APPWINDOW, which forces a taskbar button.
 		if err := desktop.HideFromTaskbar(hwnd); err != nil {
-			log.Printf("pet: hide from taskbar: %v", err)
+			a.log.Warnf("window", "从任务栏隐藏失败：%v", err)
 		}
 		a.startTray()
+		// Settings are edited in the control center; this is how this process finds out.
+		// See app_plugin_configwatch.go for why the plugin must not poll for it.
+		a.startPluginConfigWatch()
 		a.restorePosition()
 		// Voice moved to a plugin, so the pet no longer prepares a player or opens
 		// the user's library - it emits facts and the plugin decides what to say.
@@ -257,7 +304,7 @@ func (a *App) startup(ctx context.Context) {
 		if err := plugins.MigrateVoiceData(a.store.Dir(), a.pluginHost.keeper); err != nil {
 			// Not fatal: the pet works, the plugin just has no clips yet, and the
 			// next launch retries because no marker was written.
-			log.Printf("pet: 迁移语音数据失败: %v", err)
+			a.log.Warnf("plugin", "迁移语音插件的数据失败（下次启动会重试）：%v", err)
 		}
 		// The LIST moved the same way, one step later: `todos.*` retired, the todo
 		// plugin owns its own `storage` now, and this copies the host's todos.json into
@@ -269,7 +316,7 @@ func (a *App) startup(ctx context.Context) {
 			// retries, and a pet that refused to appear over a plugin's data would be
 			// the worse bug. It IS worth a log line, because the visible symptom is an
 			// empty list in the plugin while todos.json still has the entries.
-			log.Printf("pet: 迁移待办数据失败: %v", err)
+			a.log.Warnf("plugin", "迁移待办插件的数据失败（下次启动会重试）：%v", err)
 		}
 		// There is no timer loop to start: the pomodoro plugin counts its own phases
 		// (market/plugins/com.shixiansi.plugin-pomodoro), so the host has neither a
@@ -345,27 +392,27 @@ func (a *App) startTray() {
 				a.toggleTodoSurface()
 			case desktop.TrayCmdRemindNow:
 				if _, err := a.RemindNow(); err != nil {
-					log.Printf("pet: remind now: %v", err)
+					a.log.Warnf("reminder", "托盘「立刻提醒一次」失败：%v", err)
 				}
 			case desktop.TrayCmdShowPet:
 				if err := a.ShowPet(); err != nil {
-					log.Printf("pet: show pet: %v", err)
+					a.log.Warnf("pet", "托盘「显示桌宠」失败：%v", err)
 				}
 			case desktop.TrayCmdHidePet:
 				if err := a.HidePet(); err != nil {
-					log.Printf("pet: hide pet: %v", err)
+					a.log.Warnf("pet", "托盘「隐藏桌宠」失败：%v", err)
 				}
 			case desktop.TrayCmdResetPos:
 				a.ResetToDefaultPosition()
 			case desktop.TrayCmdOpenData:
 				if err := desktop.ShellOpen(a.store.Dir()); err != nil {
-					log.Printf("pet: open data dir: %v", err)
+					a.log.Warnf("pet", "打开数据目录失败：%v", err)
 				}
 			case desktop.TrayCmdOpenMarket:
 				if _, err := a.OpenPluginMarket(); err != nil {
 					// Not fatal and not silent: the program is a sibling exe, so "not
 					// found" is a real state the user has to be told about.
-					log.Printf("pet: open plugin market: %v", err)
+					a.log.Warnf("plugin", "打开控制中心失败：%v", err)
 				}
 			case desktop.TrayCmdQuit:
 				a.Quit()
@@ -373,11 +420,10 @@ func (a *App) startTray() {
 		},
 	})
 	if err != nil {
-		log.Printf("pet: tray icon unavailable: %v", err)
-		a.DebugLog("tray: FAILED: " + err.Error())
+		a.log.Errorf("tray", "托盘图标没装成功（托盘菜单因此不可用）：%v", err)
 		return
 	}
-	a.DebugLog("tray: icon registered")
+	a.log.Info("tray", "托盘图标已注册")
 	a.mu.Lock()
 	a.tray = tray
 	a.mu.Unlock()
@@ -418,14 +464,14 @@ func (a *App) Ready() error {
 	select {
 	case <-a.geomReady:
 	case <-time.After(6 * time.Second):
-		log.Printf("pet: revealing before the first geometry pass (window not placed in time)")
+		a.log.Warn("window", "窗口还没摆好就先显示了（首帧裁剪可能不准，拖动一次会重裁）")
 	}
 	// Re-assert transparency: the frame was stripped while the window was
 	// hidden, and the first show is what DWM uses to build the composition.
 	if err := desktop.MakeTransparent(hwnd); err != nil {
-		log.Printf("pet: re-apply transparency: %v", err)
+		a.log.Warnf("window", "重新应用透明失败：%v", err)
 	}
-	a.DebugLog("ready: revealing window")
+	a.log.Info("window", "页面已画好，显示窗口")
 	return desktop.Show(hwnd)
 }
 
@@ -704,16 +750,16 @@ func (a *App) applyWindowGeometry() (Layout, error) {
 	// The background brush and framelessness are set once; re-assert them here
 	// because this runs at startup before the window is shown.
 	if err := desktop.SuppressBackgroundErasure(hwnd); err != nil {
-		log.Printf("pet: suppress background erase: %v", err)
+		a.log.Warnf("window", "抑制背景擦除失败：%v", err)
 	}
 	if err := desktop.StripWindowFrame(hwnd); err != nil {
-		log.Printf("pet: strip window frame: %v", err)
+		a.log.Warnf("window", "去掉窗口边框失败：%v", err)
 	}
 	// Re-clear the window blur. Wails applies it for a translucent window, and
 	// anything that re-runs the accent setup (activation, a resize) can bring it
 	// back, which shows as a frosted wash behind the pet.
 	if err := desktop.DisableWindowBlur(hwnd); err != nil {
-		log.Printf("pet: disable window blur: %v", err)
+		a.log.Warnf("window", "关闭窗口模糊失败：%v", err)
 	}
 
 	if err := desktop.SetBounds(hwnd, target); err != nil {
@@ -811,7 +857,7 @@ func (a *App) applyWindowGeometry() (Layout, error) {
 		}
 	}
 	if err := desktop.SetWindowRegion(hwnd, regions...); err != nil {
-		log.Printf("pet: set window region: %v", err)
+		a.log.Warnf("window", "设置窗口区域失败（会露出一条没人画的桌面）：%v", err)
 	}
 
 	// Record where the pet actually ended up, so the next toggle starts from the
@@ -908,7 +954,7 @@ func (a *App) restorePosition() {
 	a.petRect = desktop.Bounds{X: x, Y: y, Width: pw, Height: ph}
 	a.mu.Unlock()
 	if _, err := a.applyWindowGeometry(); err != nil {
-		log.Printf("pet: restore position: %v", err)
+		a.log.Warnf("window", "恢复上次位置失败：%v", err)
 		return
 	}
 	if firstRun {
@@ -921,7 +967,7 @@ func (a *App) restorePosition() {
 func (a *App) savePosition(x, y int) {
 	s := a.currentScale()
 	if err := a.store.SetPosition(int(float64(x)/s), int(float64(y)/s)); err != nil {
-		log.Printf("pet: save position: %v", err)
+		a.log.Warnf("window", "保存位置失败：%v", err)
 	}
 }
 
@@ -1119,7 +1165,7 @@ func (a *App) toggleTodoSurface() {
 	a.mu.Unlock()
 	if current != nil && current.PluginID == a.todoSlotPluginID() {
 		if _, err := a.ClosePluginSurface(); err != nil {
-			log.Printf("pet: close todo surface: %v", err)
+			a.log.Warnf("plugin", "收起待办浮层面失败：%v", err)
 		}
 		return
 	}
@@ -1131,7 +1177,7 @@ func (a *App) toggleTodoSurface() {
 			Kind:  BubbleReminder,
 			Title: "待办插件还没装好：打开控制中心装上并授权它。",
 		}); err != nil {
-			a.DebugLog("todo slot: re-crop after the explanation bubble failed: " + err.Error())
+			a.log.Warnf("plugin", "待办浮层面：说明气泡之后重新裁剪失败：%v", err)
 		}
 		return
 	}
@@ -1139,9 +1185,9 @@ func (a *App) toggleTodoSurface() {
 		// OpenPluginSurface refuses in its own words (not enabled, no grant, no rectangles).
 		// The refusal travels as a bubble so the user can read it: the tray is outside the
 		// window, and a log line there is invisible.
-		a.DebugLog("todo slot: " + err.Error())
+		a.log.Warnf("plugin", "待办浮层面打不开：%v", err)
 		if _, berr := a.showBubble(&BubbleView{Kind: BubbleReminder, Title: err.Error()}); berr != nil {
-			a.DebugLog("todo slot: re-crop after the refusal bubble failed: " + berr.Error())
+			a.log.Warnf("plugin", "待办浮层面：拒绝气泡之后重新裁剪失败：%v", berr)
 		}
 	}
 }
@@ -1242,7 +1288,7 @@ func (a *App) GetState() (State, error) {
 	// Manager records a separate "disabled" flag that Windows honours over the
 	// Run value itself.
 	if desktop.RepairAutostart() {
-		a.DebugLog("autostart: repaired the Run entry")
+		a.log.Info("autostart", "开机启动的注册表项指向的是旧路径，已修好")
 	}
 	// The registry is the source of truth for auto-start because the user can
 	// also change it outside the app (Task Manager, another tool).
@@ -1407,22 +1453,35 @@ func (a *App) SetAutostart(enabled bool) (State, error) {
 	return a.GetState()
 }
 
-// DebugLog appends a diagnostic line to debug.log in the data directory, but
-// only when PETPC_DEBUG is set.
+// DebugLog records one line from the page at DEBUG level.
 //
-// Pointer handling happens entirely in the webview, so this is the only way to
-// see drag events from the Go side when diagnosing drag/snap problems.
+// Pointer handling happens entirely in the webview, so this binding is the only way to
+// see drag events from the Go side when diagnosing drag/snap problems - which is why it
+// stays a binding even though it now just forwards to the log.
+//
+// It is DEBUG because it is a probe, not an event: at the shipping level (INFO) it is
+// dropped, so the page can keep calling it unconditionally without turning the log into
+// a pointer trace. PETPC_DEBUG=1 or PETPC_LOG_LEVEL=debug brings it back.
 func (a *App) DebugLog(msg string) {
-	if os.Getenv("PETPC_DEBUG") == "" {
-		return
+	a.log.Debug("page", msg)
+}
+
+// PageLog records one line from the page at a level the page chooses.
+//
+// It exists because `fail(err)` in main.js had exactly one output: a toast that vanished
+// after 3.2 s. A binding that threw for a user who was not watching at that moment left
+// no evidence anywhere - and "点了一下，什么也没发生" is the report that costs the most
+// to diagnose. The page now reports the same failure to the log, where the control
+// center's 日志 page shows it with the host's own lines around it.
+//
+// The level string is parsed forgivingly (an unknown word logs at ERROR): a page that
+// asked to be recorded and got silence would be the worse outcome.
+func (a *App) PageLog(level, message string) {
+	lv, ok := logging.ParseLevel(level)
+	if !ok {
+		lv = logging.LevelError
 	}
-	f, err := os.OpenFile(filepath.Join(a.store.Dir(), "debug.log"),
-		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "%s %s\n", time.Now().Format("15:04:05.000"), msg)
+	a.log.Log(lv, "page", "", message)
 }
 
 // ResetToDefaultPosition moves the pet back to its first-run resting place: the

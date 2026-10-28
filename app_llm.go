@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -94,7 +93,14 @@ func (a *App) llmClient() *llm.Client {
 	a.llm.mu.Lock()
 	defer a.llm.mu.Unlock()
 	if a.llm.client == nil {
-		a.llm.client = llm.NewClient()
+		c := llm.NewClient()
+		// The transport's lines go in at DEBUG: they are per-round detail (status
+		// codes, retries, frame counts), and at the shipping level they would drown
+		// the one INFO line each llm.chat writes about who asked and what came back.
+		// They are the first thing to turn on when a reply does not arrive, which is
+		// what PETPC_LOG_LEVEL=debug is for.
+		c.Logf = func(format string, args ...any) { a.log.Debugf("llm", format, args...) }
+		a.llm.client = c
 	}
 	return a.llm.client
 }
@@ -156,7 +162,6 @@ func (a *App) promptContext(cfg store.Config) llm.PromptContext {
 // tab nor the emitter exists. A subscription with no emitter is what the static gate calls a
 // dangling event, so the page's listener is deleted too rather than left as a no-op.
 
-
 // --- diagnostics -----------------------------------------------------------
 
 // logLLMStartup writes one line about the LLM configuration at startup, so a log
@@ -172,6 +177,6 @@ func (a *App) promptContext(cfg store.Config) llm.PromptContext {
 // llm.error frame rather than in this log.
 func (a *App) logLLMStartup() {
 	cfg := a.store.Config()
-	a.DebugLog(fmt.Sprintf("llm: startup enabled=%v provider=%s base=%s model=%s",
-		cfg.LLMEnabled, cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMModel))
+	a.log.Infof("llm", "启动时的模型配置（插件自己另有端点与模型）：enabled=%v provider=%s base=%s model=%s",
+		cfg.LLMEnabled, cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMModel)
 }

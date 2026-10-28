@@ -62,6 +62,14 @@ export function OpenTodoFromBubble() {
   return window['go']['main']['App']['OpenTodoFromBubble']();
 }
 
+export function PageLog(arg1, arg2) {
+  return window['go']['main']['App']['PageLog'](arg1, arg2);
+}
+
+export function PetBadge() {
+  return window['go']['main']['App']['PetBadge']();
+}
+
 export function PetImageURL() {
   return window['go']['main']['App']['PetImageURL']();
 }

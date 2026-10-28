@@ -32,6 +32,10 @@ export function OpenPluginSurface(arg1:string):Promise<main.Layout>;
 
 export function OpenTodoFromBubble():Promise<main.Layout>;
 
+export function PageLog(arg1:string,arg2:string):Promise<void>;
+
+export function PetBadge():Promise<string>;
+
 export function PetImageURL():Promise<string>;
 
 export function PluginMarketCandidates():Promise<Array<string>>;

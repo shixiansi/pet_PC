@@ -26,6 +26,8 @@ export function Install(arg1:string):Promise<void>;
 
 export function Installed():Promise<Array<plugins.Installed>>;
 
+export function LogTail(arg1:main.LogQuery):Promise<main.LogView>;
+
 export function MainSettings():Promise<store.Config>;
 
 export function PermissionLabels():Promise<Array<main.LabelPair>>;
@@ -73,8 +75,6 @@ export function SetSnapToEdge(arg1:boolean):Promise<store.Config>;
 export function SetTheme(arg1:string):Promise<void>;
 
 export function Theme():Promise<string>;
-
-export function Todos():Promise<Array<store.Todo>>;
 
 export function Uninstall(arg1:string):Promise<void>;
 

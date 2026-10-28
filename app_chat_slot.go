@@ -192,7 +192,7 @@ func (a *App) OpenChatPluginSurface() (Layout, error) {
 			Kind:  BubbleReminder,
 			Title: message,
 		}); err != nil {
-			a.DebugLog("chat slot: re-crop after the explanation bubble failed: " + err.Error())
+			a.log.Warnf("plugin", "对话浮层面：说明气泡之后重新裁剪窗口失败：%v", err)
 			return a.currentLayout(), nil
 		}
 		return a.currentLayout(), nil
