@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-10-28T14:23:13Z",
+  "updatedAt": "2026-10-28T17:04:08Z",
   "plugins": [
     {
       "id": "com.shixiansi.plugin-bilibili",
@@ -43,6 +43,17 @@
       "netHosts": ["127.0.0.1:3000", "gchat.qpic.cn", "multimedia.nt.qq.com.cn"],
       "download": "dist/com.shixiansi.plugin-qq-1.12.0.zip",
       "sha256": "52ebe4526b78529fabac7ab2ae8785cfe0c103ef53e6f155cd30559207f17985"
+    },
+    {
+      "id": "com.shixiansi.plugin-qqbot",
+      "name": "QQ 官方机器人",
+      "version": "1.0.1",
+      "author": "shixiansi",
+      "description": "把大模型接进 QQ 官方机器人（QQ 开放平台 q.qq.com）：WebSocket 网关收群聊 @ 消息与单聊消息，用被动回复接口答复。AppID 与 AppSecret 在开放平台管理端获取，模型默认借用对话插件的配置。",
+      "permissions": ["net.ws", "net.fetch", "llm.chat", "llm.borrow", "storage", "plugin.config"],
+      "netHosts": ["api.bot.qq.com", "api.sgroup.qq.com"],
+      "download": "dist/com.shixiansi.plugin-qqbot-1.0.1.zip",
+      "sha256": "8610367fc6d2185f4c8525c3a1ad8f264660fe301ea2b36eebded4dfcfa19df5"
     },
     {
       "id": "com.shixiansi.plugin-todo",
