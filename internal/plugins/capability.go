@@ -213,6 +213,21 @@ func sortedPermissions(names []string) []string {
 	return out
 }
 
+// EventConfigChanged is "this plugin's own settings file changed on disk".
+//
+// It exists because settings are edited in ANOTHER PROCESS (the control center's 插件 page) and
+// the frame that has to obey them lives here, in the pet's headless frame for the whole session.
+// The two programs share no IPC - only the data directory - so "the setting changed" can only be
+// noticed by watching the file. Before this event existed, the plugin did the watching itself:
+// the pomodoro polled `config.get` every three seconds, which is a per-plugin timer doing the
+// host's job (and it showed up as "设置了 5 分钟，下一个番茄钟还是 25" for as long as the poll
+// window was).
+//
+// The payload is `{pluginId}` because the event is BROADCAST to subscribers: a plugin compares it
+// against its own id. Same file also covers a plugin writing its own settings through
+// `config.set`, so both editors take one path.
+const EventConfigChanged = "config.changed"
+
 // SubscribableEvents is the complete set of state-change events a plugin may
 // subscribe to.
 //
@@ -221,11 +236,11 @@ func sortedPermissions(names []string) []string {
 // llm.* frames are not here - they belong to the llm.chat call that produced
 // them and are delivered to the caller, not to subscribers.
 //
-// Both remaining entries are EDGE events ("this just happened"), not state
-// broadcasts. The two broadcasts that used to sit here - timer.changed and
-// todos.changed - are gone with the state they described: the timer is the pomodoro
-// plugin's and the list is the todo plugin's, so the host has nothing to broadcast. A
-// plugin that needs one of those now watches its neighbour through `plugin.share`.
+// These are EDGE events ("this just happened"), not state broadcasts. The two broadcasts that
+// used to sit here - timer.changed and todos.changed - are gone with the state they described:
+// the timer is the pomodoro plugin's and the list is the todo plugin's, so the host has nothing
+// to broadcast. A plugin that needs one of those now watches its neighbour through
+// `plugin.share`.
 //
 // timer.phaseEnded is kept WITHOUT an emitter on purpose: it is a promise the host
 // currently cannot keep, and the honest fix is a plugin-side timer that keeps running
@@ -235,6 +250,7 @@ func sortedPermissions(names []string) []string {
 var SubscribableEvents = []string{
 	"timer.phaseEnded",
 	"reminder.fired",
+	EventConfigChanged,
 }
 
 // IsKnownEvent reports whether name is a subscribable host event.
