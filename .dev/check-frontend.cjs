@@ -1936,17 +1936,29 @@ check(
 //     immediately in every other role, so in the input frame it stayed true FOR EVER after the
 //     first message. The hide was therefore skipped every single time - the user's 「完全不会收起」.
 check(
-  'the chat surface auto-hides on a flag its own frame clears (busy, not asking)',
+  'the chat surface auto-hides by ASKING whether it has focus, not by waiting for blur',
   (() => {
-    const start = chatPluginJs.indexOf('function armAutoHide');
+    const start = chatPluginJs.indexOf('function startAutoHidePoll');
     if (start < 0) return false;
     const body = chatPluginJs.slice(start, chatPluginJs.indexOf('\n}\n', start));
-    return /if \(composerFocused\(\)\) return;/.test(body) &&
+    return (
+      // It must POLL. A `blur` inside an opaque-origin iframe whose whole window is losing focus is
+      // not reliable in WebView2 - the first version listened for it and did nothing when the user
+      // clicked the desktop.
+      /setInterval\(/.test(body) &&
+      /documentFocused\(\)/.test(body) &&
+      /composerFocused\(\)/.test(body) &&
+      // Both must be true to SKIP the hide, so either signal reporting "gone" is enough to act on.
+      /if \(documentFocused\(\) && composerFocused\(\)\) return;/.test(body) &&
+      // `busy` is the flag this frame clears itself; `asking` is cleared only by the ANSWER frame.
       /if \(busy\) return;/.test(body) &&
       !/if \(asking\) return;/.test(body) &&
-      /request\('surface\.hide'/.test(body);
+      /request\('surface\.hide'/.test(body) &&
+      // And the event path must be gone rather than left alongside it.
+      !/addEventListener\('blur'/.test(chatPluginJs)
+    );
   })(),
-  'the auto-hide guards on a flag the input frame never clears, so it can never fire',
+  'the auto-hide waits for a blur that may never arrive, or guards on a flag this frame never clears',
 );
 
 for (const line of notes) console.log(line);
