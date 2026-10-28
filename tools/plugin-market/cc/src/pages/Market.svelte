@@ -210,20 +210,22 @@
     <ul class="list">
       {#each view.entries as entry (entry.id)}
         <li class="row" class:busy={busyId === entry.id}>
-          <div class="who">
-            <strong>{entry.name}</strong>
-            <span class="mono id">{entry.id}</span>
-            <span class="ver">v{entry.version}</span>
-            {#if entry.author}<span class="author">{entry.author}</span>{/if}
-          </div>
-          {#if entry.description}<p class="desc">{entry.description}</p>{/if}
-          <div class="meta">
-            {#each perms(entry).slice(0, SHOWN) as p (p)}
-              <span class="chip" title={p}>{permLabel(p)}</span>
-            {/each}
-            {#if perms(entry).length > SHOWN}
-              <span class="chip">等 {perms(entry).length} 项</span>
-            {/if}
+          <div class="info">
+            <div class="who">
+              <strong>{entry.name}</strong>
+              <span class="mono id">{entry.id}</span>
+              <span class="ver">v{entry.version}</span>
+              {#if entry.author}<span class="author">{entry.author}</span>{/if}
+            </div>
+            {#if entry.description}<p class="desc">{entry.description}</p>{/if}
+            <div class="meta">
+              {#each perms(entry).slice(0, SHOWN) as p (p)}
+                <span class="chip" title={p}>{permLabel(p)}</span>
+              {/each}
+              {#if perms(entry).length > SHOWN}
+                <span class="chip">等 {perms(entry).length} 项</span>
+              {/if}
+            </div>
           </div>
           <div class="act">
             {#if stateOf(entry) === 'new'}
@@ -245,10 +247,10 @@
 </div>
 
 <style>
-  .page { display: flex; flex-direction: column; gap: var(--space-3); max-width: 880px; }
+  .page { display: flex; flex-direction: column; gap: var(--space-3); }
   .head h2 { margin: 0 0 var(--space-1); font-size: 15px; }
   .hint { margin: 0; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
-  .mono { font-family: ui-monospace, Consolas, monospace; }
+  .mono { font: var(--font-mono); }
 
   .source {
     display: flex;
@@ -263,9 +265,7 @@
   .source input {
     flex: 1 1 auto;
     min-width: 0;
-    font: inherit;
-    font-size: 12px;
-    font-family: ui-monospace, Consolas, monospace;
+    font: var(--font-mono);
     color: var(--text);
     background: var(--bg);
     border: 1px solid var(--line);
@@ -281,31 +281,35 @@
     line-height: 1.6;
     border: 1px solid var(--line);
   }
-  .banner.warn { color: var(--warn, #e0b341); border-color: var(--warn, #e0b341); }
-  .banner.bad { color: var(--danger, #e05a5a); border-color: var(--danger, #e05a5a); }
-  .banner.ok { color: var(--ok, #57b57a); border-color: var(--ok, #57b57a); }
+  .banner.warn { color: var(--warn); border-color: var(--warn); }
+  .banner.bad { color: var(--danger); border-color: var(--danger); }
+  .banner.ok { color: var(--ok); border-color: var(--ok); }
 
-  .count { margin: 0; font-size: 12px; color: var(--text-dim); }
+  .count { margin: 0; font-size: 11px; color: var(--text-dim); }
 
   .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+  /* Full width, like the 日志 page's rows: this is a list, not a form. The first version capped the
+     page at 880px, which on a maximised window left the right half of the window empty and squeezed
+     every description into a narrow column - reported as 「这页面怎么这样」. */
   .row {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    grid-template-areas: 'who act' 'desc act' 'meta act';
-    gap: var(--space-1) var(--space-3);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-4);
     padding: var(--space-3);
     background: var(--bg-raised);
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
   }
   .row.busy { opacity: .7; }
-  .who { grid-area: who; display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; }
+  .info { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+  .who { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; }
   .who strong { font-size: 13px; }
-  .id { font-size: 11px; color: var(--text-dim); }
-  .ver { font-size: 11px; color: var(--text-dim); }
-  .author { font-size: 11px; color: var(--text-dim); }
-  .desc { grid-area: desc; margin: 0; font-size: 12px; color: var(--text-dim); line-height: 1.6; }
-  .meta { grid-area: meta; display: flex; flex-wrap: wrap; gap: var(--space-1); }
+  .id, .ver, .author { font-size: 11px; color: var(--text-dim); }
+  /* A description is prose: past ~90 characters a line stops being readable, and on a wide window
+     the row would otherwise stretch one sentence over the whole screen. */
+  .desc { margin: 0; max-width: 90ch; font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+  .meta { display: flex; flex-wrap: wrap; gap: var(--space-1); }
   .chip {
     font-size: 11px;
     color: var(--text-dim);
@@ -313,8 +317,8 @@
     border-radius: 999px;
     padding: 0 var(--space-2);
   }
-  .act { grid-area: act; display: flex; align-items: center; }
-  .installed { font-size: 12px; color: var(--text-dim); }
+  .act { flex: 0 0 auto; display: flex; align-items: center; align-self: center; padding-left: var(--space-2); }
+  .installed { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
 
   .btn {
     font: inherit;
@@ -325,8 +329,9 @@
     background: var(--bg);
     color: var(--text);
     cursor: pointer;
+    white-space: nowrap;
   }
   .btn:disabled { opacity: .5; cursor: default; }
-  .btn.primary { border-color: var(--accent, #4a7dff); color: var(--accent, #4a7dff); }
+  .btn.primary { border-color: var(--accent-dim); color: var(--accent); }
   .btn.ghost { background: transparent; }
 </style>
