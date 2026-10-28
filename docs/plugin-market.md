@@ -554,6 +554,44 @@ Proxy 根本不存在。所以桩现在用 `.map(asHostSends)` 摊平成**纯数
 | `tools\build-all.ps1` + 真机 | 左栏出现「市场」，列出源上 6 个插件；`待办插件` 可装，装完那一行变成「已安装 v1.2.0」并提示去插件页授权 |
 | 真浏览器截图（Edge headless，1800×900 / 980×700） | 行铺满宽度、描述一行、按钮贴右；两个宽度都没有把内容压成窄条 |
 
+### 2.11 卸载：先问一句，并且把"删数据"变成一个勾选框
+
+用户的原话：
+
+> 现在没有卸载插件的选项，添加卸载插件的选项，同时点击卸载要弹窗确认，同时需要勾选是否清除用户
+> 配置和数据，如果勾选才清除，不勾只卸载插件本体
+
+**这不只是加一个按钮，是把一条既有语义改对。** 之前 `Manager.Uninstall` 无论用户怎么想，都会
+`os.RemoveAll(plugin-data/<id>)`——也就是「卸载」是**这个程序里最具破坏性的按钮**，而这个词里没有
+一个字提到你的密钥会跟着没。现在它是两个决定，用户分开回答：
+
+| 删什么 | 什么时候 | 为什么 |
+|---|---|---|
+| `plugins/<id>`（本体） | 总是 | 这是**回滚**：把同一个版本装回来，它就接着用（因为私有目录还在） |
+| `plugin-data/<id>`（配置、密钥、数据） | 只有用户勾了「同时删除它的配置与数据」 | 这一步**不可恢复**。安全的那一半要自己选，所以勾选框默认是空的 |
+
+**做了什么：**
+
+| 位置 | 改动 | 为什么 |
+|---|---|---|
+| `internal/plugins/manager.go` | `Uninstall(id string, purge bool)`：本体无条件删，私有目录只在 `purge` 时删 | 语义落在函数签名上，调用方无法"顺手"删掉别人的数据 |
+| `tools/plugin-market/market.go` | `Uninstall(id, purgeData)`，两种结果两种日志（删除是 WARN，保留是 INFO 并写明"重新安装接着用"） | 日志是给 issue 贴的：一次卸载之后数据还在不在，应该能从日志里读出来 |
+| `cc/src/lib/bridge.ts` | `Uninstall(id, purgeData)`；开发桩把那一行**真的从 FakeRows 里删掉** | 桩不动的话，"卸载成功但行还在"会长得和"卸载没生效"一模一样（§2.10 同一个教训） |
+| `cc/src/pages/Plugins.svelte` | `.ops` 末尾一个 `.chip.danger`「卸载」→ 弹窗；弹窗里一个默认**不勾**的勾选框，文案随勾选状态**换两句话**；Esc 先关它 | 点击不直接删：一次误点丢一个插件。文案换两句话，是因为"删数据"这一半必须被读见，而不是藏在一个通用确认框的"确定"后面 |
+
+**两个门禁盯着这件事**（`node .dev/check-frontend.cjs`，130 条）：一条查界面——卸载要经过弹窗、
+勾选框要 `bind:checked={uninstallPurge}` 且初始化为 `false`、绑定是两参数的；另一条查**宿主**——
+`Uninstall(id string, purge bool)` 的签名里有这个开关、`os.RemoveAll(dataDirFor(id))` 必须被
+`if purge {` 包住。第二条是负向的：谁把删除改回无条件，静态检查当场红。
+
+| 判据 | 结果 |
+|---|---|
+| `go test ./internal/plugins/ -run Uninstall -count=1` | 3 条全过（新增 `TestUninstallKeepsDataUnlessAsked`：不勾时私有目录留着、重新安装接着用） |
+| `cd tools/plugin-market && go test ./... -count=1` | 全过（新增 `TestUninstallKeepsPrivateDataUnlessPurged`） |
+| `cd tools/plugin-market/cc && npm run check` | 0 error / 0 warning |
+| 同上 `npm run smoke` | **82/82**（新增 8 条：有入口、先弹窗、默认不勾、勾上换文案、取消不删、确认后行消失、说清数据保留） |
+| `node .dev/check-frontend.cjs` | **130 条**全绿（新增 2 条，含那条负向的） |
+
 ---
 
 ## 3. 两个程序的关系

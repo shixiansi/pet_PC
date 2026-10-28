@@ -292,7 +292,7 @@ func TestBuiltinSourceIsUsable(t *testing.T) {
 		}
 		// Uninstall, so the next entry installs into a clean state rather than
 		// tripping the "already installed" refusal.
-		if err := m.Uninstall(entry.ID); err != nil {
+		if err := m.Uninstall(entry.ID, true); err != nil {
 			t.Fatalf("uninstall %s: %v", entry.ID, err)
 		}
 	}

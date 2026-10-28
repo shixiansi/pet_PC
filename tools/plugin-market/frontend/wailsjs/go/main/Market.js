@@ -142,8 +142,8 @@ export function Theme() {
   return window['go']['main']['Market']['Theme']();
 }
 
-export function Uninstall(arg1) {
-  return window['go']['main']['Market']['Uninstall'](arg1);
+export function Uninstall(arg1, arg2) {
+  return window['go']['main']['Market']['Uninstall'](arg1, arg2);
 }
 
 export function Update(arg1) {

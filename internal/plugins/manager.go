@@ -404,7 +404,17 @@ func (m *Manager) GrantPermissions(id string, granted []string) (Installed, erro
 // The private storage is removed as well: the user asked to be rid of the
 // plugin, and a leftover directory under plugin-data/ would be state nothing
 // can ever read or clean up again.
-func (m *Manager) Uninstall(id string) error {
+// Uninstall removes the plugin, and — only when asked — the data it left behind.
+//
+// WHY `purge` IS A PARAMETER AND DEFAULTS TO FALSE. The two halves are different decisions:
+// deleting `plugins/<id>` is a ROLLBACK (install the same version again and it picks up where
+// it left off, because `plugin-data/<id>` is still there), while deleting `plugin-data/<id>`
+// destroys the settings, the stored secrets and whatever the plugin was in the middle of. The
+// first is undoable by installing again; the second is not recoverable at all. So it is the
+// user's call, made in the confirmation dialog, and the safe answer is the one that has to be
+// asked for. (Before this flag the private directory was always deleted, which made "卸载"
+// quietly the most destructive button in the program.)
+func (m *Manager) Uninstall(id string, purge bool) error {
 	idx, err := m.loadIndex()
 	if err != nil {
 		return err
@@ -428,8 +438,10 @@ func (m *Manager) Uninstall(id string) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("删除插件目录失败：%w", err)
 	}
-	if err := os.RemoveAll(m.dataDirFor(id)); err != nil {
-		return fmt.Errorf("删除插件私有目录失败：%w", err)
+	if purge {
+		if err := os.RemoveAll(m.dataDirFor(id)); err != nil {
+			return fmt.Errorf("删除插件私有目录失败：%w", err)
+		}
 	}
 	idx.Plugins = out
 	return m.saveIndex(idx)

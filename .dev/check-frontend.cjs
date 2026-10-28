@@ -2063,6 +2063,42 @@ check(
   'the 市场 page enables or grants on the user\'s behalf',
 );
 
+// --- uninstalling: it asks first, and the answer decides the data ----------------------
+//
+// Two failures worth pinning, and neither shows up in a screenshot of the dialog:
+//   (a) 卸载 acting on the click instead of opening the dialog - one mis-click loses a plugin;
+//   (b) the data being deleted regardless of the checkbox - which is exactly what the host did
+//       before this change, and it made 「卸载」 the most destructive button in the program with
+//       nothing in the word saying your keys were going with it.
+// The box must also START unticked: the safe answer is the one that has to be asked for.
+check(
+  'uninstalling asks first, and the data question is a checkbox in that dialog',
+  /Uninstall\s*\(/.test(ccPluginsPage) &&
+    /aria-label="卸载插件"/.test(ccPluginsPage) &&
+    /bind:checked=\{uninstallPurge\}/.test(ccPluginsPage) &&
+    /uninstallPurge = false;/.test(ccPluginsPage) &&
+    /export const Uninstall = \(id: string, purgeData: boolean\)/.test(ccBridge) &&
+    /export function Uninstall\(arg1:string,arg2:boolean\)/.test(
+      fs.readFileSync(path.join(root, 'tools/plugin-market/frontend/wailsjs/go/main/Market.d.ts'), 'utf8'),
+    ),
+  'the uninstall dialog, its checkbox, or the two-argument binding went missing',
+);
+check(
+  'the host deletes the plugin\'s private data only when it was asked to',
+  (() => {
+    const managerGo = fs.readFileSync(path.join(root, 'internal/plugins/manager.go'), 'utf8');
+    const at = managerGo.indexOf('func (m *Manager) Uninstall(');
+    if (at < 0) return false;
+    const body = managerGo.slice(at, managerGo.indexOf('\n}\n', at));
+    // The signature carries the flag, the body guards the data directory with it, and the
+    // plugin directory is removed unconditionally (that half is the rollback).
+    return /Uninstall\(id string, purge bool\)/.test(body) &&
+      /if purge \{[\s\S]*dataDirFor\(id\)/.test(body) &&
+      /os\.RemoveAll\(dir\)/.test(body);
+  })(),
+  'uninstall deletes plugin-data/<id> without being asked, or the flag is not honoured',
+);
+
 // --- the plugin page mounts the plugin's own document ---------------------------------
 //
 // One round went wrong here, and the wrongness was two decisions propping each other up: the

@@ -377,6 +377,31 @@ export const Install = (id: string): Promise<void | unknown> => {
 };
 
 /**
+ * Removes a plugin, and — only when asked — the data it left behind.
+ *
+ * `purgeData` is the checkbox in the confirmation dialog and nothing else. `false` is a rollback:
+ * the package goes, `plugin-data/<id>` stays (settings, stored keys, whatever the plugin was in
+ * the middle of), so installing it again continues where it stopped. `true` destroys that
+ * directory, which nothing can undo. Two decisions, so two arguments - a default buried in the
+ * host would be the host answering for the user.
+ *
+ * In dev the fake row is REMOVED, because a stub that resolved and changed nothing would leave
+ * the row on screen after a successful uninstall - the same "the button did nothing" impression
+ * `Update`'s stub mutates its rows to avoid.
+ */
+export const Uninstall = (id: string, purgeData: boolean): Promise<void | unknown> => {
+  if (!DEV) return host.Uninstall(id, purgeData);
+  const at = FAKE_ROWS.findIndex((r) => r.ID === id);
+  if (at >= 0) FAKE_ROWS.splice(at, 1);
+  const entry = FAKE_MARKET.entries.find((e) => e.id === id);
+  if (entry) {
+    entry.installed = false;
+    entry.installedVersion = '';
+  }
+  return later(undefined);
+};
+
+/**
  * Saves the catalogue address and answers with the catalogue fetched from it.
  *
  * One call rather than "save then reload": the address is only interesting if it produced a list,

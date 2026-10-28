@@ -624,7 +624,7 @@ func TestUninstallRemovesFilesIndexAndPrivateData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrivateDir: %v", err)
 	}
-	if err := m.Uninstall(id); err != nil {
+	if err := m.Uninstall(id, true); err != nil {
 		t.Fatalf("Uninstall: %v", err)
 	}
 
@@ -636,6 +636,38 @@ func TestUninstallRemovesFilesIndexAndPrivateData(t *testing.T) {
 	// disk for whatever is installed under the same id next.
 	if _, err := os.Stat(dir); err == nil {
 		t.Fatal("the plugin's private data survived the uninstall")
+	}
+	rows, err := m.Installed()
+	if err != nil {
+		t.Fatalf("Installed: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("the index still lists %d plugins", len(rows))
+	}
+}
+
+// TestUninstallKeepsPrivateDataUnlessPurged pins the DEFAULT, which is the opposite of what this
+// method used to do. Uninstalling is two decisions, not one: the package goes always, and the
+// private directory (settings, the stored key, whatever the plugin was in the middle of) goes
+// only when the user ticked the box. Anything else makes "卸载" quietly the most destructive
+// button in the program, and nothing about the word says "your key is gone".
+func TestUninstallKeepsPrivateDataUnlessPurged(t *testing.T) {
+	m := newTestMarket(t, "")
+	id := installDemoSecret(t, m, "sk-abcdefghijklmnop")
+
+	dir, err := m.manager.PrivateDir(id)
+	if err != nil {
+		t.Fatalf("PrivateDir: %v", err)
+	}
+	if err := m.Uninstall(id, false); err != nil {
+		t.Fatalf("Uninstall(purge=false): %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(m.dataDir, "plugins", id)); err == nil {
+		t.Fatal("the plugin's files survived the uninstall")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatal("the private data was deleted although the user did not ask for it")
 	}
 	rows, err := m.Installed()
 	if err != nil {

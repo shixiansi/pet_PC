@@ -256,16 +256,27 @@ func (m *Market) catalogueEntry(id string) (plugins.MarketEntry, error) {
 	return plugins.MarketEntry{}, fmt.Errorf("市场里没有插件 %s", id)
 }
 
-// Uninstall removes a plugin's files, its private storage and its index entry.
-func (m *Market) Uninstall(id string) error {
-	if err := m.manager.Uninstall(id); err != nil {
+// Uninstall removes a plugin, and — only when asked — its private storage with it.
+//
+// `purgeData` is the checkbox in the confirmation dialog, and it is the user's answer to a
+// question only they can answer: "reinstall later and continue" (keep `plugin-data/<id>`:
+// settings, stored keys, and whatever the plugin was in the middle of) versus "be gone"
+// (delete it). The package itself always goes; the data goes only when they ticked the box.
+func (m *Market) Uninstall(id string, purgeData bool) error {
+	if err := m.manager.Uninstall(id, purgeData); err != nil {
 		m.log.Pluginf(logging.LevelWarn, "market", id, "卸载失败：%v", err)
 		return err
 	}
-	// WARN and not INFO: this deleted the plugin's private directory, i.e. its settings
-	// and its stored key. That is the most destructive thing this program can do, and
-	// it is not recoverable, so it belongs above the ordinary lifecycle lines.
-	m.log.Pluginf(logging.LevelWarn, "market", id, "已卸载，它的私有目录（设置、密钥、数据）一并删除")
+	if purgeData {
+		// WARN and not INFO: this deleted the plugin's private directory — its settings, its
+		// stored key and its data — which is not recoverable. That belongs above the ordinary
+		// lifecycle lines.
+		m.log.Pluginf(logging.LevelWarn, "market", id, "已卸载，并按用户的选择删除了私有目录（设置、密钥、数据）")
+		return nil
+	}
+	// INFO: the user asked to keep it, and saying so is what makes "install it again and nothing
+	// is lost" a promise the log backs up.
+	m.log.Pluginf(logging.LevelInfo, "market", id, "已卸载，私有目录保留（重新安装接着用）")
 	return nil
 }
 

@@ -295,7 +295,7 @@ func TestUninstallRemovesConfigAndSecrets(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(private, "config.json")); err != nil {
 		t.Fatalf("config.json must exist before uninstall: %v", err)
 	}
-	if err := manager.Uninstall(man.ID); err != nil {
+	if err := manager.Uninstall(man.ID, true); err != nil {
 		t.Fatalf("Uninstall: %v", err)
 	}
 	if _, err := os.Stat(private); !os.IsNotExist(err) {

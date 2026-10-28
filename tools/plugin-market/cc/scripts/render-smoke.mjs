@@ -335,6 +335,49 @@ check('市场：点「安装」之后那一行变成已安装', !installBtn() &&
 check('市场：装完明说要去「插件」页授权（安装不等于启用）',
   text().includes('去「插件」页给它授权'));
 
+// --- uninstalling, and the question it has to carry -----------------------------------
+//
+// The dialog exists because "remove the plugin" and "delete its settings, keys and data" are not
+// the same size: the first is undone by installing the package again, the second is not. So the
+// checks are about what a screenshot of a dialog cannot tell you: the box starts UNTICKED, and
+// the wording actually changes with it. A dialog that deleted everything whatever the box said
+// would pass a check that only looked for the dialog.
+await open('插件');
+await pick('语音插件');
+const uninstallChip = () =>
+  [...w.document.querySelectorAll('button.chip')].find((b) => b.textContent.trim() === '卸载');
+const uninstallDialog = () => w.document.querySelector('[role="dialog"][aria-label="卸载插件"]');
+const inDialog = (sel, label) =>
+  [...(uninstallDialog()?.querySelectorAll(sel) ?? [])].find((el) => el.textContent.includes(label));
+
+check('插件：有一个卸载入口', Boolean(uninstallChip()));
+uninstallChip()?.click();
+await settle();
+check('插件：点卸载只是先问一次（插件还在）',
+  Boolean(uninstallDialog()) && text().includes('同时删除它的配置与数据'));
+check('插件：默认不勾，并明说只删插件本体',
+  text().includes('没勾：只删插件本体，它的配置与数据留下来'));
+const purgeBox = [...(uninstallDialog()?.querySelectorAll('input[type="checkbox"]') ?? [])][0];
+check('插件：那个勾选框默认是空的（安全的那一半要自己选）', purgeBox?.checked === false);
+
+purgeBox.checked = true;
+purgeBox.dispatchEvent(new w.Event('change', { bubbles: true }));
+await settle();
+check('插件：勾上之后文案改成「不可恢复」', text().includes('不可恢复'));
+
+inDialog('button.chip', '取消')?.click();
+await settle();
+check('插件：取消之后什么都没发生', !uninstallDialog() && Boolean(uninstallChip()));
+
+// For real this time, with the box left EMPTY: the package goes, the data stays.
+uninstallChip()?.click();
+await settle();
+inDialog('button.chip', '卸载')?.click();
+await settle();
+check('插件：确认后那一行没了',
+  ![...w.document.querySelectorAll('nav.list .row-name')].some((el) => el.textContent.includes('语音插件')));
+check('插件：并且说清配置与数据是保留的', text().includes('已卸载 语音插件（配置与数据保留）'));
+
 // --- the 日志 page -------------------------------------------------------------------
 //
 // This page's whole value is that it shows the HOST's lines, so the checks are about the

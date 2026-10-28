@@ -157,7 +157,7 @@ func TestUpdateRefusesToGoBackwards(t *testing.T) {
 func TestUpdateRequiresAnExistingInstall(t *testing.T) {
 	m, _, newer := updateFixture(t, "1.0.0", "1.1.0")
 	id := "com.example.up"
-	if err := m.Uninstall(id); err != nil {
+	if err := m.Uninstall(id, true); err != nil {
 		t.Fatalf("Uninstall: %v", err)
 	}
 	// With nothing installed, Update must refuse rather than quietly install - the

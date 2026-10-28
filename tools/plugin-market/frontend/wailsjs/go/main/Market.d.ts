@@ -76,7 +76,7 @@ export function SetTheme(arg1:string):Promise<void>;
 
 export function Theme():Promise<string>;
 
-export function Uninstall(arg1:string):Promise<void>;
+export function Uninstall(arg1:string,arg2:boolean):Promise<void>;
 
 export function Update(arg1:string):Promise<void>;
 

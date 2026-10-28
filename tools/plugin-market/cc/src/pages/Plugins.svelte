@@ -11,6 +11,7 @@
     SaveConfig,
     Catalogue,
     Update,
+    Uninstall,
   } from '../lib/bridge';
   import type { PluginRow, PluginConfig, ConfigEditor, MarketView, MarketEntry } from '../lib/bridge';
 
@@ -296,6 +297,58 @@
     }
   }
 
+  // --- the uninstall dialog -----------------------------------------------------------
+  //
+  // Uninstalling is TWO decisions, and the dialog exists because they are not the same size:
+  // removing the package is a rollback (install the same version again and the plugin is back,
+  // `plugin-data/<id>` untouched), while deleting that directory destroys its settings, its
+  // stored secrets and whatever it was in the middle of. The checkbox starts UNTICKED — the
+  // safe answer has to be asked for, not avoided.
+  //
+  // The host used to delete the private directory every time, so this is also a fix: 「卸载」
+  // was the most destructive button in the program and nothing about the word said your key
+  // was going with it.
+  let uninstallOpen = $state(false);
+  let uninstallPurge = $state(false);
+  let uninstallBusy = $state(false);
+  let uninstallError = $state('');
+
+  function openUninstall() {
+    if (!selected) return;
+    uninstallPurge = false;
+    uninstallError = '';
+    uninstallOpen = true;
+  }
+
+  function closeUninstall() {
+    if (uninstallBusy) return;
+    uninstallOpen = false;
+  }
+
+  async function confirmUninstall() {
+    if (!selected || uninstallBusy) return;
+    const row = selected;
+    const purge = uninstallPurge;
+    const title = name(row);
+    uninstallBusy = true;
+    uninstallError = '';
+    try {
+      await Uninstall(row.ID, purge);
+      uninstallOpen = false;
+      selectedId = '';
+      notice = '已卸载 ' + title + (purge ? '（配置与数据一并删除）' : '（配置与数据保留）');
+      error = '';
+      await refresh();
+      await loadCatalogue();
+    } catch (e) {
+      // Stay open: the dialog is where the user is looking, and a failure that closes it looks
+      // like a success that lost the plugin.
+      uninstallError = '卸载失败：' + why(e);
+    } finally {
+      uninstallBusy = false;
+    }
+  }
+
   function select(r: PluginRow) {
     if (selectedId === r.ID) return;
     selectedId = r.ID;
@@ -483,6 +536,10 @@
     if (event.key !== 'Escape') return;
     // The dialog is ON TOP, so it is what Escape closes first. Collapsing the list while a
     // modal is up would leave the modal over a layout it no longer matches.
+    if (uninstallOpen) {
+      closeUninstall();
+      return;
+    }
     if (cfgOpen) {
       closeConfig();
       return;
@@ -638,6 +695,17 @@
               {expanded ? '收起列表' : '展开界面'}
             </button>
           {/if}
+
+          <!-- Last in the row and the only control here that deletes something, so it does not
+               get to look like the others. It never acts on the click itself: it opens the
+               dialog that asks the one question only the user can answer (keep the data or take
+               it too). See openUninstall. -->
+          <button
+            type="button"
+            class="chip danger"
+            onclick={openUninstall}
+            title="把这个插件从这台机器上移除（会先问一次，并让你决定要不要保留它的数据）"
+          >卸载</button>
         </div>
       </header>
 
@@ -762,6 +830,49 @@
         <button type="button" class="chip" onclick={closeConfig}>取消</button>
         <button type="button" class="chip primary" disabled={cfgBusy || !cfg} onclick={saveConfig}>
           {cfgBusy ? '保存中…' : '保存'}
+        </button>
+      </footer>
+    </div>
+  </div>
+{/if}
+
+<!-- The uninstall dialog. Same shape as the settings one (a fixed sheet outside `.page`'s grid,
+     so no scroll container can clip it), and the only modal here whose confirm button destroys
+     something. It asks about the private directory EXPLICITLY rather than deciding for the user:
+     the box starts unticked, because reinstalling undoes a removal and nothing undoes a delete. -->
+{#if uninstallOpen && selected}
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="卸载插件">
+    <div class="sheet-card">
+      <header class="sheet-head">
+        <h3>卸载 {name(selected)}</h3>
+        <button type="button" class="chip" onclick={closeUninstall} disabled={uninstallBusy}>关闭</button>
+      </header>
+
+      <p class="hint sheet-note">
+        插件本体（<code>{selected.ID}</code>）会从这台机器上删除。
+      </p>
+
+      <label class="check purge">
+        <input type="checkbox" bind:checked={uninstallPurge} disabled={uninstallBusy} />
+        <span>同时删除它的配置与数据</span>
+      </label>
+
+      <p class="hint sheet-note">
+        {#if uninstallPurge}
+          勾上了：<code>plugin-data/{selected.ID}</code> 会一起删掉——设置、密钥、记录都<b>不可恢复</b>。
+        {:else}
+          没勾：只删插件本体，它的配置与数据留下来；重新装回来就接着用。
+        {/if}
+      </p>
+
+      {#if uninstallError}
+        <p class="err sheet-note">{uninstallError}</p>
+      {/if}
+
+      <footer class="sheet-foot">
+        <button type="button" class="chip" onclick={closeUninstall} disabled={uninstallBusy}>取消</button>
+        <button type="button" class="chip danger" onclick={confirmUninstall} disabled={uninstallBusy}>
+          {uninstallBusy ? '卸载中…' : '卸载'}
         </button>
       </footer>
     </div>
@@ -1087,6 +1198,16 @@
   .chip.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .chip:disabled { opacity: 0.5; cursor: default; }
 
+  /* The one destructive control on this page. Colour only — no shadow, no transform: this
+     window is cropped with SetWindowRgn, and anything that paints outside the region shows up
+     as a glass band on the desktop (tokens.css's header says the same). */
+  .chip.danger { color: var(--danger); border-color: var(--danger); }
+  .chip.danger:hover { color: var(--danger); border-color: var(--danger); opacity: 0.85; }
+
+  /* The uninstall dialog's checkbox row: the same shape as the config form's checks, with air
+     around it because it is the question the whole dialog exists to ask. */
+  .purge { margin: var(--space-3) 0 var(--space-2); color: var(--text); font-size: 13px; }
+
   .toast {
     position: fixed;
     right: var(--space-4);
@@ -1101,3 +1222,6 @@
     padding: var(--space-2) var(--space-3);
   }
 </style>
+
+
+

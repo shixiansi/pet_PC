@@ -560,7 +560,7 @@ func TestUninstallRemovesEverything(t *testing.T) {
 		t.Fatalf("write private: %v", err)
 	}
 
-	if err := m.Uninstall(entry.ID); err != nil {
+	if err := m.Uninstall(entry.ID, true); err != nil {
 		t.Fatalf("Uninstall: %v", err)
 	}
 	dir, _ := m.PluginDir(entry.ID)
@@ -577,11 +577,56 @@ func TestUninstallRemovesEverything(t *testing.T) {
 	}
 
 	before := m.Plugins()
-	if err := m.Uninstall("com.example.nope"); err == nil {
+	if err := m.Uninstall("com.example.nope", true); err == nil {
 		t.Error("uninstalling an unknown id must be refused")
 	}
 	if after := m.Plugins(); len(after) != len(before) {
 		t.Error("a refused uninstall changed the index")
+	}
+}
+
+// TestUninstallKeepsDataUnlessAsked pins the default. Removing the package is a ROLLBACK —
+// install the same version again and it picks up where it left off — while deleting
+// plugin-data/<id> destroys settings and stored secrets that cannot be regenerated. So the
+// data goes only when the caller asked, and this test is what stops "卸载" from quietly
+// becoming the most destructive button in the program again.
+func TestUninstallKeepsDataUnlessAsked(t *testing.T) {
+	m := newTestManager(t)
+	entry, _ := testEntryFromFiles(t, sampleZipFiles(), nil)
+	if _, err := m.Install(entry); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	private, err := m.PrivateDir(entry.ID)
+	if err != nil {
+		t.Fatalf("PrivateDir: %v", err)
+	}
+	keep := filepath.Join(private, "k1")
+	if err := os.WriteFile(keep, []byte("v1"), 0o644); err != nil {
+		t.Fatalf("write private: %v", err)
+	}
+
+	if err := m.Uninstall(entry.ID, false); err != nil {
+		t.Fatalf("Uninstall(purge=false): %v", err)
+	}
+	dir, _ := m.PluginDir(entry.ID)
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("the plugin directory survived: %v", err)
+	}
+	if data, err := os.ReadFile(keep); err != nil || string(data) != "v1" {
+		t.Errorf("the private data was deleted although nobody asked: %v", err)
+	}
+	for _, r := range m.Plugins() {
+		if r.ID == entry.ID {
+			t.Error("the uninstalled plugin is still in the index")
+		}
+	}
+
+	// And reinstalling finds the data still there: that is the whole point of keeping it.
+	if _, err := m.Install(entry); err != nil {
+		t.Fatalf("reinstall: %v", err)
+	}
+	if data, err := os.ReadFile(keep); err != nil || string(data) != "v1" {
+		t.Errorf("the data did not survive a reinstall: %v", err)
 	}
 }
 

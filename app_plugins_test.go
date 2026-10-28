@@ -138,7 +138,7 @@ func managerSetEnabled(t *testing.T, a *App, id string, on bool) {
 // managerUninstall removes a plugin.
 func managerUninstall(t *testing.T, a *App, id string) {
 	t.Helper()
-	if err := a.pluginManager().Uninstall(id); err != nil {
+	if err := a.pluginManager().Uninstall(id, true); err != nil {
 		t.Fatalf("Uninstall(%s): %v", id, err)
 	}
 }
