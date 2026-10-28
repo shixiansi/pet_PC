@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Frontend behaviour harness.
  *
  * Loads the REAL html, CSS and JS modules in a real browser engine against a
@@ -65,7 +65,16 @@ ${markup}
       window.__calls.push({ name, args });
       // The real Wails bindings return promises, so the fake ones must too: the
       // app calls .then() on every one of them.
-      const handler = window.__handlers[name];
+      //
+      // The scenario table may not be installed YET, and that is a fact about this
+      // page rather than defensiveness: it is installed by the checks module, which the
+      // browser evaluates AFTER the app bundle, and the app's own boot can call a
+      // binding in between. Reading through an undefined window.__handlers threw
+      // synchronously ("Cannot read properties of undefined (reading 'PageLog')"), which
+      // escaped as an unhandled rejection and killed the boot - exactly what happened
+      // when fail() in main.js gained a binding call. A missing handler means "this
+      // scenario does not answer this call", which is what the null below already means.
+      const handler = window.__handlers ? window.__handlers[name] : null;
       try {
         return Promise.resolve(handler ? handler(...args) : null);
       } catch (err) {
@@ -90,7 +99,7 @@ ${markup}
     'DebugLog', 'DismissBubble', 'DragTo',
     'EndDrag', 'GetLayout', 'GetState', 'HidePet',
     'HidePetForUser', 'OpenChatPluginSurface', 'OpenPetMenu', 'OpenPluginMarket',
-    'OpenPluginSurface', 'OpenTodoFromBubble', 'SetPluginSurfaceBlocks',
+    'OpenPluginSurface', 'OpenTodoFromBubble', 'PageLog', 'PetBadge', 'SetPluginSurfaceBlocks',
     'PetImageURL', 'PluginMarketCandidates',
     'PluginMarketPath', 'PluginRequest', 'PluginsInstalled',
     'Quit', 'Ready', 'RemindNow', 'ResetPetImage',
@@ -390,6 +399,8 @@ const checksJs = `
 
   window.__handlers = {
     GetLayout: () => layout(panelOpen, currentBubble, currentSurface),
+    // The plugin's line on the pet: empty until a plugin sets one.
+    PetBadge: () => '',
     GetState: () => {
       const cfgOver = savedConfig || {};
       const st = baseState(Object.keys(cfgOver).length ? { config: cfgOver } : {});

@@ -143,6 +143,16 @@ func managerUninstall(t *testing.T, a *App, id string) {
 	}
 }
 
+// samplePluginID is the catalogue entry these tests mean by "the sample plugin".
+//
+// It is named rather than taken as `Entries[0]`, and that is a fix rather than tidiness:
+// `Entries[0]` used to be this plugin, then a `tools/package.ps1` run re-sorted the catalogue
+// alphabetically and put the B站 plugin first - which declares no `surface` and no
+// `pet.surface`, so TestBubbleAndLayoutStayInStep started failing with 「未获权限 pet.surface」
+// on a tree where nothing about permissions had changed. The ORDER of a catalogue is a
+// packaging artifact; a test that depends on it is testing the packaging.
+const samplePluginID = "com.shixiansi.plugin-chat"
+
 // installSample installs the built-in sample plugin and returns its id.
 func installSample(t *testing.T, a *App) string {
 	t.Helper()
@@ -153,9 +163,18 @@ func installSample(t *testing.T, a *App) string {
 	if len(view.Entries) == 0 {
 		t.Fatal("the built-in source is empty")
 	}
-	id := view.Entries[0].ID
-	managerInstall(t, a, id)
-	return id
+	found := false
+	for _, e := range view.Entries {
+		if e.ID == samplePluginID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("the built-in source no longer lists %s (it lists %d entries)", samplePluginID, len(view.Entries))
+	}
+	managerInstall(t, a, samplePluginID)
+	return samplePluginID
 }
 
 // readyPlugin installs, grants everything, and enables.
