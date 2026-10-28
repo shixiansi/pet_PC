@@ -314,10 +314,29 @@ const FAKE_MARKET: MarketView = plugins.MarketView.createFrom({
       installed: true,
       installedVersion: '1.0.1',
     },
+    // And one this machine does NOT have, so the 市场 page's 安装 is exercised: a catalogue
+    // where everything is already installed would make "install does nothing" look exactly
+    // like "install works".
+    {
+      id: 'com.shixiansi.plugin-todo',
+      name: '待办插件',
+      version: '1.2.0',
+      author: 'shixiansi',
+      description: '桌面上的待办清单：提醒由它自己排，宿主只管把它画出来。',
+      permissions: ['plugin.share', 'storage', 'pet.bubble', 'pet.surface', 'plugin.config'],
+      download: 'https://example.invalid/todo-1.2.0.zip',
+      sha256: '0'.repeat(64),
+      installed: false,
+    },
   ],
 });
 
-export const Catalogue = (): Promise<MarketView> => (DEV ? later(FAKE_MARKET) : host.Catalogue());
+// A FRESH OBJECT every call, not the shared literal: the host sends JSON, so every call is a new
+// value. Handing the page the same reference meant "install, then re-read" re-assigned an object
+// whose identity had not changed, so nothing re-rendered - the row still offered 安装 after it had
+// installed. (Svelte can only see a change it is told about; the mutation happens in here.)
+export const Catalogue = (): Promise<MarketView> =>
+  DEV ? later(plugins.MarketView.createFrom(FAKE_MARKET)) : host.Catalogue();
 
 /**
  * Installs the newer package over the installed one.
@@ -336,6 +355,37 @@ export const Update = (id: string): Promise<void | unknown> => {
     entry.installedVersion = entry.version;
   }
   return later(undefined);
+};
+
+/**
+ * Installs a package this machine does not have yet.
+ *
+ * The other half of `Update`, and the difference is one the user feels: an update carries the
+ * enabled flag and the permissions already granted (it is NOT a re-authorisation), while a fresh
+ * install arrives DISABLED with nothing granted - they have seen what it asks for but have not
+ * said yes to any of it. That is why the market row says 「安装」 and then points at the 插件 page;
+ * silently enabling it would hand a plugin authority nobody approved.
+ */
+export const Install = (id: string): Promise<void | unknown> => {
+  if (!DEV) return host.Install(id);
+  const entry = FAKE_MARKET.entries.find((e) => e.id === id);
+  if (entry) {
+    entry.installed = true;
+    entry.installedVersion = entry.version;
+  }
+  return later(undefined);
+};
+
+/**
+ * Saves the catalogue address and answers with the catalogue fetched from it.
+ *
+ * One call rather than "save then reload": the address is only interesting if it produced a list,
+ * and a save that left the old list on screen would look like it did nothing.
+ */
+export const SaveMarketURL = (url: string): Promise<MarketView> => {
+  if (!DEV) return host.SaveMarketURL(url);
+  FAKE_MARKET.base = url;
+  return later(plugins.MarketView.createFrom(FAKE_MARKET));
 };
 
 // --- 插件的配置编辑器（manifest.config） ----------------------------------------------

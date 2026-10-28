@@ -2023,6 +2023,46 @@ check(
   'one program stopped opening its log, or a PETPC_DEBUG gate came back',
 );
 
+// --- the 市场 page: the catalogue is visible, and installing is not enabling -----------
+//
+// WHY THIS IS A GATE AND NOT ONLY A SMOKE TEST. The two failures worth catching here are both
+// invisible in a screenshot: (a) the page is in the rail but reads nothing (a catalogue fetched by
+// nobody), and (b) it installs by switching the plugin ON - the host granting authority on the
+// user's behalf, which is the one thing the install path deliberately does not do (a fresh install
+// lands disabled with nothing granted, and the page says so and points at 插件).
+//
+// The negative half is the load-bearing half: `SetEnabled` / `Grant` must NOT appear on this page.
+const ccMarketPage = fs.readFileSync(path.join(root, 'tools/plugin-market/cc/src/pages/Market.svelte'), 'utf8');
+check(
+  'the control center has a 市场 page, and it reads the catalogue through the binding',
+  /id: 'market', label: '市场'/.test(ccApp) &&
+    /Catalogue\(/.test(ccMarketPage) &&
+    /Catalogue = \(/.test(ccBridge) &&
+    /export function Catalogue/.test(
+      fs.readFileSync(path.join(root, 'tools/plugin-market/frontend/wailsjs/go/main/Market.d.ts'), 'utf8'),
+    ),
+  'the 市场 page is missing from the rail, does not call Catalogue, or the Go binding is gone',
+);
+check(
+  'the 市场 page installs and updates, and both reach the host',
+  /Install\(/.test(ccMarketPage) &&
+    /Update\(/.test(ccMarketPage) &&
+    /export const Install/.test(ccBridge) &&
+    /export const SaveMarketURL/.test(ccBridge) &&
+    /export function Install/.test(
+      fs.readFileSync(path.join(root, 'tools/plugin-market/frontend/wailsjs/go/main/Market.d.ts'), 'utf8'),
+    ),
+  'installing from the market would do nothing (no Install/Update call, or no Go binding)',
+);
+check(
+  'installing from the 市场 page never enables or authorises anything',
+  // Install lands the package DISABLED with nothing granted; the user says yes on 插件. A market
+  // page calling either of these is the difference between "it is here" and "it is running with
+  // permission you were never asked for".
+  !/SetEnabled\s*\(/.test(ccMarketPage) && !/\bGrant\s*\(/.test(ccMarketPage),
+  'the 市场 page enables or grants on the user\'s behalf',
+);
+
 // --- the plugin page mounts the plugin's own document ---------------------------------
 //
 // One round went wrong here, and the wrongness was two decisions propping each other up: the

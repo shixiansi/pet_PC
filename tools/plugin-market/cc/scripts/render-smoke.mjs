@@ -309,6 +309,32 @@ await settle();
 check('插件：点更新后给出确认，并且那一行换成了新版本', text().includes('已更新到 v1.7.5'));
 check('插件：更新之后按钮自己消失了', ![...w.document.querySelectorAll('button.chip')].some((b) => b.textContent.includes('更新到 v')));
 
+// --- the 市场 page --------------------------------------------------------------------
+//
+// Until now this program KNEW the catalogue but only as an update chip, so installing something
+// it did not have meant opening the pet's older market window (`docs/plugin-market.md` §2.8).
+// This page is that half, and a row can be in three states. By the time this runs the update
+// above has already moved the chat row to current, so the stub holds two current rows and one
+// package this machine does not have - which is what makes "install does nothing" distinguishable
+// from "install works".
+await open('市场');
+const installBtn = () => [...w.document.querySelectorAll('button')].find((b) => b.textContent.trim() === '安装');
+check('市场：列出源上的插件（名字与 id 都在）',
+  text().includes('待办插件') && text().includes('com.shixiansi.plugin-todo'));
+check('市场：插件源就是宿主给的那一条，并且可以改',
+  /^https:\/\//.test(w.document.querySelector('#base')?.value || ''));
+check('市场：装好的行写「已安装 v…」，三行里只有一个能装',
+  text().includes('已安装 v') &&
+    [...w.document.querySelectorAll('button')].filter((b) => b.textContent.trim() === '安装').length === 1);
+check('市场：没有「更新到 v…」——两行都已经是目录里的版本',
+  ![...w.document.querySelectorAll('button')].some((b) => b.textContent.includes('更新到 v')));
+
+installBtn()?.click();
+await settle();
+check('市场：点「安装」之后那一行变成已安装', !installBtn() && text().includes('已安装 v1.2.0'));
+check('市场：装完明说要去「插件」页授权（安装不等于启用）',
+  text().includes('去「插件」页给它授权'));
+
 // --- the 日志 page -------------------------------------------------------------------
 //
 // This page's whole value is that it shows the HOST's lines, so the checks are about the

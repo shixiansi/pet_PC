@@ -1,10 +1,11 @@
 <script lang="ts">
   import Start from './pages/Start.svelte';
   import Plugins from './pages/Plugins.svelte';
+  import Market from './pages/Market.svelte';
   import Logs from './pages/Logs.svelte';
   import Advanced from './pages/Advanced.svelte';
 
-  // Four pages, one level. Coopanion splits its settings into a normal mode and an
+  // Five pages, one level. Coopanion splits its settings into a normal mode and an
   // advanced mode; the pet is small enough that a single rail is honest.
   //
   // 「待办」 was the second page, and it is GONE rather than moved: it read the pet's
@@ -14,6 +15,12 @@
   // the 插件 page mounts in its workspace (so does the pomodoro's records view and the chat
   // plugin's transcript). "Which program draws the plugin's interface" has one answer now:
   // the plugin decides, both programs host it.
+  //
+  // 「市场」 is next to 插件 on purpose: one page lists what this machine HAS (and mounts its
+  // interface), the other lists what the SOURCE has. They were one page's worth of confusion
+  // for a while - the catalogue only existed as an update chip, so installing something new
+  // meant opening the pet's older market window. The catalogue is one HTTP GET; the page that
+  // shows it belongs to the program that is already open.
   //
   // 「日志」 is the third, and it exists because a bug report had no evidence to carry: the
   // pet writes one (logs/pet.log, always on, INFO by default), this program writes its own,
@@ -30,6 +37,7 @@
   const pages = [
     { id: 'start', label: '开始', component: Start },
     { id: 'plugins', label: '插件', component: Plugins },
+    { id: 'market', label: '市场', component: Market },
     { id: 'logs', label: '日志', component: Logs },
     { id: 'advanced', label: '高级', component: Advanced },
   ] as const;
