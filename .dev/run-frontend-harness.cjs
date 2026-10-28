@@ -551,6 +551,8 @@ const checksJs = `
       kind: 'reminder',
       title: '该歇一会儿了',
       items: [{ id: 't1', title: '写周报', due: '今天 18:00' }],
+      // A reminder's whole content IS the list, so it asks for the button that opens it.
+      showTodoAction: true,
       more: 0,
       x: 168, y: 180, w: 300, h: 140, onRight: true,
     };
@@ -787,6 +789,26 @@ const checksJs = `
     ok('a reminder bubble is up',
       !bubbleEl.classList.contains('hidden'),
       'the card did not paint: hidden=' + bubbleEl.classList.contains('hidden'));
+
+    // 「看看待办」 is only drawn when the sentence is ABOUT the list. A reminder is, so its
+    // showTodoAction is set and the button must be there.
+    const primary = document.getElementById('bubble-primary');
+    ok('a reminder offers the list it is about',
+      !!primary && !primary.classList.contains('hidden') &&
+        primary.textContent === '看看待办',
+      'primary hidden=' + (primary && primary.classList.contains('hidden')) +
+        ' text=' + (primary && primary.textContent));
+
+    // A bubble.say line (a chat reply) is NOT about the list: the same card without the flag must
+    // draw no such button. Reported as 「怎么一直弹这个窗口」, with a button that led nowhere useful.
+    window.__emit('pet:layout', layout(false, {
+      kind: 'reminder', title: '在呢在呢！', items: [], more: 0,
+      x: 168, y: 180, w: 300, h: 140, onRight: true,
+    }));
+    await sleep(120);
+    ok('a plain spoken line offers no todo button',
+      !!primary && primary.classList.contains('hidden'),
+      'the todo button appeared on a bubble that carries no list');
 
     document.activeElement?.blur?.();
     window.__calls.length = 0;

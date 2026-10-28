@@ -306,6 +306,7 @@ function pluginViewFor(pluginId) {
  */
 function applyBubble(next) {
   const wasKind = bubble?.kind || null;
+  const wasSignature = bubbleSignature(bubble);
   bubble = next;
 
   if (!next) {
@@ -330,11 +331,36 @@ function applyBubble(next) {
   els.bubbleArrow.classList.toggle('at-left', !!next.onRight);
   els.bubbleArrow.classList.toggle('at-right', !next.onRight);
 
-  if (kindChanged) {
+  // Re-render whenever the CARD'S CONTENT changed, not only when its kind did.
+  //
+  // This guard used to be `kindChanged` alone, and that was wrong in a way the user felt before
+  // anyone read the code: two `bubble.say` lines in a row are both kind "reminder", so the second
+  // one's text never replaced the first's. What the user saw was the SAME sentence coming back -
+  // 「怎么一直弹这个窗口」 - because the card they were being shown was the one written minutes
+  // earlier. It also meant the button row could not follow the content (see showTodoAction).
+  //
+  // The timer is still rescheduled only on a content change: a geometry-only layout (the pet moved,
+  // the region was recut) arrives many times a second during a drag, and resetting the countdown on
+  // each one would make a reminder bubble live for ever.
+  if (kindChanged || wasSignature !== bubbleSignature(next)) {
     renderBubble(next);
     scheduleBubbleHide(next);
   }
   els.bubble.classList.remove('hidden');
+}
+
+/**
+ * What makes two bubbles the SAME card, for the "does it need repainting" test above.
+ *
+ * Geometry is deliberately absent: a card that only moved is the same card, and repainting it would
+ * restart its countdown.
+ */
+function bubbleSignature(b) {
+  if (!b) return '';
+  const items = (b.items || [])
+    .map((i) => `${i.id}|${i.title}|${i.due || ''}|${i.status || ''}`)
+    .join(';');
+  return [b.kind, b.title, b.more || 0, b.showTodoAction ? 1 : 0, items].join('\u0001');
 }
 
 /** Renders a bubble's contents for its kind. */
@@ -369,8 +395,14 @@ function renderBubble(b) {
   els.bubbleSecondary.textContent = '知道了';
   els.bubbleSecondary.classList.remove('hidden');
   els.bubbleSecondary.onclick = () => App.DismissBubble().then(applyLayout).catch(fail);
+  // 「看看待办」 only when the sentence is actually ABOUT the list.
+  //
+  // Every `bubble.say` used to get this button, so a chat reply ("在呢在呢！…") came with a
+  // 「看看待办」 that opened a list it had nothing to do with - the user read that as the window
+  // misbehaving. Go decides now: a plugin has to ask for it, and the reminder (whose whole content
+  // IS the list) is the one caller that does.
+  els.bubblePrimary.classList.toggle('hidden', !b.showTodoAction);
   els.bubblePrimary.textContent = '看看待办';
-  els.bubblePrimary.classList.remove('hidden');
   els.bubblePrimary.onclick = () => App.OpenTodoFromBubble().then(applyLayout).catch(fail);
 }
 

@@ -86,6 +86,16 @@ type BubbleView struct {
 	Items []BubbleItem `json:"items,omitempty"`
 	// More is how many entries did not fit.
 	More int `json:"more,omitempty"`
+	// ShowTodoAction says whether the card offers 「看看待办」.
+	//
+	// It exists because `bubble.say` made ONE card shape serve two unrelated sentences. The todo
+	// plugin's line ("别忘了：…") wants that button - it opens the list the line is about. A chat
+	// reply or a "you might like this video" line does not: the user reported the result as
+	// 「怎么一直弹这个窗口」 with a button that had nothing to do with what it said.
+	//
+	// It is DEFAULT OFF and a plugin has to ask, because the button opens ANOTHER plugin's surface:
+	// that is a cross-plugin action, and it should not be granted by accident.
+	ShowTodoAction bool `json:"showTodoAction,omitempty"`
 
 	// Geometry, in CSS pixels relative to the window's top-left corner.
 	X       float64 `json:"x"`

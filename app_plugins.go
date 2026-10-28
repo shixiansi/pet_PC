@@ -577,6 +577,9 @@ func pluginEventsSubscribe(a *App, id string, payload []byte) (any, error) {
 func pluginBubbleSay(a *App, _ string, payload []byte) (any, error) {
 	var in struct {
 		Text string `json:"text"`
+		// TodoAction asks for the 「看看待办」 button. Only a line that is ABOUT the todo list should
+		// set it - see BubbleView.ShowTodoAction.
+		TodoAction bool `json:"todoAction"`
 	}
 	if err := decodePayload(payload, &in); err != nil {
 		return nil, err
@@ -590,7 +593,7 @@ func pluginBubbleSay(a *App, _ string, payload []byte) (any, error) {
 	// showing and correctly recorded in the layout - the only thing that failed
 	// is the crop, and reporting that as "bubble.say failed" would tell the
 	// plugin the opposite of what happened.
-	if _, err := a.showBubble(&BubbleView{Kind: BubbleReminder, Title: text}); err != nil {
+	if _, err := a.showBubble(&BubbleView{Kind: BubbleReminder, Title: text, ShowTodoAction: in.TodoAction}); err != nil {
 		a.DebugLog("plugin bubble: re-crop failed: " + err.Error())
 	}
 	return map[string]any{"ok": true}, nil

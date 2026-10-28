@@ -112,6 +112,9 @@ func (a *App) showReminderBubble(manual bool) bool {
 		Title: title,
 		Items: bubbleItems,
 		More:  more,
+		// The list is what this bubble is about, so the button that opens it belongs here. Every
+		// other `bubble.say` caller leaves it off (see BubbleView.ShowTodoAction).
+		ShowTodoAction: true,
 	})
 
 	// Announced AFTER the bubble is up, so a slow reaction cannot delay the visual

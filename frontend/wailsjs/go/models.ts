@@ -50,6 +50,7 @@ export namespace main {
 	    title: string;
 	    items?: BubbleItem[];
 	    more?: number;
+	    showTodoAction?: boolean;
 	    x: number;
 	    y: number;
 	    w: number;
@@ -66,6 +67,7 @@ export namespace main {
 	        this.title = source["title"];
 	        this.items = this.convertValues(source["items"], BubbleItem);
 	        this.more = source["more"];
+	        this.showTodoAction = source["showTodoAction"];
 	        this.x = source["x"];
 	        this.y = source["y"];
 	        this.w = source["w"];
