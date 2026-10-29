@@ -706,10 +706,11 @@ const PET_MENU_ACTIONS = {
 
   plugins: () => launchControlCenter(),
 
-  // 主题: flips the pet's own cards between the two schemes. It re-applies the layout instead of
-  // repainting here, because Layout.Theme is the page's single source for it - the same reason
-  // everything else about the appearance is done in applyLayout.
-  theme: () => App.ToggleCardTheme().then(applyLayout).catch(fail),
+  // 主题: flips the shared scheme. The repaint arrives as a `pet:layout` event the host pushes after
+  // writing it (Layout.Theme is the page's single source), so there is nothing to apply here - and
+  // passing the binding's STRING answer to applyLayout is what made the menu vanish and come back
+  // unchanged: `layout.petX` off a string is undefined, and the pet got positioned at "undefinedpx".
+  theme: () => App.ToggleCardTheme().catch(fail),
 
   // 归位: back to the first-run resting place. It re-places the window, and folds
   // the card away with the panel and any surface - a card beside a pet that just

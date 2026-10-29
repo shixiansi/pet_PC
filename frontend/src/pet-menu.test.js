@@ -273,10 +273,15 @@ describe('pet menu: what each cell does', () => {
 
   // 主题那一格走 TogglePanelTheme，然后**重新应用一次 layout**：配色是 Layout.Theme 说的，
   // 页面不自己猜（自己猜就会出现"文件写深色、界面是浅色"）。
-  it('主题 flips the card scheme through the binding, then re-applies the layout', async () => {
+  // 主题那一格只调 ToggleCardTheme；**重画靠宿主推过来的 `pet:layout` 事件**（Layout.Theme 是
+  // 页面唯一的配色来源）。这里刻意断言"没有额外去取 layout"：上一版把 binding 返回的主题字符串
+  // 直接喂给了 applyLayout，于是 `layout.petX` 变成 undefined，菜单先消失、再以旧配色回来。
+  it('主题 flips the shared scheme through the binding, and does not re-apply a layout itself', async () => {
     const { calls } = await openAndClick('theme');
     expect(callsTo(calls, 'ToggleCardTheme').length).toBe(1);
-    expect(callsTo(calls, 'GetLayout').length).toBeGreaterThan(0);
+    // The LAST call is the binding: nothing after it fetches a layout. (A count of zero would be
+    // wrong - the page asks for one at boot - so the assertion is about what the click added.)
+    expect(calls[calls.length - 1].name).toBe('ToggleCardTheme');
   });
 
   it('归位 and 隐藏 call the bindings the tray uses', async () => {

@@ -1477,13 +1477,33 @@ func (a *App) SetCardTheme(theme string) (State, error) {
 		return State{}, err
 	}
 	a.log.Infof("ui", "配色切成 %s（桌宠与控制中心共用）", next)
+	a.pushLayout()
 	return a.GetState()
+}
+
+// pushLayout re-sends the current layout, which is how the page learns about a change that is not a
+// geometry change.
+//
+// WHY THE SETTER PUSHES AND THE PAGE DOES NOT ASK. The scheme travels in Layout.Theme, and the page
+// paints from whatever layout it last received. `ToggleCardTheme` answers with a bare string, so a
+// page that wanted to repaint had to fetch the layout itself - and the version of that which shipped
+// passed the THEME STRING to `applyLayout`, which then read `layout.petX` off a string: the menu
+// vanished (the pet got positioned at "undefinedpx") and came back on the next push still in the old
+// colours. Pushing from here makes every caller correct by construction.
+func (a *App) pushLayout() {
+	if a.ctx == nil {
+		return
+	}
+	if l, err := a.GetLayout(); err == nil {
+		a.emitEvent("pet:layout", l)
+	}
 }
 
 // ToggleCardTheme flips the scheme and answers with the NEW value.
 //
 // The menu cell's label is rendered FROM the theme ("深色" while the cards are light, i.e. it names
-// the action), so the page needs to know the result without asking again.
+// the action), so the page needs to know the result without asking again. The repaint does not
+// depend on that answer: SetCardTheme pushes a layout.
 func (a *App) ToggleCardTheme() (string, error) {
 	next := store.ThemeDark
 	if a.panelTheme() == store.ThemeDark {
