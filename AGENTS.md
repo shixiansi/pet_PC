@@ -250,9 +250,13 @@ DPAPI（[internal/desktop/crypto_windows.go](internal/desktop/crypto_windows.go)
   能看个啥"。另外同一 `(插件, 方法, 等级)` 5 秒内只写一行、合并数附在下一行上
   （`internal/logging.Throttle`），因为轮询既可能读也可能写。分类表在
   `internal/plugins.DataMethod`，两个宿主共用；新方法忘了分类就默认按"动作"记 INFO。
-- **正文与密钥绝不进日志。** payload 只记字节数，回复只记字数，`Settings.String()` 只写
-  `key=set`。日志是给 issue 贴的（`Market.Diagnostics` 直接复制它），一处
-  `log.Debug("llm", payload)` 就让每份报告都不能外发。
+- **密钥绝不进任何一行；正文只在 DEBUG 行。** INFO 及以上 payload 只记字节数、回复只记字数，
+  `Settings.String()` 只写 `key=set`。DEBUG（`PETPC_LOG_LEVEL=debug`）才记 `llm.chat` 发出的
+  每条消息与回来的正文（`app_plugins.go` 的 `logChatRequest` / `logChatReply`，单条上限 2000 字，
+  截断会写明）："为什么它这么答"靠字数答不了，而这一层是用户自己开的。这条线的另一半是**报告**
+  ——`Market.Diagnostics` 只取 INFO 及以上（`settingsapi_diagnostics.go` 的 `MinLevel`），所以
+  贴出去的诊断报告里没有对话正文。**谁把正文挪到 INFO、或者把报告的 MinLevel 调回 LevelDebug，
+  就同时毁掉这两半。**
 
 守它的检查：`internal/logging`（格式往返/等级/轮转/伪造行）、`internal/llm/log_test.go`、
 `app_log_test.go`、`tools/plugin-market/logapi_test.go`，以及 `.dev/check-frontend.cjs` 的

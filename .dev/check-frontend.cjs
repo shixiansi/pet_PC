@@ -2023,6 +2023,32 @@ check(
   'one program stopped opening its log, or a PETPC_DEBUG gate came back',
 );
 
+// --- the conversation is in the log at DEBUG, and the report stops at INFO ----------------
+//
+// One decision with two halves, and each half is useless without the other: logging the words at
+// INFO would make every pasted diagnostics report a transcript, while keeping the report at DEBUG
+// after the log gained the words would leak them through the other door. Together they buy the
+// thing that did not exist before — "turn on debug and read what was actually sent and received" —
+// without costing the "a report is safe to paste" property.
+check(
+  'the model conversation is logged at DEBUG and nowhere else',
+  /func logChatRequest\(/.test(goAppPlugins) &&
+    /func logChatReply\(/.test(goAppPlugins) &&
+    // The guard is what makes it DEBUG-only: a content line without it would ride whatever level
+    // the file happens to be at, which is INFO for every user.
+    /log\.Level\(\) != logging\.LevelDebug/.test(goAppPlugins) &&
+    /"llm\.chat 发出\[/.test(goAppPlugins) &&
+    /llm\.chat 收到（/.test(goAppPlugins),
+  'the DEBUG content lines are gone, or their level guard was removed',
+);
+check(
+  'the diagnostics report stops at INFO, so a pasted report has no conversation in it',
+  /MinLevel: logging\.LevelInfo/.test(
+    fs.readFileSync(path.join(root, 'tools/plugin-market/settingsapi_diagnostics.go'), 'utf8'),
+  ),
+  'the report reads DEBUG lines, so copying it can carry the conversation',
+);
+
 // --- the 市场 page: the catalogue is visible, and installing is not enabling -----------
 //
 // WHY THIS IS A GATE AND NOT ONLY A SMOKE TEST. The two failures worth catching here are both

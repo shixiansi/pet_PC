@@ -160,7 +160,12 @@ func writeLogSection(b *strings.Builder, dir string) {
 	}
 
 	entries, err := logging.Read(dir, []string{logging.PetLog, logging.MarketLog}, logging.Query{
-		MinLevel: logging.LevelDebug,
+		// INFO and above, NOT the level the files happen to be at. At DEBUG the pet logs the
+		// words that went to the model and came back (app_plugins.go's logChatRequest), and this
+		// report is copied into a chat window - so this section stays on the side of "safe to
+		// paste", which is the only reason it exists. Someone actually debugging reads the 日志
+		// page, where the level is theirs to choose.
+		MinLevel: logging.LevelInfo,
 		Limit:    logTailLines,
 	})
 	if err != nil {

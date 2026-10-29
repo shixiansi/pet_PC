@@ -80,40 +80,73 @@ func TestPluginRequestsAreLoggedWithTheirOutcome(t *testing.T) {
 	}
 }
 
-func TestLLMChatIsLoggedWithoutTheConversationText(t *testing.T) {
+// TestLLMChatLogsTheWordsOnlyAtDebug pins the line this whole feature draws.
+//
+// The words a plugin sends to the model, and the words that come back, are the one thing the log
+// could not say before — "196 字" answers "did it reply" and nothing else, so "为什么它这么答"
+// needed the plugin to be instrumented. They are also the user's own conversation, and `pet.log`
+// is the file the diagnostics report is cut from. So the rule is a LEVEL, not a ban:
+//
+//	INFO  (what both programs ship with): endpoint, model, counts, finish reason — no words.
+//	DEBUG (PETPC_LOG_LEVEL=debug)        : the words, one line per message, plus the reply.
+//
+// writeLogSection stops at INFO for the same reason, so a pasted report stays safe.
+func TestLLMChatLogsTheWordsOnlyAtDebug(t *testing.T) {
 	stub := newToolStub(t, textScript("好"))
 	a := loggedApp(t)
 	id := installToolPlugin(t, a, "llm.chat", "plugin.config")
 	setPluginConfig(t, a, id, map[string]string{"llmBaseUrl": stub.URL(), "llmModel": "m"})
 
 	const question = "帮我记一下：明天九点去体检"
+
+	// --- the shipping level ---
+	a.log.SetLevel(logging.LevelInfo)
 	if _, err := a.PluginRequest(id, "llm.chat", `{"text":"`+question+`"}`); err != nil {
 		t.Fatalf("llm.chat: %v", err)
 	}
-
-	log := readPetLog(t, a)
+	info := readPetLog(t, a)
 	for _, want := range []string{
 		// The request line names the endpoint and the model, which is what answers
-		// "which service is this install actually talking to".
+		// "which service is this install actually talking to". INFO on purpose: it carries
+		// no content, so it is the line everyone gets.
 		"llm.chat 请求 base=" + stub.URL(),
 		"model=m",
-		// One line per round with the usage the server reported, and the finish reason.
-		"llm.chat 一轮",
-		"finish=stop",
-		// And the completion, with a character count rather than the text.
+		// And the completion, with a character count rather than the text. The per-ROUND line
+		// ("一轮 … finish=…") stays at DEBUG: it is one line per tool round, and the two lines
+		// above already answer "did it reply" and "to whom".
 		"llm.chat 完成",
 	} {
-		if !strings.Contains(log, want) {
-			t.Errorf("the log does not mention %q:\n%s", want, log)
+		if !strings.Contains(info, want) {
+			t.Errorf("the log does not mention %q at INFO:\n%s", want, info)
 		}
 	}
-	if strings.Contains(log, question) {
-		t.Errorf("the conversation text reached the log:\n%s", log)
+	if strings.Contains(info, question) {
+		t.Errorf("the conversation text reached the log at INFO - that file is what a diagnostics report is cut from:\n%s", info)
 	}
-	// The reply's own text ("好") must not be recorded either - a character count is
-	// the most a log may say about it.
-	if strings.Contains(log, "回复 好") {
-		t.Errorf("the model's reply reached the log:\n%s", log)
+	if strings.Contains(info, "回复 好") || strings.Contains(info, "收到：好") {
+		t.Errorf("the model's reply reached the log at INFO:\n%s", info)
+	}
+
+	// --- and at DEBUG, on purpose ---
+	a.log.SetLevel(logging.LevelDebug)
+	if _, err := a.PluginRequest(id, "llm.chat", `{"text":"debug 里要看得见这一句"}`); err != nil {
+		t.Fatalf("llm.chat: %v", err)
+	}
+	debug := readPetLog(t, a)
+	if !strings.Contains(debug, "llm.chat 发出[") || !strings.Contains(debug, "debug 里要看得见这一句") {
+		t.Errorf("at DEBUG the sent text is still missing:\n%s", debug)
+	}
+	// The per-round line (usage, finish reason) lives here too, not at INFO.
+	if !strings.Contains(debug, "llm.chat 一轮") || !strings.Contains(debug, "finish=stop") {
+		t.Errorf("at DEBUG the per-round line is missing:\n%s", debug)
+	}
+	// The system prompt is part of what was sent — it is usually WHY the reply reads the way it
+	// does — so it must be visible too, not only the user's turns.
+	if !strings.Contains(debug, "发出[1/") || !strings.Contains(debug, " system：") {
+		t.Errorf("the system prompt is not in the DEBUG log:\n%s", debug)
+	}
+	if !strings.Contains(debug, "llm.chat 收到（1 字）：好") {
+		t.Errorf("at DEBUG the reply is still missing:\n%s", debug)
 	}
 }
 
@@ -212,4 +245,20 @@ func readPetLogAt(t *testing.T, dir string) string {
 		t.Fatalf("nothing was logged under %s: %v", dir, err)
 	}
 	return string(data)
+}
+// TestClampLogBodySaysWhatItCut keeps a truncated line honest: a body that silently stops
+// mid-sentence reads as "the model said that much".
+func TestClampLogBodySaysWhatItCut(t *testing.T) {
+	short := strings.Repeat("短", 20)
+	if got := clampLogBody(short); got != short {
+		t.Fatalf("a body inside the cap was changed: %q", got)
+	}
+	long := strings.Repeat("长", chatLogBodyRunes+5)
+	got := clampLogBody(long)
+	if !strings.Contains(got, "…（截断，共 2005 字）") {
+		t.Fatalf("a truncated body does not say how much it cut: %q", got[len(got)-40:])
+	}
+	if !strings.HasPrefix(got, strings.Repeat("长", chatLogBodyRunes)) {
+		t.Fatal("the kept prefix is not the beginning of the body")
+	}
 }

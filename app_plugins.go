@@ -1600,6 +1600,60 @@ func pluginShareRemove(a *App, id string, payload []byte) (any, error) {
 // own history (through storage.get/set on the key "llm-history"), and the pet
 // writing one too would be two writers for one conversation - with the pet's
 // copy invisible to the only UI that shows it.
+//
+// It IS written to the log at DEBUG, together with what was sent; see
+// logChatRequest for why that is the only level allowed to carry the words.
+
+// chatLogBodyRunes bounds one logged message body. Long enough for a real system prompt (the
+// chat plugin's persona runs several lines) and short enough that a DEBUG log stays readable.
+const chatLogBodyRunes = 2000
+
+// logChatRequest writes what is ABOUT TO BE SENT, one line per message, at DEBUG.
+//
+// WHY THE WORDS ARE LOGGED AT ALL, AND WHY ONLY AT DEBUG. A line that says "196 字" answers "did
+// it reply" and nothing else; "why did it reply THAT" needs the text. But that text is the user's
+// own conversation, and `pet.log` is the file the diagnostics report is cut from - so it exists
+// at exactly one level, the one a user turns on deliberately (PETPC_LOG_LEVEL=debug), and
+// writeLogSection stops at INFO for that reason (tools/plugin-market/settingsapi_diagnostics.go).
+//
+// The level is checked BEFORE anything is built: at INFO this must cost nothing, not "format a
+// 40 KB string and drop it".
+func logChatRequest(log *logging.Logger, pluginID string, msgs []llm.Message) {
+	if log.Level() != logging.LevelDebug {
+		return
+	}
+	for i, m := range msgs {
+		body := strings.TrimSpace(m.Content)
+		if body == "" {
+			continue
+		}
+		log.Pluginf(logging.LevelDebug, "llm", pluginID,
+			"llm.chat 发出[%d/%d] %s：%s", i+1, len(msgs), m.Role, clampLogBody(body))
+	}
+}
+
+// logChatReply writes the model's answer at DEBUG. See logChatRequest for why only there.
+func logChatReply(log *logging.Logger, pluginID, label, body string) {
+	if log.Level() != logging.LevelDebug {
+		return
+	}
+	text := strings.TrimSpace(body)
+	if text == "" {
+		return
+	}
+	log.Pluginf(logging.LevelDebug, "llm", pluginID, "%s：%s", label, clampLogBody(text))
+}
+
+// clampLogBody keeps one logged body inside chatLogBodyRunes and SAYS what it cut: a line that
+// silently stops mid-sentence reads as "the model said that much".
+func clampLogBody(text string) string {
+	r := []rune(text)
+	if len(r) <= chatLogBodyRunes {
+		return text
+	}
+	return string(r[:chatLogBodyRunes]) + fmt.Sprintf("…（截断，共 %d 字）", len(r))
+}
+
 func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 	var in struct {
 		Text      string       `json:"text"`
@@ -1734,13 +1788,16 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 	// This is the line the whole feature exists for: "模型没回话" used to be
 	// unanswerable from the outside, because the endpoint, the model, the round
 	// count and the budget all live in the PLUGIN's settings while the request is
-	// made by the HOST. The counts (messages, history turns, tools, images) are
-	// enough to recognise a request; the text itself is NOT logged, and neither is
-	// the key - Settings.String has said "key=set" since it was written.
+	// made by the HOST. INFO, because it carries no content - only which endpoint
+	// asked which model with how much. The words themselves are the next line down
+	// (logChatRequest, DEBUG): they are the user's conversation, and this file is
+	// what the diagnostics report is cut from.
 	started := time.Now()
-	a.log.Pluginf(logging.LevelDebug, "llm", id,
+	a.log.Pluginf(logging.LevelInfo, "llm", id,
 		"llm.chat 请求 base=%s model=%s：消息 %d 条（历史 %d 轮），工具 %v，图片 %d 张",
 		cfg.LLMBaseURL, cfg.LLMModel, len(msgs), len(in.History), toolNames(specs), len(images))
+	// And at DEBUG the words themselves, which is what "为什么它这么答" actually needs.
+	logChatRequest(a.log, id, msgs)
 
 	// send performs ONE round and accounts for it.
 	//
@@ -1787,6 +1844,11 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 		// leaving a hole in the middle of a sentence.
 		a.log.Pluginf(logging.LevelInfo, "llm", id, "llm.chat 完成 in %dms：回复 %d 字",
 			time.Since(started).Milliseconds(), len([]rune(text)))
+		// The words, at DEBUG (see logChatRequest). The count is repeated in the label on
+		// purpose: it is the same number the INFO line above reports, so "回复 17 字" and
+		// "收到（17 字）：…" read as one thought split across two lines by the level, not as
+		// two unrelated facts.
+		logChatReply(a.log, id, fmt.Sprintf("llm.chat 收到（%d 字）", len([]rune(text))), text)
 		a.emitPluginEvent(id, "llm.done", map[string]any{"requestId": requestID, "text": text})
 		return map[string]any{"requestId": requestID, "text": text}, nil
 	}
@@ -1816,6 +1878,10 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 		// results below refer to them, and a gateway that cannot match the two
 		// rejects the whole request.
 		msgs = append(msgs, llm.Message{Role: "assistant", Content: res.Text, ToolCalls: res.ToolCalls})
+		// A model that answers AND calls tools said something in between; at DEBUG it is part of
+		// "what came back" (the tool payloads themselves stay out of the log on purpose - they can
+		// carry the user's own data; see app_plugin_tools.go).
+		logChatReply(a.log, id, fmt.Sprintf("llm.chat 中间回复（%d 字）", len([]rune(res.Text))), res.Text)
 		for _, call := range res.ToolCalls {
 			out, runErr := a.runPluginTool(id, requestID, call)
 			if runErr != nil {

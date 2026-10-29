@@ -97,16 +97,24 @@
 
 ## 6. 里面不许有什么
 
-**对话正文、待办内容、插件设置的值、任何密钥。**
+**密钥绝不进任何一行。正文（对话、待办、设置值）只在 `DEBUG` 行。**
 
-记的是「谁调了什么、花了多久、结果如何」：方法名、插件 id、字节数、条数、tokens、耗时、
-错误文案。这条不是风格偏好——日志是给 issue 贴的，而控制中心「高级 → 生成诊断报告」直接
-复制它。一处 `log.Debug("llm", payload)` 就能让每一份报告都不能外发。
+- **`INFO` 及以上**记的是「谁调了什么、花了多久、结果如何」：方法名、插件 id、字节数、条数、
+  tokens、耗时、错误文案。用户默认看到的就是这一层。
+- **`DEBUG`**（`PETPC_LOG_LEVEL=debug`）才记模型**发出的每条消息与回来的正文**
+  （`app_plugins.go` 的 `logChatRequest` / `logChatReply`，单条上限 2000 字，截断会写明）。
+  理由很实在：数字数回答不了「它为什么这么答」，而这个问题以前只能靠给插件加打点。
+
+这条线的另一半是**报告**：控制中心「高级 → 生成诊断报告」只读 `INFO` 及以上
+（`settingsapi_diagnostics.go` 的 `MinLevel: logging.LevelInfo`），所以贴进 issue 的报告里
+没有对话正文——日志文件本身在 DEBUG 下有，那层是用户自己开的。密钥则是两处都没有：
+`Settings.String()` 只写 `key=set`。
 
 守它的测试：
 
 - `internal/llm/log_test.go` —— 传输层的每一行都不含用户的话、密钥、服务端返回体；
-- `app_log_test.go` —— `llm.chat` 与每次插件调用都不含 payload 与回复正文；
+- `app_log_test.go` —— `llm.chat` 在 `INFO` 下没有正文、在 `DEBUG` 下有（含 system 提示与回复）；
+  每次插件调用都不含 payload；
 - `tools/plugin-market/logapi_test.go` —— 页面读到的是文件里真有的东西。
 
 ## 7. 加一行日志要改哪儿
