@@ -603,9 +603,17 @@ func (a *App) GetLayout() (Layout, error) {
 	if _, err := a.resolveWindow(); err != nil {
 		return Layout{}, err
 	}
+	// The scheme is a SETTING, not geometry: it changes without the window moving, so it is stamped
+	// here instead of trusted from the cached layout. Without this the cache still held the value
+	// from the last geometry pass, and pushLayout re-sent the OLD scheme - which is exactly why
+	// flipping 主题 in the menu did nothing until the menu was re-opened (that recomputes geometry,
+	// and so the layout, with the new value).
+	theme := a.panelTheme()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.layout, nil
+	cached := a.layout
+	cached.Theme = theme
+	return cached, nil
 }
 
 // panelRGB is the panel's opaque background colour, matching --panel-bg in the

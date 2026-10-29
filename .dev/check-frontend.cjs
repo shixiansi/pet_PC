@@ -475,7 +475,11 @@ check(
     /document\.documentElement\.dataset\.theme = dark \? 'dark' : 'light'/.test(mainJs) &&
     /:root\[data-theme='dark'\]/.test(css) &&
     /func \(a \*App\) ToggleCardTheme\(\)/.test(mainGo) &&
-    /Theme: a\.panelTheme\(\)/.test(mainGo),
+    /Theme: a\.panelTheme\(\)/.test(mainGo) &&
+    // And GetLayout must STAMP it: the cached layout holds the value from the last geometry pass,
+    // so a push after a theme flip used to re-send the OLD scheme - the menu did not change until
+    // it was re-opened (that recomputes geometry).
+    /cached\.Theme = theme/.test(mainGo),
   'the theme cell, its action, the dark palette or Layout.Theme is missing',
 );
 // 配色是**一个**设置，两个窗口共用一份文件（internal/store/theme.go）。
