@@ -1,53 +1,195 @@
 /*
- * Design tokens. Extracted from the two hand-written stylesheets the pet and the
- * market carry today (1391 + 1585 lines) rather than invented: the colours and the
- * glass feel are already accepted by the user, and the complaint is about structure,
- * not about the palette.
+ * 设计令牌（控制中心）—— 取自用户给的一份参考设计，只取骨架与风格，不取内容。
  *
- * Two things here are NOT cosmetic:
- *  - the window is cropped with SetWindowRgn, so no element may use box-shadow,
- *    filter or transform: those paint outside the region and show up as a glass band;
- *  - body must stay transparent for the same reason.
+ * 它定的东西：**单一强调色（紫罗兰）**、4px 基准的间距、6 档圆角、5 档阴影、Inter 字体与
+ * 12→36 的字号阶梯，以及窗口骨架的两个常量（侧栏 236 · 顶栏 60）。我们这边保留了**自己的
+ * 变量名**（`--bg` / `--line` / `--accent`…），于是每个页面都自动跟着变，不需要逐页改色。
+ *
+ * 两条仍然生效的约束，别在这里破：
+ *  1. 这个文件是**控制中心**的调色板。桌宠那一页是 `frontend/src/style.css`，那边的窗口被
+ *     `SetWindowRgn` 裁过，**不许**出现 box-shadow / filter / transform（会画到桌面上）；
+ *     控制中心是普通窗口，所以这里的阴影是安全的——但别把这条经验搬回桌宠那边。
+ *  2. `:root[data-theme='light']` 必须写得出来：插件帧按 `data-theme` 判断自己在哪个配色里
+ *     （`.dev/check-frontend.cjs` 有一条门禁盯着它）。
  */
-:root {
-  --bg: #14161a;
-  --bg-raised: #1c1f26;
-  --bg-sunken: #101216;
-  --line: #2a2f39;
-  --text: #e8eaee;
-  --text-dim: #9aa2ae;
-  --accent: #4c8dff;
-  --accent-dim: #2f5da8;
-  --danger: #e05561;
-  --ok: #46b17b;
-  /* 日志页的「警告」色：介于正文与错误之间。没有它的话，一次重试过的模型请求
-     只能和真正的失败同样染红，或者干脆不标——前者让错误失去分量，后者让警告
-     失去存在感。 */
-  --warn: #d9a13c;
 
-  --radius-sm: 6px;
-  --radius: 10px;
-  --radius-lg: 14px;
+:root,
+:root[data-theme='light'] {
+  /* — 品牌色阶（单一强调色 · 紫罗兰） — */
+  --p-50: #f5f3ff;
+  --p-100: #ede9fe;
+  --p-200: #ddd6fe;
+  --p-300: #c4b5fd;
+  --p-400: #a78bfa;
+  --p-500: #8b5cf6;
+  --p-600: #7c3aed;
+  --p-700: #6d28d9;
+  --p-800: #5b21b6;
+  --p-900: #4c1d95;
 
+  /* — 语义色（每个都配一个软底，给 tag / banner 用） — */
+  --success: #059669;
+  --success-bg: #ecfdf5;
+  --warning: #d97706;
+  --warning-bg: #fffbeb;
+  --danger: #dc2626;
+  --danger-bg: #fef2f2;
+  --info: #2563eb;
+  --info-bg: #eff6ff;
+
+  /* — 中性色阶 — */
+  --n-0: #ffffff;
+  --n-25: #fcfcfd;
+  --n-50: #f8fafc;
+  --n-100: #f1f5f9;
+  --n-200: #e8ecf2;
+  --n-300: #cbd5e1;
+  --n-400: #94a3b8;
+  --n-500: #64748b;
+  --n-600: #475569;
+  --n-700: #334155;
+  --n-800: #1e293b;
+  --n-900: #0f172a;
+
+  /* — 表面与文字（页面只认这一层名字） — */
+  --bg: #f6f7f9;
+  --bg-app: #f6f7f9;
+  --bg-raised: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-sunken: #f1f5f9;
+  --bg-hover: #f1f5f9;
+  --bg-active: #f5f3ff;
+  --line: #e6e9ef;
+  --border: #e6e9ef;
+  --border-strong: #d3d9e2;
+  --text: #0f172a;
+  --text-dim: #7a8798;
+  --text-faint: #a6b1c0;
+
+  /* — 强调色 — */
+  --accent: #7c3aed;
+  --accent-hover: #6d28d9;
+  --accent-soft: #f5f3ff;
+  --accent-dim: #c4b5fd;
+  --on-accent: #ffffff;
+  --ring: rgba(124, 58, 237, 0.28);
+
+  /* — 语义别名（页面历史上用的是这两个名字） — */
+  --ok: var(--success);
+  --warn: var(--warning);
+
+  /* — 字体与字号阶梯 — */
+  --font: 14px/1.55 "Inter", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", system-ui,
+    -apple-system, "Segoe UI", sans-serif;
+  --font-mono: 12px/1.5 "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-md: 15px;
+  --fs-lg: 17px;
+  --fs-xl: 20px;
+  --fs-2xl: 24px;
+  --fs-3xl: 30px;
+  --lh-tight: 1.25;
+  --lh-base: 1.55;
+  --lh-loose: 1.75;
+
+  /* — 间距（4px 基准） — */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
+  --space-6: 32px;
+  --space-8: 48px;
 
-  --font: 13px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
-  --font-mono: 12px/1.5 "Cascadia Mono", "Consolas", monospace;
+  /* — 圆角 — */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
+  --radius-full: 999px;
+
+  /* — 阴影（只有控制中心可以用：桌宠那边的窗口是原生裁剪的） — */
+  --sh-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --sh-sm: 0 1px 3px rgba(15, 23, 42, 0.07), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --sh-md: 0 4px 12px -2px rgba(15, 23, 42, 0.09), 0 2px 4px -2px rgba(15, 23, 42, 0.05);
+  --sh-lg: 0 12px 28px -8px rgba(15, 23, 42, 0.14), 0 4px 8px -4px rgba(15, 23, 42, 0.06);
+  --sh-ring: 0 0 0 3px var(--ring);
+
+  /* — 动效 — */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+
+  /* — 窗口骨架 — */
+  --sidebar-w: 236px;
+  --topbar-h: 60px;
+  --content-max: 1180px;
 }
 
-:root[data-theme='light'] {
-  --bg: #f4f5f7;
-  --bg-raised: #ffffff;
-  --bg-sunken: #eceef1;
-  --line: #d8dce2;
-  --text: #1b1e23;
-  --text-dim: #5f6773;
-  --accent: #2f6fe4;
-  --accent-dim: #a8c2ef;
-  /* 浅色下的警告色必须比深色下更暗：同一个 #d9a13c 铺在白卡片上读不出来。 */
-  --warn: #9a6b12;
+:root[data-theme='dark'] {
+  --p-50: #1e1b3a;
+  --p-100: #262046;
+  --p-200: #332a63;
+  --p-300: #4c3d94;
+  --p-400: #7c5cf0;
+  --p-500: #8b5cf6;
+  --p-600: #a78bfa;
+  --p-700: #c4b5fd;
+
+  --success: #34d399;
+  --success-bg: rgba(16, 185, 129, 0.14);
+  --warning: #fbbf24;
+  --warning-bg: rgba(245, 158, 11, 0.14);
+  --danger: #f87171;
+  --danger-bg: rgba(239, 68, 68, 0.14);
+  --info: #60a5fa;
+  --info-bg: rgba(59, 130, 246, 0.14);
+
+  --n-0: #0b0e14;
+  --n-25: #0f131b;
+  --n-50: #141a24;
+  --n-100: #1b2330;
+  --n-200: #232d3d;
+  --n-300: #31404f;
+  --n-400: #4a5a6e;
+  --n-500: #6b7c90;
+  --n-600: #92a2b4;
+  --n-700: #b4c0ce;
+  --n-800: #d5dde7;
+  --n-900: #edf2f8;
+
+  --bg: #0b0e14;
+  --bg-app: #0b0e14;
+  --bg-raised: #141a24;
+  --bg-surface: #141a24;
+  --bg-sunken: #0e131b;
+  --bg-hover: #1a2230;
+  --bg-active: #1e1b3a;
+  --line: #232d3d;
+  --border: #232d3d;
+  --border-strong: #31404f;
+  --text: #e8edf5;
+  --text-dim: #a2b0c2;
+  --text-faint: #5a6a7e;
+
+  --accent: #7c3aed;
+  --accent-hover: #8b5cf6;
+  --accent-soft: #1e1b3a;
+  --accent-dim: #4c3d94;
+  --on-accent: #ffffff;
+  --ring: rgba(167, 139, 250, 0.34);
+
+  /* 深色下的警告色必须比浅色下更亮：同一个 #D97706 铺在深底上读不出来。 */
+  --warn: var(--warning);
+
+  --sh-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --sh-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --sh-md: 0 4px 12px -2px rgba(0, 0, 0, 0.5);
+  --sh-lg: 0 12px 28px -8px rgba(0, 0, 0, 0.6);
 }

@@ -1,10 +1,85 @@
 @import './tokens.css';
 
-html, body { height: 100%; }
+/*
+ * 基础层 —— 与参考设计对齐：字体渲染、焦点环、滚动条、选择色。
+ *
+ * 只写「每个页面都该一样」的东西。具体控件（按钮、卡片、行）留在各页面自己的 scoped 样式里：
+ * 全局地给 button 铺底色，是毁掉这些页面最快的方式——它们本来就把按钮画成 chip 的形状。
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
   font: var(--font);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
-* { box-sizing: border-box; }
+
+h1,
+h2,
+h3,
+h4,
+p,
+figure {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* 键盘可达性：只用 outline——不参与布局，也不会被哪个滚动容器裁掉。 */
+:focus-visible {
+  outline: 2px solid var(--p-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+::selection {
+  background: var(--p-200);
+  color: var(--p-900);
+}
+
+:root[data-theme='dark'] ::selection {
+  background: var(--p-700);
+  color: #fff;
+}
+
+/* 滚动条：细、无轨道底色，hover 才变深——这个窗口里每一页都在滚。 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--n-300);
+  border-radius: var(--radius-full);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--n-400);
+  background-clip: content-box;
+}

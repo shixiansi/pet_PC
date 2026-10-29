@@ -165,13 +165,11 @@
 </script>
 
 <div class="page">
-  <header class="head">
-    <h2>插件市场</h2>
-    <p class="hint">
-      插件源上有什么。<strong>安装不会启用它</strong>：装完去「插件」页授权它要用的能力，
-      那一步才是你同意它做什么。
-    </p>
-  </header>
+  <!-- 这一页的名字与一句话说明在顶栏上（App.svelte 的 topbar），这里不再重复一个 h2：
+       顶栏说"是哪一页"，这一段只说这一页最要紧的那条规矩。 -->
+  <p class="hint">
+    <strong>安装不会启用它</strong>：装完去「插件」页授权它要用的能力，那一步才是你同意它做什么。
+  </p>
 
   <form
     class="source"
@@ -248,7 +246,6 @@
 
 <style>
   .page { display: flex; flex-direction: column; gap: var(--space-3); }
-  .head h2 { margin: 0 0 var(--space-1); font-size: 15px; }
   .hint { margin: 0; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
   .mono { font: var(--font-mono); }
 
@@ -296,42 +293,63 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: var(--space-4);
-    padding: var(--space-3);
+    padding: var(--space-4);
     background: var(--bg-raised);
     border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--sh-xs);
+    transition: box-shadow var(--dur-2) var(--ease), border-color var(--dur-2) var(--ease);
   }
+  .row:hover { box-shadow: var(--sh-md); border-color: var(--border-strong); }
   .row.busy { opacity: .7; }
   .info { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
   .who { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; }
-  .who strong { font-size: 13px; }
+  .who strong { font-size: var(--fs-md); font-weight: 650; letter-spacing: -0.01em; }
   .id, .ver, .author { font-size: 11px; color: var(--text-dim); }
   /* A description is prose: past ~90 characters a line stops being readable, and on a wide window
      the row would otherwise stretch one sentence over the whole screen. */
-  .desc { margin: 0; max-width: 90ch; font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+  .desc { margin: 0; max-width: 90ch; font-size: var(--fs-sm); color: var(--text-dim); line-height: 1.6; }
   .meta { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+  /* Soft pills, the way the reference draws tags: a tint with no border reads as metadata, while
+     an outline at this size reads as another button. */
   .chip {
     font-size: 11px;
     color: var(--text-dim);
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    padding: 0 var(--space-2);
+    background: var(--bg-hover);
+    border: 1px solid transparent;
+    border-radius: var(--radius-full);
+    padding: 1px var(--space-2);
   }
   .act { flex: 0 0 auto; display: flex; align-items: center; align-self: center; padding-left: var(--space-2); }
-  .installed { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+  .installed { font-size: var(--fs-sm); color: var(--text-dim); white-space: nowrap; }
 
   .btn {
     font: inherit;
-    font-size: 12px;
-    padding: var(--space-1) var(--space-3);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--line);
-    background: var(--bg);
+    font-size: var(--fs-sm);
+    font-weight: 550;
+    height: 34px;
+    padding: 0 var(--space-4);
+    border-radius: var(--radius);
+    border: 1px solid var(--border-strong);
+    background: var(--bg-raised);
     color: var(--text);
     cursor: pointer;
     white-space: nowrap;
+    transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease),
+      box-shadow var(--dur-1) var(--ease);
   }
+  .btn:hover { background: var(--bg-hover); border-color: var(--n-400); }
   .btn:disabled { opacity: .5; cursor: default; }
-  .btn.primary { border-color: var(--accent-dim); color: var(--accent); }
+  /* The one action a row has is FILLED, like the reference's primary button: on a page whose job
+     is "install this", an outline the same weight as the chips reads as decoration. */
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent);
+    box-shadow: 0 1px 2px rgba(124, 58, 237, 0.3);
+  }
+  .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
   .btn.ghost { background: transparent; }
+  .btn.ghost:hover { background: var(--bg-hover); }
 </style>
+

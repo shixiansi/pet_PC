@@ -35,64 +35,176 @@
   // for these two pages to show, and a page that silently writes keys nobody reads is worse
   // than no page.
   const pages = [
-    { id: 'start', label: '开始', component: Start },
-    { id: 'plugins', label: '插件', component: Plugins },
-    { id: 'market', label: '市场', component: Market },
-    { id: 'logs', label: '日志', component: Logs },
-    { id: 'advanced', label: '高级', component: Advanced },
+    { id: 'start', label: '开始', hint: '桌宠的样子、外观与启动', component: Start },
+    { id: 'plugins', label: '插件', hint: '已装插件的启停、权限、设置与界面', component: Plugins },
+    { id: 'market', label: '市场', hint: '插件源上有什么，能装与能更新', component: Market },
+    { id: 'logs', label: '日志', hint: '两个程序写下的日志，按等级与子系统筛', component: Logs },
+    { id: 'advanced', label: '高级', hint: '模型配置、数据目录与诊断报告', component: Advanced },
   ] as const;
 
   let current = $state<string>('start');
   const view = $derived(pages.find((p) => p.id === current) ?? pages[0]);
 </script>
 
+<!--
+  The shell: a rail on the left, a title bar on top, the page below it.
+
+  WHY A TITLE BAR, when the rail already highlights where you are: the rail says "which page";
+  the bar says "which page, in words, and what it is for". It also gives every page the same
+  first line, which is why none of them repeats its own name in a big font at the top any more.
+-->
 <div class="shell">
-  <nav>
-    <h1>PetPC</h1>
-    {#each pages as page (page.id)}
-      <button
-        class="rail-item"
-        class:active={page.id === current}
-        onclick={() => (current = page.id)}
-      >{page.label}</button>
-    {/each}
-  </nav>
-  <main>
-    <view.component />
-  </main>
+  <aside class="rail">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <!-- A pet head, drawn inline: an icon font or an asset would be one more file to ship. -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 9.5 4 4l5 2.2a9.4 9.4 0 0 1 6 0L20 4l-1 5.5a7.4 7.4 0 0 1 1 3.6c0 4-3.6 6.9-8 6.9s-8-2.9-8-6.9a7.4 7.4 0 0 1 1-3.6Z" />
+          <path d="M9 12.5h.01M15 12.5h.01" />
+          <path d="M12 15.5c.7 0 1.3-.4 1.6-1" />
+        </svg>
+      </span>
+      <span class="brand-text">
+        <span class="brand-name">PetPC</span>
+        <span class="brand-sub">控制中心</span>
+      </span>
+    </div>
+
+    <nav class="nav" aria-label="页面">
+      {#each pages as page (page.id)}
+        <button
+          class="nav-item"
+          class:is-active={page.id === current}
+          aria-current={page.id === current ? 'page' : undefined}
+          onclick={() => (current = page.id)}
+        >{page.label}</button>
+      {/each}
+    </nav>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="titles">
+        <h1>{view.label}</h1>
+        <p class="sub">{view.hint}</p>
+      </div>
+    </header>
+    <div class="content">
+      <view.component />
+    </div>
+  </div>
 </div>
 
 <style>
-  .shell { display: grid; grid-template-columns: 168px 1fr; height: 100vh; }
+  .shell {
+    display: grid;
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+    height: 100vh;
+    overflow: hidden;
+    background: var(--bg);
+  }
 
-  nav {
-    background: var(--bg-sunken);
-    border-right: 1px solid var(--line);
-    padding: var(--space-4) var(--space-2);
+  /* --- 侧栏 --- */
+  .rail {
     display: flex;
     flex-direction: column;
-    gap: var(--space-1);
-  }
-  h1 {
-    font-size: 13px;
-    letter-spacing: .08em;
-    color: var(--text-dim);
-    margin: 0 0 var(--space-3) var(--space-2);
+    gap: var(--space-2);
+    padding: var(--space-4) var(--space-3);
+    background: var(--bg-raised);
+    border-right: 1px solid var(--line);
+    min-height: 0;
   }
 
-  .rail-item {
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-2) var(--space-5);
+  }
+  .brand-mark {
+    width: 36px;
+    height: 36px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: var(--radius);
+    color: #fff;
+    background: linear-gradient(135deg, var(--p-500), var(--p-700));
+    box-shadow: 0 2px 8px rgba(124, 58, 237, 0.35);
+  }
+  .brand-mark svg { width: 21px; height: 21px; }
+  .brand-text { display: flex; flex-direction: column; min-width: 0; }
+  .brand-name {
+    font-size: var(--fs-md);
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+  .brand-sub {
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    color: var(--text-dim);
+  }
+
+  .nav { display: flex; flex-direction: column; gap: 2px; }
+  .nav-item {
     appearance: none;
     border: 0;
-    background: transparent;
-    color: var(--text-dim);
+    width: 100%;
     text-align: left;
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius-sm);
-    font: inherit;
-    cursor: pointer;
+    padding: 9px var(--space-3);
+    border-radius: var(--radius);
+    font-size: var(--fs-base);
+    font-weight: 500;
+    color: var(--text-dim);
+    background: transparent;
+    transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
   }
-  .rail-item:hover { color: var(--text); background: var(--bg-raised); }
-  .rail-item.active { color: var(--text); background: var(--bg-raised); }
+  .nav-item:hover { background: var(--bg-hover); color: var(--text); }
+  .nav-item.is-active {
+    background: var(--bg-active);
+    color: var(--accent);
+    font-weight: 600;
+  }
 
-  main { padding: var(--space-5); overflow-y: auto; }
+  /* --- 主区 --- */
+  .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+  .topbar {
+    flex: none;
+    height: var(--topbar-h);
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: 0 var(--space-6);
+    background: var(--bg-raised);
+    border-bottom: 1px solid var(--line);
+  }
+  .titles { display: flex; flex-direction: column; min-width: 0; }
+  .topbar h1 {
+    font-size: var(--fs-lg);
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    line-height: 1.2;
+    color: var(--text);
+  }
+  .sub {
+    font-size: var(--fs-xs);
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* The content area owns the padding and the scroll; a page that fills the window (插件) sets
+     `height: 100%` and scrolls its own columns instead, so the two never fight. */
+  .content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--space-6);
+  }
 </style>
+
+
+
