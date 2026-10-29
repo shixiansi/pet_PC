@@ -2098,6 +2098,21 @@ check(
     .join('; '),
 );
 
+// 上一条只比对 :root 里的令牌，所以它看不见"令牌改了、某条规则里还写着旧颜色的 rgba"。
+// 2026-10-29 就是这么漏的：强调色从 #4c8dff 换成紫罗兰，而右键菜单的 hover 里写的是
+// rgba(76,141,255,.2) —— 令牌全对，菜单还是蓝的，用户用一句「没变化是怎么回事」发现的。
+const staleAccent = [
+  /rgba?\(\s*76,\s*141,\s*255/i,
+  /rgba?\(\s*224,\s*85,\s*78/i,
+  /#4c8dff/i,
+  /#e0554e/i,
+].filter((re) => re.test(css.replace(/\/\*[\s\S]*?\*\//g, '')));
+check(
+  'the pet stylesheet has no leftovers of the palette it just left',
+  staleAccent.length === 0,
+  `still written out: ${staleAccent.map(String).join(', ')}`,
+);
+
 // --- the 市场 page: the catalogue is visible, and installing is not enabling -----------
 //
 // WHY THIS IS A GATE AND NOT ONLY A SMOKE TEST. The two failures worth catching here are both
