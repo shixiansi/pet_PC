@@ -2069,6 +2069,35 @@ check(
   'the scheme is not applied at boot, not saved, or no page can change it',
 );
 
+// --- 桌宠那一页与控制中心用同一套令牌 ------------------------------------------------
+//
+// 两个窗口是同一件产品的两面：控制中心用参考稿的**浅色**一侧，桌宠是桌面上的玻璃、用**深色**
+// 一侧。它们必须同意"强调色、正文、状态色各是什么"——否则下一次改配色只会改一半，而且没人会
+// 发现，因为这两个窗口永远不会出现在同一张截图里。
+const ccDarkBlock = (ccTokens.match(/:root\[data-theme='dark'\]\s*\{([\s\S]*?)\n\}/) || [])[1] || '';
+const tokenIn = (block, name) => {
+  const m = block.match(new RegExp('--' + name + ':\\s*([^;]+);'));
+  return m ? m[1].trim().toLowerCase() : '';
+};
+const petToken = (name) => tokenIn(css.slice(0, css.indexOf('}')), name);
+const sharedPairs = [
+  ['accent', 'accent'],
+  ['accent-hover', 'accent-hover'],
+  ['text', 'text'],
+  ['text-dim', 'text-dim'],
+  ['success', 'ok'],
+  ['warning', 'warn'],
+  ['danger', 'danger'],
+];
+const drifted = sharedPairs.filter(([ccName, petName]) => tokenIn(ccDarkBlock, ccName) !== petToken(petName));
+check(
+  'the pet page and the control center name the same colours',
+  sharedPairs.length > 0 && drifted.length === 0,
+  drifted
+    .map(([ccName, petName]) => `${petName}=${petToken(petName)} vs --${ccName}=${tokenIn(ccDarkBlock, ccName)}`)
+    .join('; '),
+);
+
 // --- the 市场 page: the catalogue is visible, and installing is not enabling -----------
 //
 // WHY THIS IS A GATE AND NOT ONLY A SMOKE TEST. The two failures worth catching here are both
