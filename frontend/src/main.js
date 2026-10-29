@@ -238,6 +238,11 @@ function applyLayout(layout) {
     const dark = layout.theme === 'dark';
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     if (els.menuThemeLabel) els.menuThemeLabel.textContent = dark ? '浅色' : '深色';
+    // And the mounted plugin frames, because they are opaque documents with their own
+    // stylesheet: the chat panel was open when the switch was flipped and stayed dark until
+    // the surface was re-opened. `?theme=` covers frames that mount later; this covers the
+    // ones already on screen.
+    pluginHost?.setTheme(dark ? 'dark' : 'light');
   }
 
   Object.assign(els.pet.style, {

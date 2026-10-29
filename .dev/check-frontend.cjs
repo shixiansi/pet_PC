@@ -478,6 +478,17 @@ check(
     /Theme: normalizeCardTheme\(a\.store\.Config\(\)\.CardTheme\)/.test(mainGo),
   'the theme cell, its action, the dark palette or Layout.Theme is missing',
 );
+// 插件帧的配色：三处都要有，少一处就是"点了主题、插件面板还是黑的"。插件文档是 opaque origin，
+// 看不见宿主的 CSS，所以契约是三条并行的通道（手册 §几何与主题）：?theme= 管首帧不闪、init.theme
+// 管握手、theme 消息管"已经挂着的帧"。用户在面板开着的时候切主题，靠的正是第三条。
+check(
+  'a plugin frame is told which scheme the window is in',
+  /\?theme=\$\{currentTheme\(\)\}/.test(pluginHostJs) &&
+    /theme: currentTheme\(\),/.test(pluginHostJs) &&
+    /sendTheme\(theme\)/.test(pluginHostJs) &&
+    /pluginHost\?\.setTheme\(/.test(mainJs),
+  'the frame URL, init.theme, the live theme message or its caller is missing',
+);
 // The grid fills the card Go sizes - the rows are fractions, not a pixel height of
 // their own. A grid that declared its own height would either come up short (a band
 // of empty card) or run over (clipped by the region, which reads as a torn edge).

@@ -45,8 +45,29 @@ const V = 1;
  */
 
 
+/**
+ * The scheme the page is currently painted in.
+ *
+ * Read from `<html data-theme>` rather than stored: that attribute is what style.css keys both
+ * palettes off, and applyLayout writes it from Layout.Theme - so there is exactly one answer to
+ * "which theme is it", and the frames are told that one.
+ */
+function currentTheme() {
+  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+}
+
 /** The message the plugin sends to announce itself, and the host's answer. */
 const TYPE_READY = 'ready';
+/**
+ * The host telling a mounted frame that the interface's colour scheme changed.
+ *
+ * A plugin document cannot see the host's CSS, so the scheme reaches it three ways, and the
+ * manual (docs/plugin-dev.md §几何与主题) names all three: ?theme= on the frame URL (so the
+ * first paint is already right - no flash), init.theme, and this message, for a frame that
+ * outlives a flip of the switch. A plugin that only reads the first is a plugin that looks
+ * wrong from the second click onward.
+ */
+const TYPE_THEME = 'theme';
 const TYPE_INIT = 'init';
 const TYPE_REQUEST = 'request';
 const TYPE_RESPONSE = 'response';
@@ -135,7 +156,10 @@ class PluginFrame {
     // URL, so the plugin's own script and stylesheet load (subresource fetches are
     // not origin-checked the way DOM access is), while the DOCUMENT stays opaque
     // because allow-same-origin is absent.
-    frame.setAttribute('src', `/plugin-asset/${this.pluginId}/${this.entry}`);
+    // `?theme=` is part of the contract, not decoration: the plugin puts it on `<html
+    // data-theme>` before its first paint, so a light window never shows a dark frame first.
+    // The asset route keys on `r.URL.Path` (main.go), so the query costs nothing.
+    frame.setAttribute('src', `/plugin-asset/${this.pluginId}/${this.entry}?theme=${currentTheme()}`);
     frame.dataset.pluginId = this.pluginId;
     frame.dataset.kind = this.kind;
     // The version the document came from. It is on the element as well as on the
@@ -164,6 +188,7 @@ class PluginFrame {
       permissions: this.permissions,
       granted: this.granted,
       surface,
+      theme: currentTheme(),
     };
   }
 
@@ -253,6 +278,18 @@ class PluginFrame {
   /** Removes the frame. */
   destroy() {
     this.el.remove();
+  }
+
+  /**
+   * Tells a MOUNTED frame that the interface's colour scheme changed.
+   *
+   * Only after the handshake: before it the plugin has not read anything yet, and its `init` (sent
+   * on `ready`) already carries the current theme - so posting now would be a message the plugin's
+   * handler has no reason to accept yet.
+   */
+  sendTheme(theme) {
+    if (!this.initialised) return;
+    this.post({ v: V, type: TYPE_THEME, theme });
   }
 }
 
@@ -452,6 +489,19 @@ export class PluginHost {
         return;
       }
     }
+  }
+
+  /**
+   * Tells every mounted frame which colour scheme the interface is in.
+   *
+   * Called from `applyLayout` (main.js) on every push, not only when the value changes: a frame
+   * that mounted between two pushes must still hear it, and `sendTheme` is a no-op before that
+   * frame's handshake - so "send it every time" is what makes "never miss it" true.
+   */
+  setTheme(theme) {
+    const value = theme === 'light' ? 'light' : 'dark';
+    for (const frame of this.surfaceFrames.values()) frame.sendTheme(value);
+    for (const frame of this.backgroundFrames.values()) frame.sendTheme(value);
   }
 
   /**
