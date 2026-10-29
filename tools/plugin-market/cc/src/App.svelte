@@ -5,6 +5,7 @@
   import Logs from './pages/Logs.svelte';
   import Preferences from './pages/Preferences.svelte';
   import Advanced from './pages/Advanced.svelte';
+  import { Theme } from './lib/bridge';
   import { themeState, toggleTheme } from './lib/theme.svelte';
 
   // Five pages, one level. Coopanion splits its settings into a normal mode and an
@@ -45,6 +46,21 @@
     { id: 'advanced', label: '高级', hint: '模型配置、数据目录与诊断报告', component: Advanced },
   ] as const;
 
+  // 另一个窗口也能改配色（桌宠右键菜单的「主题」），而 `Theme()` 只在挂载时读一次。窗口重新
+  // 获得焦点时再读一次：从桌宠切过来，第一眼就是对方刚设的那个方案——否则又会是"一个亮一个暗"，
+  // 只是这次原因变成了"这个窗口没刷新"。
+  $effect(() => {
+    const sync = () => {
+      void Theme().then((next) => {
+        const dark = next !== 'light';
+        if (themeState.current === (dark ? 'dark' : 'light')) return;
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        themeState.current = dark ? 'dark' : 'light';
+      }).catch(() => {});
+    };
+    window.addEventListener('focus', sync);
+    return () => window.removeEventListener('focus', sync);
+  });
   let current = $state<string>('start');
   const view = $derived(pages.find((p) => p.id === current) ?? pages[0]);
 </script>
