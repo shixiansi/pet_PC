@@ -68,7 +68,7 @@
           onclick={() => void setTheme('dark')}
         >深色</button>
       </div>
-      <span class="field-note">存在 <code>plugin-market.json</code> 里，下次打开还是它。</span>
+      <span class="field-note">两个窗口共用这一个设置（<code>theme.json</code>）：桌宠右键菜单的「主题」改的是同一份。</span>
     </div>
   </section>
 

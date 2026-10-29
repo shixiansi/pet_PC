@@ -475,8 +475,30 @@ check(
     /document\.documentElement\.dataset\.theme = dark \? 'dark' : 'light'/.test(mainJs) &&
     /:root\[data-theme='dark'\]/.test(css) &&
     /func \(a \*App\) ToggleCardTheme\(\)/.test(mainGo) &&
-    /Theme: normalizeCardTheme\(a\.store\.Config\(\)\.CardTheme\)/.test(mainGo),
+    /Theme: a\.panelTheme\(\)/.test(mainGo),
   'the theme cell, its action, the dark palette or Layout.Theme is missing',
+);
+// 配色是**一个**设置，两个窗口共用一份文件（internal/store/theme.go）。
+//
+// 2026-10-29 的教训：先做成"各窗口一个开关"（桌宠 settings.json 的 cardTheme、控制中心
+// plugin-market.json 的 theme），于是右键菜单是深色、设置页是浅色，用户原话「一个亮一个暗的，
+// 像是独立的」。这条检查盯的就是别再分家：两边都必须走 store 的共享文件，而且谁都不许再长出
+// 自己的开关字段。
+const themeGo = fs.readFileSync(path.join(root, 'internal/store/theme.go'), 'utf8');
+const marketMarketGo = fs.readFileSync(path.join(root, 'tools/plugin-market/market.go'), 'utf8');
+// Inline read of app.go: petAppGo is declared further down, and reaching it from here is the
+// temporal-dead-zone crash that comment above warns about.
+const themePetAppGo = fs.readFileSync(path.join(root, 'app.go'), 'utf8');
+check(
+  'the colour scheme is one value both windows read and write',
+  /func WritePanelTheme\(/.test(themeGo) &&
+    /func ReadPanelTheme\(/.test(themeGo) &&
+    /store\.WritePanelTheme\(/.test(themePetAppGo) &&
+    /store\.ReadPanelTheme\(/.test(themePetAppGo) &&
+    /store\.WritePanelTheme\(/.test(marketMarketGo) &&
+    /store\.ReadPanelTheme\(/.test(marketMarketGo) &&
+    !/CardTheme string/.test(fs.readFileSync(path.join(root, 'internal/store/store.go'), 'utf8')),
+  'a window kept its own switch, or one of them stopped using the shared theme file',
 );
 // 插件帧的配色：三处都要有，少一处就是"点了主题、插件面板还是黑的"。插件文档是 opaque origin，
 // 看不见宿主的 CSS，所以契约是三条并行的通道（手册 §几何与主题）：?theme= 管首帧不闪、init.theme

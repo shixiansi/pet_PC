@@ -888,7 +888,7 @@ func (a *App) applyWindowGeometry() (Layout, error) {
 		Scale:        s,
 		// Read on every layout, not cached at startup: the menu flips it, and the next push
 		// has to carry the new value or the cards would change only after a restart.
-		Theme: normalizeCardTheme(a.store.Config().CardTheme),
+		Theme: a.panelTheme(),
 	}
 	if hasBubble {
 		// The bubble is reported in CSS pixels from the same physical rectangle
@@ -1455,33 +1455,28 @@ func (a *App) SetSnapToEdge(enabled bool) (State, error) {
 	return a.GetState()
 }
 
-// 卡片配色的两个值。空值按 light 处理：cardTheme 这个字段比 settings.json 年轻。
-const (
-	cardThemeLight = "light"
-	cardThemeDark  = "dark"
-)
-
-// normalizeCardTheme maps anything that is not "dark" onto "light" - the mirror of the control
-// center's own normalizeTheme, which answers "dark" for anything that is not "light". Each window's
-// fallback is the scheme that matches the OTHER window, so an unreadable value never leaves the two
-// looking like different products.
-func normalizeCardTheme(theme string) string {
-	if strings.EqualFold(strings.TrimSpace(theme), cardThemeDark) {
-		return cardThemeDark
+// panelTheme is the scheme BOTH windows draw in, read from the file the two of them share
+// (internal/store/theme.go). Nothing is cached here: the value can be changed by the control
+// center at any moment, and a cached copy is how the menu and the settings page end up disagreeing.
+func (a *App) panelTheme() string {
+	if theme := store.ReadPanelTheme(a.store.Dir()); theme != "" {
+		return theme
 	}
-	return cardThemeLight
+	// Nothing stored yet: light, which is the scheme the control center's window is designed
+	// around and therefore the one the pet's cards match on a fresh install.
+	return store.ThemeLight
 }
 
-// SetCardTheme switches the pet's own cards between the light and the dark scheme.
+// SetCardTheme switches the scheme for BOTH windows (see panelTheme).
 //
 // It answers with the whole State like the other setters: the theme travels in Layout.Theme, so
 // the caller only has to re-apply the layout it already knows how to apply.
 func (a *App) SetCardTheme(theme string) (State, error) {
-	next := normalizeCardTheme(theme)
-	if _, err := a.store.UpdateConfig(func(c *store.Config) { c.CardTheme = next }); err != nil {
+	next := store.NormalizeTheme(theme)
+	if err := store.WritePanelTheme(a.store.Dir(), next); err != nil {
 		return State{}, err
 	}
-	a.log.Infof("ui", "卡片配色切成 %s", next)
+	a.log.Infof("ui", "配色切成 %s（桌宠与控制中心共用）", next)
 	return a.GetState()
 }
 
@@ -1490,9 +1485,9 @@ func (a *App) SetCardTheme(theme string) (State, error) {
 // The menu cell's label is rendered FROM the theme ("深色" while the cards are light, i.e. it names
 // the action), so the page needs to know the result without asking again.
 func (a *App) ToggleCardTheme() (string, error) {
-	next := cardThemeDark
-	if normalizeCardTheme(a.store.Config().CardTheme) == cardThemeDark {
-		next = cardThemeLight
+	next := store.ThemeDark
+	if a.panelTheme() == store.ThemeDark {
+		next = store.ThemeLight
 	}
 	if _, err := a.SetCardTheme(next); err != nil {
 		return "", err

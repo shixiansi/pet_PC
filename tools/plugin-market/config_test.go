@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"PetPC/internal/plugins"
+	"PetPC/internal/store"
 )
 
 // This file covers the market program's OWN settings file.
@@ -218,31 +219,36 @@ func TestSaveMarketConfigLeavesNoTempFiles(t *testing.T) {
 	}
 }
 
-// The colour scheme is remembered in THIS program's settings file - not in the
-// webview's own storage - and anything that is not "light" reads back as dark.
+// The colour scheme is ONE preference for BOTH windows, stored in the file the two programs share
+// (internal/store/theme.go) - not in this program's config, and not in the webview's storage.
 //
-// Both halves matter. Persisting it here is what makes the appearance deterministic
-// for the real-window gate (it seeds this file); normalising is what keeps a
-// hand-edited or future value from leaving the window in a scheme no rule in the
-// stylesheet knows.
-func TestThemeIsRememberedAndNormalised(t *testing.T) {
+// This test used to assert the opposite (the value lives in plugin-market.json, and anything that
+// is not "light" reads back as dark). That arrangement is what let the pet's menu and this window
+// disagree: each had its own switch in its own file. What matters now:
+//
+//   - a fresh install answers LIGHT from both programs, so they cannot start out different;
+//   - a flip is written to the shared file, where the other program reads it;
+//   - an unknown value lands on the default (light) rather than on the other extreme, because
+//     "unreadable" means "no opinion", and no opinion is the default.
+func TestThemeIsSharedAndNormalised(t *testing.T) {
 	m := newTestMarket(t, "")
 
-	// A settings file written before themes existed has no value, and that reads as
-	// the scheme this window shipped with.
-	if got := m.Theme(); got != themeDark {
-		t.Fatalf("default theme = %q, want %q", got, themeDark)
+	// A settings file written before the scheme was shared has no value at all: both windows
+	// answer the default, which is the light scheme they are designed around.
+	if got := m.Theme(); got != themeLight {
+		t.Fatalf("default theme = %q, want %q", got, themeLight)
 	}
 
-	if err := m.SetTheme("light"); err != nil {
+	if err := m.SetTheme("dark"); err != nil {
 		t.Fatalf("SetTheme: %v", err)
 	}
-	if got := m.Theme(); got != themeLight {
-		t.Fatalf("theme after set = %q, want %q", got, themeLight)
+	if got := m.Theme(); got != themeDark {
+		t.Fatalf("theme after set = %q, want %q", got, themeDark)
 	}
-	// It is in the FILE, not only in memory: a restart has to open in it.
-	if got := loadMarketConfig(m.cfgPath, m.dataDir).Theme; got != themeLight {
-		t.Fatalf("stored theme = %q, want %q", got, themeLight)
+	// It is in the SHARED file, not only in memory: the pet reads the same file, and a restart of
+	// either program has to open in it.
+	if got := store.ReadPanelTheme(m.dataDir); got != themeDark {
+		t.Fatalf("stored theme = %q, want %q", got, themeDark)
 	}
 
 	// Case and surrounding space are forgiven...
@@ -254,13 +260,20 @@ func TestThemeIsRememberedAndNormalised(t *testing.T) {
 			t.Fatalf("SetTheme(%q) -> %q, want %q", in, got, themeLight)
 		}
 	}
-	// ...anything else is dark.
-	for _, in := range []string{"", "purple", "DARK"} {
+	// ...an explicit dark is dark...
+	if err := m.SetTheme("DARK"); err != nil {
+		t.Fatalf("SetTheme(DARK): %v", err)
+	}
+	if got := m.Theme(); got != themeDark {
+		t.Fatalf("SetTheme(DARK) -> %q, want %q", got, themeDark)
+	}
+	// ...and anything else is the default, not the opposite end.
+	for _, in := range []string{"", "purple"} {
 		if err := m.SetTheme(in); err != nil {
 			t.Fatalf("SetTheme(%q): %v", in, err)
 		}
-		if got := m.Theme(); got != themeDark {
-			t.Fatalf("SetTheme(%q) -> %q, want %q", in, got, themeDark)
+		if got := m.Theme(); got != themeLight {
+			t.Fatalf("SetTheme(%q) -> %q, want the default %q", in, got, themeLight)
 		}
 	}
 }

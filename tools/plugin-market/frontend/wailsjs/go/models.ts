@@ -815,7 +815,6 @@ export namespace store {
 	    position?: Position;
 	    snapToEdge: boolean;
 	    edgeMargin: number;
-	    cardTheme?: string;
 	    autostart: boolean;
 	    marketBaseUrl: string;
 	    globalHotkeys: boolean;
@@ -853,7 +852,6 @@ export namespace store {
 	        this.position = this.convertValues(source["position"], Position);
 	        this.snapToEdge = source["snapToEdge"];
 	        this.edgeMargin = source["edgeMargin"];
-	        this.cardTheme = source["cardTheme"];
 	        this.autostart = source["autostart"];
 	        this.marketBaseUrl = source["marketBaseUrl"];
 	        this.globalHotkeys = source["globalHotkeys"];

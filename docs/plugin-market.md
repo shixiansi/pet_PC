@@ -867,3 +867,31 @@ $t = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes('build\bin\PetPCPlu
   因为用户同时开两个并同时点安装的窗口极小，而为此引入文件锁的复杂度不成比例。
 - **不做**：评分/评论/下载量统计、自动更新与版本回滚、插件签名与非对称校验、
   多市场聚合、插件间依赖解析、GitHub Pages 托管市场页、把 exe 作为 Release 附件分发。
+
+### 2.14 配色是**一个**设置，两个窗口共用（2026-10-29）
+
+用户原话：「怎么右键和设置界面的主题不统一的，一个亮一个暗的，像是独立的」。
+
+当时确实是这样，而且是我自己造出来的：上一轮给桌宠加了 `settings.json` 的 `cardTheme`、控制中心
+沿用 `plugin-market.json` 的 `theme`——**两个开关、两个文件**。翻一个，另一个不动，于是右键菜单
+深色、设置页浅色。
+
+现在配色住在**两个程序共用的** `theme.json`（`internal/store/theme.go`）：
+
+| | 写 | 读 |
+|---|---|---|
+| 桌宠 | 右键菜单的「主题」→ `store.WritePanelTheme` | `Layout.Theme`（每次 layout 都读，不缓存） |
+| 控制中心 | 「偏好」页 / 顶栏按钮 → `store.WritePanelTheme` | `Theme()`（挂载时读一次，写回后自己再读） |
+
+三条规矩：
+
+1. **一个值一份文件，两个程序都能写**。最后写的人赢——这是开关，不是文档，两次写都是单键的
+   read-modify-write，最坏情况是翻转晚一拍。
+2. **没有文件时不许猜**：`ReadPanelTheme` 对缺失的返回 `""`，让调用方回落到自己的旧字段一次
+   （控制中心的 `plugin-market.json:theme`）。默认值是**浅色**，两边同一个默认，所以新装的机器
+   不可能一上来就一个亮一个暗。
+3. **认不出来就回到默认**，不是回到另一端：`store.NormalizeTheme` 把"不是 dark"的一律当 light。
+   两个程序用同一个函数，否则同一个乱值在两个窗口里会变成两种配色。
+
+门禁：`the colour scheme is one value both windows read and write`（两边都得走 store 的共享文件，
+且谁都不许再长出 `CardTheme` 这种自己的开关字段）。

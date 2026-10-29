@@ -441,36 +441,56 @@ func (m *Market) SelectedID() string {
 	return m.cfg.LastSelectedID
 }
 
-// Theme returns the remembered colour scheme: "dark" or "light". An empty value
-// means the file predates themes, and empty is DARK - the scheme this window
-// shipped with - so an existing settings file keeps opening exactly as it did.
+// Theme answers with the scheme BOTH windows draw in.
+//
+// It is read from the file the two programs share (internal/store/theme.go), not from this
+// program's own config, because the pet's right-click menu can change it as well: one value with
+// two owners in two files is how the menu ended up dark while this window was light (reported
+// 2026-10-29 as 一个亮一个暗的，像是独立的). m.cfg.Theme is only the fallback for an install that
+// predates the shared file; the first flip from either window writes it and this field stops
+// being consulted.
 func (m *Market) Theme() string {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	return normalizeTheme(m.cfg.Theme)
-}
-
-// SetTheme remembers the colour scheme.
-//
-// An unknown value is normalised to dark rather than refused: a look must never be
-// able to fail a save and leave the window in a scheme the file does not name. The
-// write goes through the same saveMarketConfig as every other preference, so the
-// pet's config file is still never touched.
-func (m *Market) SetTheme(name string) error {
-	m.mu.Lock()
-	m.cfg.Theme = normalizeTheme(name)
-	cfg := m.cfg
+	legacy := strings.TrimSpace(m.cfg.Theme)
+	dir := m.dataDir
 	m.mu.Unlock()
-	return saveMarketConfig(m.cfgPath, cfg)
+	if theme := store.ReadPanelTheme(dir); theme != "" {
+		return theme
+	}
+	// Nothing shared yet. An install that predates the shared file keeps whatever its own config
+	// said; one with no opinion at all gets the default, which is LIGHT - the same answer the pet's
+	// layout gives - so a fresh install cannot start with the two windows disagreeing.
+	if legacy == "" {
+		return store.ThemeLight
+	}
+	return store.NormalizeTheme(legacy)
 }
 
-// normalizeTheme maps anything that is not "light" onto "dark".
+// SetTheme stores the colour scheme for both windows.
+//
+// An unknown value is normalised rather than refused: a look must never be able to fail a save.
+// It writes the SHARED file - the pet picks the change up on its next layout push - and it does
+// not rewrite either program's config, so nothing else in them can be clobbered by a colour.
+func (m *Market) SetTheme(name string) error {
+	theme := store.NormalizeTheme(name)
+	m.mu.Lock()
+	dir := m.dataDir
+	m.cfg.Theme = theme
+	m.mu.Unlock()
+	return store.WritePanelTheme(dir, theme)
+}
+
+// normalizeTheme maps anything that is not "light" onto "dark" - the rule this program's own
+// field used before the scheme became shared. Only m.cfg.Theme reads are left on it (see Theme),
+// and every write goes through store.NormalizeTheme so an unknown value cannot mean "dark" here
+// and "light" in the pet.
 func normalizeTheme(name string) string {
 	if strings.EqualFold(strings.TrimSpace(name), themeLight) {
 		return themeLight
 	}
 	return themeDark
 }
+
 
 // usageLine reads the usage counter the pet keeps for this plugin.
 //
