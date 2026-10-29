@@ -127,6 +127,10 @@ func (m *Market) startup(ctx context.Context) {
 	// 日志 page can be told apart from a quiet one.
 	m.log.Infof("market", "启动：数据目录 %s，日志级别 %s，日志文件 %s",
 		m.dataDir, m.log.Level(), m.log.Path())
+	// The colour scheme is shared with the pet, which can change it while this window is open.
+	// Handing over the value the window is about to open with is what keeps the first tick from
+	// re-announcing it.
+	m.startThemeWatch(m.Theme())
 }
 
 // shutdown exists so the window's lifecycle is explicit; there is nothing to

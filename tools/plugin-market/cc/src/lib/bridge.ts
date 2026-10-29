@@ -30,6 +30,7 @@
  * field name the host does not send is now a `npm run check` error.
  */
 import * as host from '../../../frontend/wailsjs/go/main/Market';
+import { EventsOn } from '../../../frontend/wailsjs/runtime/runtime';
 import { desktop, main, plugins, store } from '../../../frontend/wailsjs/go/models';
 
 const DEV = import.meta.env.DEV;
@@ -699,3 +700,17 @@ function fakeLog(q: LogQuery): LogView {
 }
 
 export const LogTail = (q: LogQuery): Promise<LogView> => (DEV ? later(fakeLog(q)) : host.LogTail(q));
+// --- 另一个窗口改了配色 ------------------------------------------------------------
+//
+// The scheme is one file both programs write (internal/store/theme.go). When the pet's right-click
+// menu flips it, THIS window never loses focus and never re-mounts, so it would keep drawing the old
+// scheme until it was reopened - reported as 「在控制面板打开的情况下…不会实时改变」. The host polls
+// that file (tools/plugin-market/theme_watch.go) and emits eventMarketTheme; this is the listener.
+//
+// The dev stub answers with a no-op disposer: there is no second window in the browser, and a fake
+// that fired the event would make the smoke test unable to tell "the listener works" from "the stub
+// called it".
+export const OnTheme = (cb: (theme: string) => void): (() => void) => {
+  if (DEV) return () => {};
+  return EventsOn('market:theme', (theme: string) => cb(theme === 'light' ? 'light' : 'dark'));
+};

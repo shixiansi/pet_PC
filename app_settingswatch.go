@@ -70,6 +70,10 @@ func (a *App) startSettingsWatch() {
 		appliedScale := cfg.PetScale
 		appliedHotkeys := cfg.GlobalHotkeys
 		appliedImage := a.store.ImagePath()
+		// The colour scheme is shared with the control center (internal/store/theme.go), which
+		// can flip it at any moment. Same rule as the scale: a fresh value on disk is not an
+		// applied change - the page has to be told, and a layout push is what tells it.
+		appliedTheme := a.panelTheme()
 		ticker := time.NewTicker(settingsWatchInterval)
 		defer ticker.Stop()
 		for {
@@ -98,6 +102,13 @@ func (a *App) startSettingsWatch() {
 				// re-apply, there is mark-up to repaint. The control center is where it is
 				// now chosen, so the pet has to be told; the event carries the URL so the
 				// page does not have to guess when to ask again.
+				if theme := a.panelTheme(); theme != appliedTheme {
+					appliedTheme = theme
+					if l, err := a.GetLayout(); err == nil {
+						a.emitEvent("pet:layout", l)
+					}
+					a.log.Infof("settings", "外部改动了配色，已推送布局（%s）", theme)
+				}
 				if img := a.store.ImagePath(); img != appliedImage {
 					appliedImage = img
 					a.emitEvent(eventPetImage, map[string]any{

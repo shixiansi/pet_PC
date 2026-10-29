@@ -5,7 +5,7 @@
   import Logs from './pages/Logs.svelte';
   import Preferences from './pages/Preferences.svelte';
   import Advanced from './pages/Advanced.svelte';
-  import { Theme } from './lib/bridge';
+  import { Theme, OnTheme } from './lib/bridge';
   import { themeState, toggleTheme } from './lib/theme.svelte';
 
   // Five pages, one level. Coopanion splits its settings into a normal mode and an
@@ -58,8 +58,24 @@
         themeState.current = dark ? 'dark' : 'light';
       }).catch(() => {});
     };
+    // Two sources, because they cover different situations:
+    //   - the host's `market:theme` event: the pet's menu changed the shared file while this
+    //     window sat open and focused - the case that was reported as "not real time";
+    //   - `focus`: a belt for when the event was missed (the window was busy, or the watcher
+    //     started after the flip).
+    // A timer in this page was the first attempt and it hung the render smoke test: a page with a
+    // timer that never stops is a page that never settles.
     window.addEventListener('focus', sync);
-    return () => window.removeEventListener('focus', sync);
+    const off = OnTheme((theme) => {
+      const dark = theme !== 'light';
+      if (themeState.current === (dark ? 'dark' : 'light')) return;
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      themeState.current = dark ? 'dark' : 'light';
+    });
+    return () => {
+      window.removeEventListener('focus', sync);
+      off();
+    };
   });
   let current = $state<string>('start');
   const view = $derived(pages.find((p) => p.id === current) ?? pages[0]);
