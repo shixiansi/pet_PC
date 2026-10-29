@@ -569,7 +569,7 @@
            `已装插件 · v4` for the same reason, and this rewrite dropped it.
            Bump the number when the page's shape changes, not on every edit. -->
       <p class="list-head">
-        <span>已装插件 · v5</span>
+        <span>已装插件 · v6</span>
         <span class="count">{loaded ? rows.length + ' 个' : ''}</span>
       </p>
       {#if !loaded}
@@ -910,7 +910,8 @@
   .list {
     background: var(--bg-raised);
     border: 1px solid var(--line);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--sh-xs);
     padding: var(--space-2);
     overflow-y: auto;
     min-height: 0;
@@ -920,13 +921,21 @@
   }
   .list-head {
     margin: 0 0 var(--space-2);
-    padding: 0 var(--space-2);
+    padding: var(--space-1) var(--space-2);
     color: var(--text-dim);
     font-size: 11px;
+    letter-spacing: 0.04em;
     display: flex;
+    align-items: center;
     justify-content: space-between;
   }
-  .count { font-family: var(--font-mono); }
+  /* 计数做成一枚软底 pill：它是这一列唯一会变的数字，值得有个形状。 */
+  .count {
+    font-family: var(--font-mono);
+    background: var(--bg-hover);
+    border-radius: var(--radius-full);
+    padding: 1px var(--space-2);
+  }
 
   .row {
     appearance: none;
@@ -934,17 +943,22 @@
     background: transparent;
     color: var(--text);
     font: inherit;
+    font-size: var(--fs-base);
+    font-weight: 550;
     text-align: left;
-    padding: var(--space-2);
-    border-radius: var(--radius-sm);
+    padding: 9px var(--space-3);
+    border-radius: var(--radius);
     cursor: pointer;
     display: grid;
     grid-template-columns: 8px 1fr auto;
     align-items: center;
     gap: var(--space-2);
+    transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
   }
-  .row:hover { background: var(--bg-sunken); }
-  .row.selected { border-color: var(--accent-dim); background: var(--bg-sunken); }
+  .row:hover { background: var(--bg-hover); }
+  /* 选中行与左栏的当前页说同一套语言：浅紫底 + 紫字。它比"描一圈浅紫"更容易一眼认出。 */
+  .row.selected { background: var(--bg-active); color: var(--accent); font-weight: 600; }
+  .row.selected .row-meta { color: var(--accent); }
   .row.is-off .row-name { color: var(--text-dim); }
 
   /* The state dot exists so the list can be SCANNED: which of these is off, which one has a
@@ -989,13 +1003,16 @@
     gap: var(--space-3);
     background: var(--bg-raised);
     border: 1px solid var(--line);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--sh-xs);
     padding: var(--space-3) var(--space-4);
   }
   .who { min-width: 0; }
   .identity h2 {
     margin: 0;
-    font-size: 15px;
+    font-size: var(--fs-xl);
+    font-weight: 650;
+    letter-spacing: -0.02em;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1028,8 +1045,8 @@
 
   .chip {
     appearance: none;
-    border: 1px solid var(--line);
-    background: var(--bg-sunken);
+    border: 1px solid var(--border-strong);
+    background: var(--bg-raised);
     color: var(--text);
     font: inherit;
     font-size: 12px;
@@ -1086,7 +1103,8 @@
     display: flex;
     background: var(--bg-raised);
     border: 1px solid var(--line);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--sh-xs);
     /* The plugin document paints its own background edge to edge; this only clips it to the
        card's corners. Nothing here is a popover host, so clipping costs nothing. */
     overflow: hidden;

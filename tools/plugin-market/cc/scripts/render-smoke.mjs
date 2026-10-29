@@ -154,8 +154,12 @@ const chatFrame = frame();
 check('插件：选中后挂的是一个帧', Boolean(chatFrame));
 check('插件：帧的 sandbox 恰好是 allow-scripts（没有 allow-same-origin）',
   chatFrame?.getAttribute('sandbox') === 'allow-scripts');
-check('插件：帧的地址是 /plugin-asset/<id>/<entry>?theme=',
-  (chatFrame?.getAttribute('src') || '') === '/plugin-asset/com.shixiansi.plugin-chat/index.html?theme=dark');
+// 帧带的方案 = 窗口当前的方案，而不是写死的 dark：这一轮起 data-theme 真的会被应用
+// （main.ts 在 mount 之前读宿主存的值），所以这里跟着它断言。
+const scheme = () => w.document.documentElement.dataset.theme;
+check('插件：帧的地址是 /plugin-asset/<id>/<entry>?theme=<窗口的方案>',
+  (chatFrame?.getAttribute('src') || '') ===
+    '/plugin-asset/com.shixiansi.plugin-chat/index.html?theme=' + scheme());
 check('插件：权限文案来自 []LabelPair', text().includes('调用你已配置的大模型（流式返回）'));
 check('插件：权限计数来自 Granted（4/5）', text().includes('4/5'));
 
@@ -275,7 +279,7 @@ check('插件：声明了浮层面的插件也在这里挂界面（这是上一�
 check('插件：它的帧也走同一个沙箱与 URL 约定',
   pomoFrame?.getAttribute('sandbox') === 'allow-scripts' &&
     (pomoFrame?.getAttribute('src') || '') ===
-      '/plugin-asset/com.shixiansi.plugin-pomodoro/panel.html?theme=dark');
+      '/plugin-asset/com.shixiansi.plugin-pomodoro/panel.html?theme=' + scheme());
 check('插件：番茄钟现在有声明出来的设置项，所以有「设置」', Boolean(chip('设置')));
 chip('设置')?.click();
 await settle();
@@ -415,6 +419,28 @@ searchBox.value = '';
 searchBox.dispatchEvent(new w.Event('input', { bubbles: true }));
 await settle();
 
+// --- the 偏好 page, and the colour scheme it owns --------------------------------------
+//
+// The theme was dead code until this round: `SetTheme` existed and was tested on the Go side, and
+// nothing in the interface ever called it, so the window always rendered whatever `tokens.css`
+// defaulted to. The assertions are about the two halves that make it real - the attribute that CSS
+// and the plugin frames read, and the value that goes back to the file.
+await open('偏好');
+check('偏好：主题是一组分段控件，当前值就是 <html data-theme>',
+  text().includes('浅色') && text().includes('深色') &&
+    w.document.documentElement.dataset.theme === 'light');
+check('偏好：数据目录来自 DataDir()', text().includes('C:\\fake\\PetPC'));
+
+const seg = (label) => [...w.document.querySelectorAll('button')].find((b) => b.textContent.trim() === label);
+seg('深色')?.click();
+await settle();
+check('偏好：点「深色」之后 <html data-theme> 真的变了',
+  w.document.documentElement.dataset.theme === 'dark');
+check('偏好：顶栏那颗按钮跟着翻（两处共用一份状态）',
+  Boolean(w.document.querySelector('.theme-btn')?.getAttribute('aria-label')?.includes('浅色')));
+seg('浅色')?.click();
+await settle();
+check('偏好：再点回来', w.document.documentElement.dataset.theme === 'light');
 await open('高级');
 check('高级：模型配置来自 store.Config', text().includes('deepseek') && text().includes('deepseek-chat'));
 check('高级：密钥状态来自 HostKey()', text().includes('已设置（DPAPI 密文）') && text().includes('llm-key.bin'));

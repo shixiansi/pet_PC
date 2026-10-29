@@ -573,6 +573,23 @@ export const SetReminderDisplay = (items: number, autoHideSec: number): Promise<
 
 export const DataDir = (): Promise<string> => (DEV ? later('C:\\fake\\PetPC') : host.DataDir());
 
+// --- 外观：配色 ----------------------------------------------------------------
+//
+// The value lives in `plugin-market.json` (the host's own config file - this program never writes
+// the pet's), and the WINDOW reads it back at boot: `main.ts` puts it on
+// `<html data-theme>` before mounting, which is what `tokens.css` keys on and what the plugin
+// frames read to pick their own scheme. Until this existed the binding was dead: `SetTheme` was
+// written, tested on the Go side, and nothing in the interface ever called it.
+let FAKE_THEME = 'light';
+export const Theme = (): Promise<string> => (DEV ? later(FAKE_THEME) : host.Theme());
+export const SetTheme = (name: string): Promise<void | unknown> => {
+  if (!DEV) return host.SetTheme(name);
+  // The host normalises anything that is not "light" onto "dark"; the fake does the same, or a
+  // page that passed garbage would look correct here and flip to dark on the real thing.
+  FAKE_THEME = name === 'light' ? 'light' : 'dark';
+  return later(undefined);
+};
+
 // --- 高级页的诊断面 --------------------------------------------------------------
 
 export type HostKeyState = main.HostKey;

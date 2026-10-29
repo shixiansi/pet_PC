@@ -1,6 +1,8 @@
 import { mount } from 'svelte';
 import './app.css';
 import App from './App.svelte';
+import { Theme } from './lib/bridge';
+import { syncThemeState } from './lib/theme.svelte';
 
 // Svelte 5 mounts from an explicit call rather than the legacy `new App({target})`.
 // The target is required to exist: index.html owns the element, and a silent
@@ -29,4 +31,29 @@ window.addEventListener('unhandledrejection', (e) =>
   banner('unhandledrejection: ' + ((e.reason && (e.reason.stack || e.reason.message)) || e.reason)),
 );
 
+// The colour scheme has to be on <html> BEFORE the first paint: `tokens.css` keys every colour off
+// `data-theme`, and the plugin frames read the same attribute to pick theirs. Applying it after
+// mount paints the wrong scheme for a frame; never applying it - which is what happened until now,
+// the binding existed and nothing called it - leaves the window on the stylesheet's default
+// whatever the user picked.
+//
+// TIMED OUT on purpose: a Wails binding that never settles would otherwise hold the window on a
+// blank page for ever, and that is a worse failure than starting in the wrong scheme.
+async function applyStoredTheme() {
+  const asked = Promise.race([
+    Theme(),
+    new Promise<string>((_, reject) => setTimeout(() => reject(new Error('theme 没回应')), 1500)),
+  ]);
+  let theme = 'dark';
+  try {
+    theme = (await asked) === 'light' ? 'light' : 'dark';
+  } catch {
+    // No answer means no preference: the host's own normalizeTheme answers "dark" for anything
+    // that is not "light", so this is the same answer the file would have given.
+  }
+  document.documentElement.dataset.theme = theme;
+  syncThemeState();
+}
+
+await applyStoredTheme();
 mount(App, { target });

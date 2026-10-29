@@ -3,7 +3,9 @@
   import Plugins from './pages/Plugins.svelte';
   import Market from './pages/Market.svelte';
   import Logs from './pages/Logs.svelte';
+  import Preferences from './pages/Preferences.svelte';
   import Advanced from './pages/Advanced.svelte';
+  import { themeState, toggleTheme } from './lib/theme.svelte';
 
   // Five pages, one level. Coopanion splits its settings into a normal mode and an
   // advanced mode; the pet is small enough that a single rail is honest.
@@ -39,6 +41,7 @@
     { id: 'plugins', label: '插件', hint: '已装插件的启停、权限、设置与界面', component: Plugins },
     { id: 'market', label: '市场', hint: '插件源上有什么，能装与能更新', component: Market },
     { id: 'logs', label: '日志', hint: '两个程序写下的日志，按等级与子系统筛', component: Logs },
+    { id: 'preferences', label: '偏好', hint: '这个窗口的配色，以及数据放在哪', component: Preferences },
     { id: 'advanced', label: '高级', hint: '模型配置、数据目录与诊断报告', component: Advanced },
   ] as const;
 
@@ -87,6 +90,27 @@
       <div class="titles">
         <h1>{view.label}</h1>
         <p class="sub">{view.hint}</p>
+      </div>
+      <!-- 配色随时可达：偏好页有同一件事的分段控件，而这一颗按钮是为了"不用先走过去再说"。 -->
+      <div class="top-actions">
+        <button
+          type="button"
+          class="theme-btn"
+          onclick={() => void toggleTheme()}
+          title={themeState.current === 'light' ? '切到深色' : '切到浅色'}
+          aria-label={themeState.current === 'light' ? '切到深色' : '切到浅色'}
+        >
+          {#if themeState.current === 'light'}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M20.5 14.3A8.5 8.5 0 0 1 9.7 3.5 8.5 8.5 0 1 0 20.5 14.3Z" />
+            </svg>
+          {:else}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <circle cx="12" cy="12" r="4.2" />
+              <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4" />
+            </svg>
+          {/if}
+        </button>
       </div>
     </header>
     <div class="content">
@@ -195,6 +219,23 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  .top-actions { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); }
+  .theme-btn {
+    appearance: none;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    background: var(--bg-raised);
+    color: var(--text-dim);
+    transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease),
+      border-color var(--dur-1) var(--ease);
+  }
+  .theme-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-strong); }
+  .theme-btn svg { width: 17px; height: 17px; }
 
   /* The content area owns the padding and the scroll; a page that fills the window (插件) sets
      `height: 100%` and scrolls its own columns instead, so the two never fight. */

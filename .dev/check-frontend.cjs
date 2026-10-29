@@ -2049,6 +2049,26 @@ check(
   'the report reads DEBUG lines, so copying it can carry the conversation',
 );
 
+// --- 配色：存得住、开机就生效、两处都能改 ----------------------------------------------
+//
+// The theme binding existed on the Go side for a while and NOTHING called it: `SetTheme` was
+// tested and the window always rendered `tokens.css`'s default. This pins the three links that
+// make it real - the boot-time application, the write, and the fact that the pages which offer it
+// actually reach the binding.
+const ccMainTs = fs.readFileSync(path.join(root, 'tools/plugin-market/cc/src/main.ts'), 'utf8');
+const ccPrefsPage = fs.readFileSync(path.join(root, 'tools/plugin-market/cc/src/pages/Preferences.svelte'), 'utf8');
+check(
+  'the window applies the stored colour scheme before mounting, and can change it',
+  /await applyStoredTheme\(\)/.test(ccMainTs) &&
+    /document\.documentElement\.dataset\.theme = theme/.test(ccMainTs) &&
+    /export const Theme = /.test(ccBridge) &&
+    /export const SetTheme = /.test(ccBridge) &&
+    /id: 'preferences', label: '偏好'/.test(ccApp) &&
+    /setTheme\('dark'\)/.test(ccPrefsPage) &&
+    /setTheme\('light'\)/.test(ccPrefsPage),
+  'the scheme is not applied at boot, not saved, or no page can change it',
+);
+
 // --- the 市场 page: the catalogue is visible, and installing is not enabling -----------
 //
 // WHY THIS IS A GATE AND NOT ONLY A SMOKE TEST. The two failures worth catching here are both
