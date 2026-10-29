@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Frontend behaviour harness.
  *
  * Loads the REAL html, CSS and JS modules in a real browser engine against a
@@ -105,7 +105,7 @@ ${markup}
     'Quit', 'Ready', 'RemindNow', 'ResetPetImage',
     'ResetToDefaultPosition',
     'SaveHotkeySettings', 'SaveReminderSettings', 'SetAutostart', 'SetBubbleHover',
-    'SetReminderEnabled', 'SetScale',
+    'SetCardTheme', 'SetReminderEnabled', 'SetScale', 'ToggleCardTheme',
     'SetSnapToEdge', 'ShowPet', 'ShowPetForUser',
     'SnapNow', 'StartDrag',
 

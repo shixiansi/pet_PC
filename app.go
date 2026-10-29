@@ -570,6 +570,16 @@ type Layout struct {
 	PanelOnRight bool    `json:"panelOnRight"`
 	Scale        float64 `json:"scale"`
 
+	// Theme is the colour scheme the pet's cards must be drawn in: "light" or
+	// "dark" (store.Config.CardTheme).
+	//
+	// It travels WITH the layout rather than in an event of its own because the page
+	// already re-applies the layout on every state push - so "the file says dark, the
+	// cards are light" cannot happen: whatever the host last pushed is what the page
+	// paints. The control center's theme is a different field in a different process;
+	// this one is only the pet's own cards.
+	Theme string `json:"theme"`
+
 	// Bubble is the speech bubble when one is showing, or nil.
 	//
 	// Its content travels with the layout rather than in a separate event
@@ -876,6 +886,9 @@ func (a *App) applyWindowGeometry() (Layout, error) {
 		PanelH:       float64(panelH) / s,
 		PanelOnRight: panelOnRight,
 		Scale:        s,
+		// Read on every layout, not cached at startup: the menu flips it, and the next push
+		// has to carry the new value or the cards would change only after a restart.
+		Theme: normalizeCardTheme(a.store.Config().CardTheme),
 	}
 	if hasBubble {
 		// The bubble is reported in CSS pixels from the same physical rectangle
@@ -1440,6 +1453,51 @@ func (a *App) SetSnapToEdge(enabled bool) (State, error) {
 		return State{}, err
 	}
 	return a.GetState()
+}
+
+// 卡片配色的两个值。空值按 light 处理：cardTheme 这个字段比 settings.json 年轻。
+const (
+	cardThemeLight = "light"
+	cardThemeDark  = "dark"
+)
+
+// normalizeCardTheme maps anything that is not "dark" onto "light" - the mirror of the control
+// center's own normalizeTheme, which answers "dark" for anything that is not "light". Each window's
+// fallback is the scheme that matches the OTHER window, so an unreadable value never leaves the two
+// looking like different products.
+func normalizeCardTheme(theme string) string {
+	if strings.EqualFold(strings.TrimSpace(theme), cardThemeDark) {
+		return cardThemeDark
+	}
+	return cardThemeLight
+}
+
+// SetCardTheme switches the pet's own cards between the light and the dark scheme.
+//
+// It answers with the whole State like the other setters: the theme travels in Layout.Theme, so
+// the caller only has to re-apply the layout it already knows how to apply.
+func (a *App) SetCardTheme(theme string) (State, error) {
+	next := normalizeCardTheme(theme)
+	if _, err := a.store.UpdateConfig(func(c *store.Config) { c.CardTheme = next }); err != nil {
+		return State{}, err
+	}
+	a.log.Infof("ui", "卡片配色切成 %s", next)
+	return a.GetState()
+}
+
+// ToggleCardTheme flips the scheme and answers with the NEW value.
+//
+// The menu cell's label is rendered FROM the theme ("深色" while the cards are light, i.e. it names
+// the action), so the page needs to know the result without asking again.
+func (a *App) ToggleCardTheme() (string, error) {
+	next := cardThemeDark
+	if normalizeCardTheme(a.store.Config().CardTheme) == cardThemeDark {
+		next = cardThemeLight
+	}
+	if _, err := a.SetCardTheme(next); err != nil {
+		return "", err
+	}
+	return next, nil
 }
 
 // SetAutostart writes or removes the per-user Run registry entry.

@@ -126,6 +126,10 @@ export function SetBubbleHover(arg1) {
   return window['go']['main']['App']['SetBubbleHover'](arg1);
 }
 
+export function SetCardTheme(arg1) {
+  return window['go']['main']['App']['SetCardTheme'](arg1);
+}
+
 export function SetPluginSurfaceBlocks(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetPluginSurfaceBlocks'](arg1, arg2, arg3);
 }
@@ -156,6 +160,10 @@ export function SnapNow() {
 
 export function StartDrag() {
   return window['go']['main']['App']['StartDrag']();
+}
+
+export function ToggleCardTheme() {
+  return window['go']['main']['App']['ToggleCardTheme']();
 }
 
 export function WindowReady() {

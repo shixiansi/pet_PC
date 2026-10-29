@@ -9,21 +9,53 @@
  */
 
 :root {
-  /* 与控制中心同一套令牌（那份参考设计稿），用的是它的**深色一侧**：这个窗口是桌面上的玻璃，
-     深色是它的正确一侧；控制中心是普通窗口，浅色是那边的正确一侧。
+  /* 与控制中心同一套令牌（那份参考设计稿），用的是它的**浅色**一侧：两个窗口看起来必须是
+     同一件产品——白底卡片、深色字、紫罗兰强调。玻璃深色版在深色桌面上确实近黑，用户原话
+     「右键菜单以及对话框这些主体还都是黑色的」，所以这一页跟着控制中心走浅色。
      变量名与语义一一对应，所以气泡、右键菜单、插件浮层面、徽章、对话按钮都跟着换。 */
-  --panel-bg: rgba(20, 26, 36, 0.94); /* = 控制中心的 --bg-surface，只是带一点透明 */
+  --panel-bg: rgba(255, 255, 255, 0.97); /* = 控制中心的 --bg-surface，只是带一点透明 */
+  --panel-border: rgba(15, 23, 42, 0.1);
+  --text: #0f172a;
+  --text-dim: #7a8798;
+  --accent: #7c3aed;
+  --accent-hover: #6d28d9;
+  --danger: #dc2626;
+  --ok: #059669;
+  --warn: #d97706;
+  --radius: 14px;
+  --font: "Inter", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
+    system-ui, sans-serif;
+
+  /* 随配色翻转的几组值。写成令牌而不是散在几十条规则里，是因为两套配色都要它们：内嵌块的
+     底色（气泡里的一条提醒、菜单的一格）、悬停底色、按钮描边、投影。 */
+  --tint: rgba(15, 23, 42, 0.04);
+  --chip-bg: rgba(255, 255, 255, 0.96);
+  --chip-hover: #f1f5f9;
+  --chip-border: rgba(15, 23, 42, 0.12);
+  --chip-border-strong: rgba(15, 23, 42, 0.26);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.18);
+  --shadow-lg: 0 4px 12px rgba(15, 23, 42, 0.18);
+}
+
+/* 深色版：右键菜单里那一格能切到这里。值取自控制中心的 [data-theme='dark']，所以两个窗口在
+   两种配色下都还是同一套颜色——只有"哪一侧"不同。默认浅色，因为控制中心是浅色，而两个窗口
+   看起来必须是同一件产品。 */
+:root[data-theme='dark'] {
+  --panel-bg: rgba(20, 26, 36, 0.94);
   --panel-border: rgba(255, 255, 255, 0.08);
   --text: #e8edf5;
   --text-dim: #a2b0c2;
-  --accent: #7c3aed;
   --accent-hover: #8b5cf6;
   --danger: #f87171;
   --ok: #34d399;
   --warn: #fbbf24;
-  --radius: 14px;
-  --font: "Inter", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
-    system-ui, sans-serif;
+  --tint: rgba(255, 255, 255, 0.06);
+  --chip-bg: rgba(20, 26, 36, 0.92);
+  --chip-hover: rgba(32, 40, 54, 0.96);
+  --chip-border: rgba(255, 255, 255, 0.18);
+  --chip-border-strong: rgba(255, 255, 255, 0.32);
+  --shadow-sm: 0 2px 5px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 * {
@@ -156,9 +188,9 @@ body {
   width: 24px;
   height: 24px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid var(--chip-border);
   border-radius: 50%;
-  background: rgba(20, 26, 36, 0.92);
+  background: var(--chip-bg);
   color: var(--text);
   font: inherit;
   cursor: pointer;
@@ -178,8 +210,8 @@ body {
 }
 
 .pet-chat:hover {
-  border-color: rgba(255, 255, 255, 0.32);
-  background: rgba(32, 40, 54, 0.96);
+  border-color: var(--chip-border-strong);
+  background: var(--chip-hover);
 }
 
 
@@ -212,10 +244,10 @@ body {
   margin: 0 auto;
   width: fit-content;
   padding: 1px 6px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid var(--chip-border);
   border-radius: 8px;
-  background: rgba(16, 21, 30, 0.86);
-  color: #fff;
+  background: var(--chip-bg);
+  color: var(--text);
   font-size: 11px;
   font-weight: 600;
   line-height: 15px;
@@ -238,7 +270,7 @@ body {
   font-weight: 600;
   line-height: 20px;
   text-align: center;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-sm);
   pointer-events: none;
 }
 
@@ -390,7 +422,7 @@ body {
   gap: 6px;
   padding: 4px 6px;
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--tint);
   font-size: 12px;
 }
 
@@ -465,7 +497,7 @@ body {
   font-size: 11px;
   line-height: 1;
   color: var(--text);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--tint);
   border: 1px solid transparent;
   border-radius: 9px;
   cursor: default;
@@ -612,10 +644,10 @@ body {
   margin: 0;
   padding: 7px 10px;
   border-radius: 9px;
-  background: rgba(248, 113, 113, 0.92);
+  background: var(--danger);
   color: #fff;
   font-size: 12px;
   text-align: center;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-lg);
   animation: panel-in 0.14s ease-out;
 }

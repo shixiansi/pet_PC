@@ -465,6 +465,19 @@ check(
     (menuMap.match(/\n {2}[a-z]+: \(\)/g) || []).length === menuCells.length,
   'a menu cell and PET_MENU_ACTIONS disagree: ' + JSON.stringify(menuCells),
 );
+// 主题那一格：菜单里点它 → ToggleCardTheme → 重新应用 layout → <html data-theme> 变。四段缺一段
+// 都不成立，而缺哪一段都长得像"点了没反应"：格子没有、动作没接、颜色没有第二套、或者页面
+// 自己猜配色而不是读 Layout.Theme。
+check(
+  'the menu can switch the card scheme, and the page takes it from the layout',
+  /data-menu="theme"/.test(html) &&
+    /theme: \(\) => App\.ToggleCardTheme\(\)/.test(mainJs) &&
+    /document\.documentElement\.dataset\.theme = dark \? 'dark' : 'light'/.test(mainJs) &&
+    /:root\[data-theme='dark'\]/.test(css) &&
+    /func \(a \*App\) ToggleCardTheme\(\)/.test(mainGo) &&
+    /Theme: normalizeCardTheme\(a\.store\.Config\(\)\.CardTheme\)/.test(mainGo),
+  'the theme cell, its action, the dark palette or Layout.Theme is missing',
+);
 // The grid fills the card Go sizes - the rows are fractions, not a pixel height of
 // their own. A grid that declared its own height would either come up short (a band
 // of empty card) or run over (clipped by the region, which reads as a torn edge).
@@ -524,14 +537,14 @@ check(
   // Inline reads rather than shared consts: each file is used once, and a const declared
   // further down would be a temporal-dead-zone crash, not a check.
   /plugins: \(\) => launchControlCenter\(\)/.test(mainJs) &&
-    /settings: \(\) => launchControlCenter\(\)/.test(mainJs) &&
+    /plugins: \(\) => launchControlCenter\(\)/.test(mainJs) &&
     /function launchControlCenter\(\)[\s\S]{0,200}App\.OpenPluginMarket\(\)/.test(mainJs) &&
     /TrayCmdOpenMarket\s*=\s*trayCmdOpenMarket/.test(
       fs.readFileSync(path.join(root, 'internal/desktop/tray_windows.go'), 'utf8'),
     ) &&
     /desktop\.TrayCmdOpenMarket,/.test(mainGo) &&
     /case desktop\.TrayCmdOpenMarket:/.test(mainGo),
-  'a way into the control center went missing: the two menu cells or the tray item',
+  'a way into the control center went missing: the menu cell or the tray item',
 );
 
 // --- 5. THERE IS NO PANEL, and it must stay gone ----------------------------
@@ -585,17 +598,16 @@ check(
 );
 check(
   'the pet has a way into the control center WITHOUT the panel',
-  // The gear in the panel header was one of the two entries, and the panel is gone. The tray
-  // item and the pet's own two menu cells (插件 / 设置) are what is left, so all three are
-  // pinned: losing the header button without these would leave a pet with no way in at all.
+  // The gear in the panel header was one of the entries, and the panel is gone. The tray item
+  // and the pet's own menu cell (插件/设置 merged into one 「控制中心」) are what is left, so both
+  // are pinned: losing the header button without these would leave a pet with no way in at all.
   /TrayCmdOpenMarket\s*=\s*trayCmdOpenMarket/.test(
     fs.readFileSync(path.join(root, 'internal/desktop/tray_windows.go'), 'utf8'),
   ) &&
     /desktop\.TrayCmdOpenMarket,/.test(mainGo) &&
     /case desktop\.TrayCmdOpenMarket:/.test(mainGo) &&
-    /plugins: \(\) => launchControlCenter\(\)/.test(mainJs) &&
-    /settings: \(\) => launchControlCenter\(\)/.test(mainJs),
-  'a way into the control center went missing: the tray item or the two menu cells',
+    /plugins: \(\) => launchControlCenter\(\)/.test(mainJs),
+  'a way into the control center went missing: the tray item or the menu cell',
 );
 // --- 6. The conversation button: hover target inside the pet's box ----------
 //
@@ -2071,10 +2083,10 @@ check(
 
 // --- 桌宠那一页与控制中心用同一套令牌 ------------------------------------------------
 //
-// 两个窗口是同一件产品的两面：控制中心用参考稿的**浅色**一侧，桌宠是桌面上的玻璃、用**深色**
-// 一侧。它们必须同意"强调色、正文、状态色各是什么"——否则下一次改配色只会改一半，而且没人会
-// 发现，因为这两个窗口永远不会出现在同一张截图里。
-const ccDarkBlock = (ccTokens.match(/:root\[data-theme='dark'\]\s*\{([\s\S]*?)\n\}/) || [])[1] || '';
+// 两个窗口是同一件产品的两面，而且现在用的是**同一侧**：参考稿的浅色。它们必须同意"强调色、
+// 正文、状态色各是什么"——否则下一次改配色只会改一半，而且没人会发现，因为这两个窗口永远不会
+// 出现在同一张截图里。（桌宠那一页另外留着一套深色给右键菜单切，那是它自己的第二套，不参与这条。）
+const ccLightBlock = (ccTokens.match(/:root,\s*\n?:root\[data-theme='light'\]\s*\{([\s\S]*?)\n\}/) || [])[1] || '';
 const tokenIn = (block, name) => {
   const m = block.match(new RegExp('--' + name + ':\\s*([^;]+);'));
   return m ? m[1].trim().toLowerCase() : '';
@@ -2089,12 +2101,12 @@ const sharedPairs = [
   ['warning', 'warn'],
   ['danger', 'danger'],
 ];
-const drifted = sharedPairs.filter(([ccName, petName]) => tokenIn(ccDarkBlock, ccName) !== petToken(petName));
+const drifted = sharedPairs.filter(([ccName, petName]) => tokenIn(ccLightBlock, ccName) !== petToken(petName));
 check(
   'the pet page and the control center name the same colours',
   sharedPairs.length > 0 && drifted.length === 0,
   drifted
-    .map(([ccName, petName]) => `${petName}=${petToken(petName)} vs --${ccName}=${tokenIn(ccDarkBlock, ccName)}`)
+    .map(([ccName, petName]) => `${petName}=${petToken(petName)} vs --${ccName}=${tokenIn(ccLightBlock, ccName)}`)
     .join('; '),
 );
 

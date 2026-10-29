@@ -27,7 +27,9 @@ const root = path.resolve(here, '..');
 const indexHtml = readFileSync(path.join(root, 'index.html'), 'utf8');
 
 /** The cells the menu ships with, in the order they are drawn. */
-const CELLS = ['todos', 'chat', 'pomodoro', 'remind', 'plugins', 'settings', 'snap', 'hide', 'quit'];
+// 9 格：插件与设置合并成一格「控制中心」（两者原本调的是同一个 binding），腾出来的那一格给了
+// 主题切换。格子数必须还是 9 —— 菜单的高度是 Go 里一个常量（bubbleHeightMenu）。
+const CELLS = ['todos', 'chat', 'pomodoro', 'remind', 'plugins', 'theme', 'snap', 'hide', 'quit'];
 
 const $ = (id) => document.getElementById(id);
 const isHidden = (id) => $(id).classList.contains('hidden');
@@ -263,13 +265,19 @@ describe('pet menu: what each cell does', () => {
     expect(callsTo(calls, 'DismissBubble').length).toBe(0);
   });
 
-  for (const cell of ['plugins', 'settings']) {
-    it(`${cell} launches the control center and closes the card`, async () => {
-      const { calls } = await openAndClick(cell);
-      expect(callsTo(calls, 'OpenPluginMarket').length).toBe(1);
-      expect(callsTo(calls, 'DismissBubble').length).toBe(1);
-    });
-  }
+  it('控制中心 opens the market and closes the card', async () => {
+    const { calls } = await openAndClick('plugins');
+    expect(callsTo(calls, 'OpenPluginMarket').length).toBe(1);
+    expect(callsTo(calls, 'DismissBubble').length).toBe(1);
+  });
+
+  // 主题那一格走 TogglePanelTheme，然后**重新应用一次 layout**：配色是 Layout.Theme 说的，
+  // 页面不自己猜（自己猜就会出现"文件写深色、界面是浅色"）。
+  it('主题 flips the card scheme through the binding, then re-applies the layout', async () => {
+    const { calls } = await openAndClick('theme');
+    expect(callsTo(calls, 'ToggleCardTheme').length).toBe(1);
+    expect(callsTo(calls, 'GetLayout').length).toBeGreaterThan(0);
+  });
 
   it('归位 and 隐藏 call the bindings the tray uses', async () => {
     resetPage();

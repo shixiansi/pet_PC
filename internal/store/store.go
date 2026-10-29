@@ -63,6 +63,17 @@ type Config struct {
 	// EdgeMargin is the gap left between the pet and the screen edge.
 	EdgeMargin int `json:"edgeMargin"`
 
+	// CardTheme is the colour scheme of the pet's OWN cards: the bubble, the
+	// right-click menu, and a plugin's floating surface.
+	//
+	// It is a separate preference from the control center's `plugin-market.json`
+	// theme, because those are two independent processes: the pet's cards sit on
+	// the desktop, the control center's pages sit in a window. The default matches
+	// the control center (light), and the switch lives on the pet's own right-click
+	// menu - the only place you are looking when the colour bothers you. Empty
+	// means light: the field arrived later than the file.
+	CardTheme string `json:"cardTheme,omitempty"`
+
 	// Autostart mirrors the Windows registry state; it is persisted so the
 	// settings panel can render before the registry is read.
 	Autostart bool `json:"autostart"`
@@ -239,6 +250,8 @@ func DefaultConfig() Config {
 		PetScale:   DefaultScale,
 		SnapToEdge: true,
 		EdgeMargin: DefaultEdgeGap,
+		// 与控制中心一致的那一侧：两个窗口看起来必须是同一件产品。
+		CardTheme: "light",
 
 		// The global shortcuts are off until asked for: see the field's comment.
 		GlobalHotkeys: false,

@@ -72,6 +72,9 @@ const els = {
   // per action, with its icon and its label) and wired by delegation in wire();
   // what each one DOES lives in PET_MENU_ACTIONS.
   bubbleMenu: $('bubble-menu'),
+  // 那一格主题按钮的标签。只有它在页面生命周期里会变（写着"点下去会变成什么"），所以它
+  // 需要单独的引用；其余格子的文字是静态的。
+  menuThemeLabel: $('menu-theme-label'),
   // No entry for #bubble-actions: it is the row the two buttons below sit in, and the
   // page never touches the row itself - only the buttons. (The element stays in the
   // markup because it is what lays them out.)
@@ -224,6 +227,18 @@ function applyLayout(layout) {
   // before the installed list has been read, and it is completed by re-applying
   // this same layout once the list lands.
   lastLayout = layout;
+
+  // The cards' colour scheme. `<html data-theme>` is the CSS switch (style.css keys both palettes
+  // off it), so this is the only place the page decides which one is live - and it decides from
+  // the layout, i.e. from the host, so the file and the pixels cannot disagree.
+  //
+  // The menu cell's label names the ACTION ("深色" while the cards are light), which is the way
+  // round that does not need a second word for "currently".
+  if (layout.theme) {
+    const dark = layout.theme === 'dark';
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    if (els.menuThemeLabel) els.menuThemeLabel.textContent = dark ? '浅色' : '深色';
+  }
 
   Object.assign(els.pet.style, {
     left: `${layout.petX}px`,
@@ -685,7 +700,11 @@ const PET_MENU_ACTIONS = {
   remind: () => App.RemindNow().then(applyState),
 
   plugins: () => launchControlCenter(),
-  settings: () => launchControlCenter(),
+
+  // 主题: flips the pet's own cards between the two schemes. It re-applies the layout instead of
+  // repainting here, because Layout.Theme is the page's single source for it - the same reason
+  // everything else about the appearance is done in applyLayout.
+  theme: () => App.ToggleCardTheme().then(applyLayout).catch(fail),
 
   // 归位: back to the first-run resting place. It re-places the window, and folds
   // the card away with the panel and any surface - a card beside a pet that just

@@ -102,18 +102,22 @@
           </svg>
           <span class="menu-label">提醒</span>
         </button>
-        <button type="button" class="menu-cell" data-menu="plugins" title="打开控制中心（插件管理）">
+        <!-- 一格「控制中心」而不是两格（插件 / 设置）：两个都调 launchControlCenter()，而控制
+             中心的左栏本来就有插件页和偏好页。腾出来的那一格给了主题切换，于是 3×3 的格子数
+             不变——菜单的高度是 Go 里一个常量，格子数变了它就得跟着变，那是没必要付的账。 -->
+        <button type="button" class="menu-cell" data-menu="plugins" title="打开控制中心：插件、市场、日志与偏好">
           <svg class="menu-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <path d="M10 4.5a2 2 0 0 1 4 0V6h3.5A1.5 1.5 0 0 1 19 7.5V11h1.5a2 2 0 0 1 0 4H19v3.5a1.5 1.5 0 0 1-1.5 1.5H14v-1.5a2 2 0 0 0-4 0V20H6.5A1.5 1.5 0 0 1 5 18.5V15H3.5a2 2 0 0 1 0-4H5V7.5A1.5 1.5 0 0 1 6.5 6H10V4.5z" />
           </svg>
-          <span class="menu-label">插件</span>
+          <span class="menu-label">控制中心</span>
         </button>
-        <button type="button" class="menu-cell" data-menu="settings" title="打开控制中心（偏好设置）">
+        <!-- 主题：标签写的是**点下去会变成什么**（现在是浅色 → 显示"深色"），由 applyLayout
+             按 layout.theme 改写。图标是月亮，因为它代表"切到深色"那一步。 -->
+        <button type="button" class="menu-cell" data-menu="theme" title="切换卡片的浅色 / 深色">
           <svg class="menu-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <circle cx="12" cy="12" r="3.2" />
-            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.55V21a2 2 0 0 1-4 0v-.1A1.7 1.7 0 0 0 9 19.35a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.65 15a1.7 1.7 0 0 0-1.55-1.03H3a2 2 0 0 1 0-4h.1A1.7 1.7 0 0 0 4.65 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.65a1.7 1.7 0 0 0 1.03-1.55V3a2 2 0 0 1 4 0v.1A1.7 1.7 0 0 0 15 4.65a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.35 9v.1A1.7 1.7 0 0 0 20.9 10.1H21a2 2 0 0 1 0 4h-.1A1.7 1.7 0 0 0 19.4 15z" />
+            <path d="M20.5 14.3A8.5 8.5 0 0 1 9.7 3.5 8.5 8.5 0 1 0 20.5 14.3Z" />
           </svg>
-          <span class="menu-label">设置</span>
+          <span class="menu-label" id="menu-theme-label">深色</span>
         </button>
         <button type="button" class="menu-cell" data-menu="snap" title="归位到默认位置">
           <svg class="menu-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
