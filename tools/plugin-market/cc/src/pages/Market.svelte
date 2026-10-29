@@ -25,6 +25,11 @@
   // WHAT IT NEVER DOES: enabling anything. `Install` lands a package DISABLED with nothing
   // granted, and this page says so out loud and points at 插件. An install that quietly switched a
   // plugin on would be the host granting authority on the user's behalf.
+  //
+  // A GRID OF CARDS, not a list of rows (2026-10-29, "插件市场改成这样的布局"): what a marketplace
+  // sells is the SHAPE of each plugin - a name, a one-paragraph pitch, three facts - and a row of
+  // that reads as a table. Cards also survive a wide window: `auto-fill` + a minimum width means a
+  // maximised 1800px window shows four or five of them instead of one sentence stretched across it.
   let view = $state<MarketView | null>(null);
   let labels = $state<Record<string, string>>({});
   let loading = $state(false);
@@ -36,6 +41,8 @@
   /** The editable copy of the source address; `view.base` is what the host actually used. */
   let base = $state('');
   let savingBase = $state(false);
+  /** What the search box holds. Filtering is CLIENT side: the catalogue is one file already read. */
+  let query = $state('');
 
   // Started here rather than in onMount, same as the 插件 page: a page that renders but never
   // starts a request is exactly the failure that page shipped with once.
@@ -148,14 +155,48 @@
     }
   }
 
-  /** Up to three permission labels, then "等 N 项" — a row is not the place for a wall of chips. */
-  const SHOWN = 3;
+
   function perms(entry: MarketEntry): string[] {
     return Array.isArray(entry.permissions) ? entry.permissions : [];
   }
   function permLabel(id: string): string {
     const label = labels[id];
     return label ? label : id;
+  }
+  /** 权限的完整文案，给 tooltip 用（卡片上只放数量）。 */
+  function permLabels(entry: MarketEntry): string {
+    return perms(entry).map(permLabel).join('、');
+  }
+
+  /** What the search box matches: the name, the id, and the pitch. */
+  const shown = $derived(
+    (view?.entries ?? []).filter((e) => {
+      const q = query.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        e.name.toLowerCase().includes(q) ||
+        e.id.toLowerCase().includes(q) ||
+        (e.description ?? '').toLowerCase().includes(q)
+      );
+    }),
+  );
+
+  /**
+   * The icon tile's letter and hue.
+   *
+   * A package has no icon yet (the catalogue carries no artwork), and a grid with eighteen identical
+   * placeholders is unreadable. Deriving both from the id is deterministic - the same plugin is the
+   * same colour on every machine and after every refresh - so the tile is a landmark rather than
+   * decoration. When packages grow an `icon` field this is the one thing that goes away.
+   */
+  function initial(name: string): string {
+    const first = [...(name || '?').trim()][0] ?? '?';
+    return first.toUpperCase();
+  }
+  function hue(id: string): number {
+    let h = 0;
+    for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) % 360;
+    return h;
   }
 
   function stateOf(entry: MarketEntry): 'new' | 'old' | 'current' {
@@ -171,6 +212,22 @@
     <strong>安装不会启用它</strong>：装完去「插件」页授权它要用的能力，那一步才是你同意它做什么。
   </p>
 
+  <div class="toolbar">
+    <label class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="6.5" />
+        <path d="m16 16 4.5 4.5" />
+      </svg>
+      <input type="search" bind:value={query} placeholder="搜索插件名称、功能…" spellcheck="false" />
+    </label>
+    <span class="count">
+      {#if view}{query.trim() ? shown.length + ' / ' + view.entries.length : view.entries.length}{:else}—{/if} 个插件
+    </span>
+    <button class="btn ghost" type="button" onclick={() => void refresh()} disabled={loading}>
+      {loading ? '刷新中…' : '重新读取'}
+    </button>
+  </div>
+
   <form
     class="source"
     onsubmit={(e) => {
@@ -181,9 +238,6 @@
     <label for="base">插件源</label>
     <input id="base" type="text" bind:value={base} spellcheck="false" placeholder="https://…" />
     <button class="btn" type="submit" disabled={savingBase}>{savingBase ? '保存中…' : '保存并刷新'}</button>
-    <button class="btn ghost" type="button" onclick={() => void refresh()} disabled={loading}>
-      {loading ? '刷新中…' : '重新读取'}
-    </button>
   </form>
 
   {#if view?.fallback}
@@ -203,29 +257,39 @@
     <p class="hint">还没有目录。上面的地址填对之后点「保存并刷新」。</p>
   {:else if view.entries.length === 0}
     <p class="hint">这个源上没有插件。</p>
+  {:else if shown.length === 0}
+    <p class="hint">没有匹配「{query.trim()}」的插件。清空搜索再看看。</p>
   {:else}
-    <p class="count">共 {view.entries.length} 个插件</p>
-    <ul class="list">
-      {#each view.entries as entry (entry.id)}
-        <li class="row" class:busy={busyId === entry.id}>
-          <div class="info">
-            <div class="who">
-              <strong>{entry.name}</strong>
-              <span class="mono id">{entry.id}</span>
-              <span class="ver">v{entry.version}</span>
-              {#if entry.author}<span class="author">{entry.author}</span>{/if}
+    <ul class="grid">
+      {#each shown as entry (entry.id)}
+        <li class="card" class:busy={busyId === entry.id}>
+          <div class="head">
+            <span class="icon" style={`--hue:${hue(entry.id)}`} aria-hidden="true">{initial(entry.name)}</span>
+            <div class="ident">
+              <h3 title={entry.id}>{entry.name}</h3>
+              <p class="id mono" title={entry.id}>{entry.id}</p>
             </div>
-            {#if entry.description}<p class="desc">{entry.description}</p>{/if}
-            <div class="meta">
-              {#each perms(entry).slice(0, SHOWN) as p (p)}
-                <span class="chip" title={p}>{permLabel(p)}</span>
-              {/each}
-              {#if perms(entry).length > SHOWN}
-                <span class="chip">等 {perms(entry).length} 项</span>
-              {/if}
-            </div>
+            {#if stateOf(entry) === 'current'}
+              <span class="state">已安装</span>
+            {:else if stateOf(entry) === 'old'}
+              <span class="state update">可更新</span>
+            {/if}
           </div>
-          <div class="act">
+
+          {#if entry.description}<p class="desc">{entry.description}</p>{/if}
+
+          <!-- 三枚短 pill，和参考稿的节奏一致：版本、要几项权限、归谁。权限的**文案**放进
+               title（读者要看的时候鼠标一停就有），而不是铺两行 chip —— 一句「调用你已配置的
+               大模型（流式返回）」会把卡片撑成三级台阶，行高不齐。 -->
+          <div class="meta">
+            <span class="pill mono">v{entry.version}</span>
+            {#if perms(entry).length > 0}
+              <span class="pill" title={permLabels(entry)}>{perms(entry).length} 项权限</span>
+            {/if}
+          </div>
+
+          <div class="foot">
+            <span class="author">{entry.author ? entry.author : '未署名'}</span>
             {#if stateOf(entry) === 'new'}
               <button class="btn primary" disabled={Boolean(busyId)} onclick={() => void install(entry)}>
                 {busyId === entry.id ? '安装中…' : '安装'}
@@ -246,8 +310,41 @@
 
 <style>
   .page { display: flex; flex-direction: column; gap: var(--space-3); }
-  .hint { margin: 0; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
+  .hint { margin: 0; color: var(--text-dim); font-size: var(--fs-sm); line-height: 1.6; }
   .mono { font: var(--font-mono); }
+
+  /* 工具条：搜索在左，计数与「重新读取」在右。搜索是这一页最常用的动作，所以它占满剩下的宽度。 */
+  .toolbar { display: flex; align-items: center; gap: var(--space-3); }
+  .search {
+    flex: 1 1 auto;
+    min-width: 0;
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .search svg {
+    position: absolute;
+    left: 11px;
+    width: 16px;
+    height: 16px;
+    color: var(--text-faint);
+    pointer-events: none;
+  }
+  .search input {
+    width: 100%;
+    height: 36px;
+    padding: 0 var(--space-3) 0 34px;
+    font: inherit;
+    font-size: var(--fs-sm);
+    color: var(--text);
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    transition: border-color var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease);
+  }
+  .search input::placeholder { color: var(--text-faint); }
+  .search input:focus { outline: none; border-color: var(--p-500); box-shadow: var(--sh-ring); }
+  .count { font-size: var(--fs-xs); color: var(--text-dim); white-space: nowrap; }
 
   .source {
     display: flex;
@@ -256,15 +353,15 @@
     padding: var(--space-2);
     background: var(--bg-sunken);
     border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius);
   }
-  .source label { font-size: 12px; color: var(--text-dim); }
+  .source label { font-size: var(--fs-xs); color: var(--text-dim); }
   .source input {
     flex: 1 1 auto;
     min-width: 0;
     font: var(--font-mono);
     color: var(--text);
-    background: var(--bg);
+    background: var(--bg-raised);
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
     padding: var(--space-1) var(--space-2);
@@ -274,7 +371,7 @@
     margin: 0;
     padding: var(--space-2) var(--space-3);
     border-radius: var(--radius-sm);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     line-height: 1.6;
     border: 1px solid var(--line);
   }
@@ -282,17 +379,21 @@
   .banner.bad { color: var(--danger); border-color: var(--danger); }
   .banner.ok { color: var(--ok); border-color: var(--ok); }
 
-  .count { margin: 0; font-size: 11px; color: var(--text-dim); }
-
-  .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
-  /* Full width, like the 日志 page's rows: this is a list, not a form. The first version capped the
-     page at 880px, which on a maximised window left the right half of the window empty and squeezed
-     every description into a narrow column - reported as 「这页面怎么这样」. */
-  .row {
+  /* auto-fill + a minimum: a narrow window gets one column, a maximised one gets four or five.
+     `minmax(276px, 1fr)` is the width at which a two-line description still reads. */
+  .grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(276px, 1fr));
+    gap: var(--space-3);
+    align-items: stretch;
+  }
+  .card {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--space-4);
+    flex-direction: column;
+    gap: var(--space-2);
     padding: var(--space-4);
     background: var(--bg-raised);
     border: 1px solid var(--line);
@@ -300,34 +401,101 @@
     box-shadow: var(--sh-xs);
     transition: box-shadow var(--dur-2) var(--ease), border-color var(--dur-2) var(--ease);
   }
-  .row:hover { box-shadow: var(--sh-md); border-color: var(--border-strong); }
-  .row.busy { opacity: .7; }
-  .info { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
-  .who { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; }
-  .who strong { font-size: var(--fs-md); font-weight: 650; letter-spacing: -0.01em; }
-  .id, .ver, .author { font-size: 11px; color: var(--text-dim); }
-  /* A description is prose: past ~90 characters a line stops being readable, and on a wide window
-     the row would otherwise stretch one sentence over the whole screen. */
-  .desc { margin: 0; max-width: 90ch; font-size: var(--fs-sm); color: var(--text-dim); line-height: 1.6; }
+  .card:hover { box-shadow: var(--sh-md); border-color: var(--border-strong); }
+  .card.busy { opacity: .7; }
+
+  .head { display: flex; align-items: flex-start; gap: var(--space-3); }
+  /* 图标位：包里没有图，所以取 id 的一个稳定色相 + 名字首字。同一插件在哪台机器上都是同一个
+     颜色，于是它是个"地标"而不是装饰。包里长出色图之后，这里唯一要删的就是它。 */
+  .icon {
+    width: 40px;
+    height: 40px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: var(--radius);
+    color: #fff;
+    font-size: var(--fs-lg);
+    font-weight: 700;
+    background: linear-gradient(140deg, hsl(var(--hue) 72% 58%), hsl(calc(var(--hue) + 26) 68% 44%));
+  }
+  .ident { min-width: 0; flex: 1 1 auto; }
+  .ident h3 {
+    margin: 0;
+    font-size: var(--fs-md);
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .id {
+    margin: 1px 0 0;
+    font-size: 11px;
+    color: var(--text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .state {
+    flex: none;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-full);
+    color: var(--success);
+    background: var(--success-bg);
+    white-space: nowrap;
+  }
+  .state.update { color: var(--warning); background: var(--warning-bg); }
+
+  /* Two lines, then an ellipsis: a card's job is "is this for me", and four lines of prose in a
+     276px column is neither. */
+  .desc {
+    margin: 0;
+    font-size: var(--fs-sm);
+    color: var(--text-dim);
+    line-height: 1.6;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
   .meta { display: flex; flex-wrap: wrap; gap: var(--space-1); }
-  /* Soft pills, the way the reference draws tags: a tint with no border reads as metadata, while
-     an outline at this size reads as another button. */
-  .chip {
+  .pill {
     font-size: 11px;
     color: var(--text-dim);
     background: var(--bg-hover);
     border: 1px solid transparent;
     border-radius: var(--radius-full);
     padding: 1px var(--space-2);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .act { flex: 0 0 auto; display: flex; align-items: center; align-self: center; padding-left: var(--space-2); }
+
+  /* `margin-top: auto` keeps the action row on the floor of every card in a row, whatever the
+     description's height: a grid where the buttons float at different heights looks unfinished. */
+  .foot {
+    margin-top: auto;
+    padding-top: var(--space-2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    border-top: 1px solid var(--line);
+  }
+  .author { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .installed { font-size: var(--fs-sm); color: var(--text-dim); white-space: nowrap; }
 
   .btn {
     font: inherit;
     font-size: var(--fs-sm);
     font-weight: 550;
-    height: 34px;
+    height: 32px;
     padding: 0 var(--space-4);
     border-radius: var(--radius);
     border: 1px solid var(--border-strong);
@@ -340,8 +508,8 @@
   }
   .btn:hover { background: var(--bg-hover); border-color: var(--n-400); }
   .btn:disabled { opacity: .5; cursor: default; }
-  /* The one action a row has is FILLED, like the reference's primary button: on a page whose job
-     is "install this", an outline the same weight as the chips reads as decoration. */
+  /* The one action a card has is FILLED: on a page whose job is "install this", an outline the same
+     weight as the pills reads as decoration. */
   .btn.primary {
     background: var(--accent);
     border-color: var(--accent);
@@ -352,4 +520,3 @@
   .btn.ghost { background: transparent; }
   .btn.ghost:hover { background: var(--bg-hover); }
 </style>
-
