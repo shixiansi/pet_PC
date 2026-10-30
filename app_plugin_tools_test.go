@@ -359,3 +359,17 @@ func TestToolLoopStopsAtTheRoundLimit(t *testing.T) {
 		t.Errorf("the endpoint saw %d requests, want exactly maxToolRounds (%d)", stub.Hits(), maxToolRounds)
 	}
 }
+// reasoningOnlyScript is a model that spent its whole output budget thinking: the stream carries
+// `reasoning_content` and never a `content` delta, and it still finishes with "stop".
+//
+// This is not a hypothetical shape - it is what a reasoning model does when max_tokens is smaller
+// than its chain of thought, and the real machine logged one of these as "完成，回复 0 字"
+// (tokens out=1353). See the empty-reply branch in app_plugins.go's `finish`.
+func reasoningOnlyScript(thought string) []string {
+	body, _ := json.Marshal(map[string]any{
+		"choices": []map[string]any{{"delta": map[string]any{"reasoning_content": thought}}},
+	})
+	end := map[string]any{"choices": []map[string]any{{"delta": map[string]any{}, "finish_reason": "stop"}}}
+	b, _ := json.Marshal(end)
+	return []string{string(body), string(b)}
+}

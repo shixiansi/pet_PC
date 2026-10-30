@@ -262,3 +262,37 @@ func TestClampLogBodySaysWhatItCut(t *testing.T) {
 		t.Fatal("the kept prefix is not the beginning of the body")
 	}
 }
+// TestAnEmptyReplyThatCostTokensIsAWarning: a model that thinks and says nothing is not "完成".
+//
+// The plugin forwards the empty string wherever it was going to send the answer - a bubble, a QQ
+// group - and nothing arrives. The line has to say WHY, and it has to say it at INFO without
+// spilling the thought itself: the reasoning is the model's words, which belong on the DEBUG line
+// like every other piece of text (see TestLLMChatLogsTheWordsOnlyAtDebug).
+func TestAnEmptyReplyThatCostTokensIsAWarning(t *testing.T) {
+	stub := newToolStub(t, reasoningOnlyScript("先把问题拆开，再想想他说的是哪个明天"))
+	a := loggedApp(t)
+	id := installToolPlugin(t, a, "llm.chat", "plugin.config")
+	setPluginConfig(t, a, id, map[string]string{"llmBaseUrl": stub.URL(), "llmModel": "m"})
+
+	a.log.SetLevel(logging.LevelInfo)
+	out, err := a.PluginRequest(id, "llm.chat", `{"text":"明天几点"}`)
+	if err != nil {
+		t.Fatalf("llm.chat: %v", err)
+	}
+	// The call still SUCCEEDS: the host has no business turning "the model said nothing" into an
+	// error the plugin must handle differently from an empty answer.
+	if !strings.Contains(out, `"text":""`) {
+		t.Errorf("the answer should carry the empty text, got %s", out)
+	}
+
+	log := readPetLog(t, a)
+	if !strings.Contains(log, "回了空文本") {
+		t.Fatalf("an empty reply was logged as a plain success:\n%s", log)
+	}
+	if !strings.Contains(log, "字思考") || !strings.Contains(log, "finish=stop") {
+		t.Errorf("the warning must name the reasoning size and the finish reason:\n%s", log)
+	}
+	if strings.Contains(log, "先把问题拆开") {
+		t.Errorf("the chain of thought reached the log at INFO - that file is what a diagnostics report is cut from:\n%s", log)
+	}
+}

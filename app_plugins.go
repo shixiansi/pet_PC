@@ -1793,6 +1793,9 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 	// (logChatRequest, DEBUG): they are the user's conversation, and this file is
 	// what the diagnostics report is cut from.
 	started := time.Now()
+	// What the LAST round actually produced, kept for `finish`: an empty reply is only
+	// diagnosable together with the finish reason and the size of the chain of thought.
+	var lastReasoning, lastFinish string
 	a.log.Pluginf(logging.LevelInfo, "llm", id,
 		"llm.chat 请求 base=%s model=%s：消息 %d 条（历史 %d 轮），工具 %v，图片 %d 张",
 		cfg.LLMBaseURL, cfg.LLMModel, len(msgs), len(in.History), toolNames(specs), len(images))
@@ -1826,6 +1829,7 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 		a.log.Pluginf(lv, "llm", id,
 			"llm.chat 一轮 in %dms（尝试 %d 次）：%d 字，%s，finish=%s，工具调用 %d 个",
 			res.ElapsedMS, res.Attempts, len([]rune(res.Text)), tokens, res.FinishReason, len(res.ToolCalls))
+		lastReasoning, lastFinish = res.Reasoning, res.FinishReason
 		return res, err
 	}
 	fail := func(err error) (any, error) {
@@ -1839,6 +1843,19 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 		return nil, errors.New(message)
 	}
 	finish := func(text string) (any, error) {
+		// An EMPTY reply is not "完成", and saying so is the point of this branch.
+		//
+		// A thinking model that spends its whole output budget on the chain of thought answers
+		// `finish=stop` with no content at all. The plugin then forwards an empty string - to a
+		// chat bubble, to a QQ group - and the log said "完成，回复 0 字", which reads as success.
+		// The real machine hit this once (tokens out=1353, 0 字), and the only way to tell it
+		// apart from "the model had nothing to say" is the reasoning length, which is why that
+		// number is on the line and the reasoning TEXT is not (it belongs to the DEBUG line).
+		if text == "" && strings.TrimSpace(lastReasoning) != "" {
+			a.log.Pluginf(logging.LevelWarn, "llm", id,
+				"llm.chat 回了空文本，但模型写了 %d 字思考（finish=%s）：多半是思考吃掉了输出预算（调大 max tokens，或换非思考模型）",
+				len([]rune(lastReasoning)), lastFinish)
+		}
 		// The delta frames carried the text as it arrived; the done frame carries the
 		// WHOLE reply, so a plugin that dropped a frame can repair itself instead of
 		// leaving a hole in the middle of a sentence.
