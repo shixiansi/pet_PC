@@ -2583,3 +2583,26 @@ func TestPluginServicesListsWhatEachPluginServes(t *testing.T) {
 		}
 	}
 }
+
+// TestClampPluginMaxTokens covers the bounds on a per-call output budget.
+//
+// The field exists because thinking models bill their reasoning against the same budget: a
+// small cap turns into an EMPTY reply with a non-empty reasoning block, and the only lever a
+// plugin has is "ask again with more room". The host still decides how much more.
+func TestClampPluginMaxTokens(t *testing.T) {
+	cases := []struct {
+		in, want int
+	}{
+		{1, minPluginChatTokens},
+		{minPluginChatTokens - 1, minPluginChatTokens},
+		{480, 480},
+		{maxPluginChatTokens, maxPluginChatTokens},
+		{maxPluginChatTokens + 1, maxPluginChatTokens},
+		{1 << 20, maxPluginChatTokens},
+	}
+	for _, c := range cases {
+		if got := clampPluginMaxTokens(c.in); got != c.want {
+			t.Errorf("clampPluginMaxTokens(%d) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}

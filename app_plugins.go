@@ -1753,6 +1753,25 @@ func clampLogBody(text string) string {
 	return string(r[:chatLogBodyRunes]) + fmt.Sprintf("…（截断，共 %d 字）", len(r))
 }
 
+// The bounds on a per-call output budget (see MaxTokens in pluginLLMChat).
+//
+// 64 tokens cannot hold one sentence; 4096 is as much as a group-chat reply ever needs and is
+// the same order as the settings ceiling. Between them, the caller's number wins.
+const (
+	minPluginChatTokens = 64
+	maxPluginChatTokens = 4096
+)
+
+func clampPluginMaxTokens(want int) int {
+	if want < minPluginChatTokens {
+		return minPluginChatTokens
+	}
+	if want > maxPluginChatTokens {
+		return maxPluginChatTokens
+	}
+	return want
+}
+
 func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 	var in struct {
 		Text      string       `json:"text"`
@@ -1779,6 +1798,19 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 		// something other than what it does, and one the user did not grant is never
 		// offered at all.
 		Tools []string `json:"tools"`
+		// MaxTokens overrides the output budget for THIS call, clamped by the host.
+		//
+		// It exists because of thinking models: they bill their reasoning against the
+		// same budget, so a small cap turns into an EMPTY reply with a non-empty
+		// reasoning block (the host warns about exactly that shape). A caller can then
+		// retry once with more room instead of showing the user nothing - which is the
+		// only fix available on that side, since reasoning length is not ours to set.
+		//
+		// Clamped rather than trusted: 64 is below any useful answer, and the ceiling
+		// keeps one plugin from turning a shared key into a runaway bill. The clamp is
+		// intentionally a fixed number, NOT the user's configured budget: this is a
+		// per-call ask, and the daily budget is still the user's line in the sand.
+		MaxTokens int `json:"maxTokens"`
 	}
 	if err := decodePayload(payload, &in); err != nil {
 		return nil, err
@@ -1816,6 +1848,9 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 		// vision call changes, so it cannot become a way around the endpoint, the
 		// key or the daily cap.
 		cfg.LLMModel = clampPluginText(model, 96)
+	}
+	if in.MaxTokens > 0 {
+		cfg.LLMMaxTokens = clampPluginMaxTokens(in.MaxTokens)
 	}
 	images, err := a.pluginChatImages(id, *row.Manifest, in.Images)
 	if err != nil {
