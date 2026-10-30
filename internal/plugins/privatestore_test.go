@@ -287,3 +287,60 @@ func TestValidStorageSegment(t *testing.T) {
 		}
 	}
 }
+
+// TestStorageSetNamesAKeyThatIsBothAFileAndAFolder covers the failure that reads like a disk
+// problem and is not one.
+//
+// A key is a path, so `s/<hash>` and `s/<hash>/meta` cannot both exist: the first is a file and
+// the second needs it to be a folder. What the host used to return was Windows' own
+// "The system cannot find the path specified", which sent the QQ-bot plugin's author looking at
+// permissions (six times on 2026-10-29). The assertion is on the SENTENCE, because the sentence
+// is the whole fix: the plugin author reads it in their own log and knows which of their keys to
+// rename.
+func TestStorageSetNamesAKeyThatIsBothAFileAndAFolder(t *testing.T) {
+	dir := t.TempDir()
+	// The transcript key, written first - exactly the order that made this happen in the wild.
+	storeCall(t, StorageSet, dir, `{"key":"s/6fc664c3","value":"[]"}`)
+
+	_, err := StorageSet(dir, []byte(`{"key":"s/6fc664c3/meta","value":"{}"}`))
+	if err == nil {
+		t.Fatal("a key under a file must be refused")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "s/6fc664c3") {
+		t.Errorf("the message must name the blocking path, got %q", msg)
+	}
+	if !strings.Contains(msg, "已经是一个文件") {
+		t.Errorf("the message must say the blocker is a file, got %q", msg)
+	}
+	// The original file must be untouched: a refusal changes nothing.
+	got := storeCall(t, StorageGet, dir, `{"key":"s/6fc664c3"}`)
+	if got["value"] != "[]" {
+		t.Errorf("the existing value changed: %v", got["value"])
+	}
+}
+
+// TestFirstFileInPathOnlyBlamesFiles is the other half of the translation: the walk must report
+// a FILE and nothing else, or every failed mkdir would be blamed on the plugin's key design.
+//
+// A folder-only prefix is not the cause (MkdirAll could have created it), and an absent one is
+// not either - so both answer "". Only a component that exists as a file is named.
+func TestFirstFileInPathOnlyBlamesFiles(t *testing.T) {
+	dir := t.TempDir()
+	storeCall(t, StorageSet, dir, `{"key":"a/b/c","value":"1"}`)
+
+	if blocker := firstFileInPath(dir, filepath.Join(dir, "a", "b")); blocker != "" {
+		t.Errorf("a path made of folders was blamed: %q", blocker)
+	}
+	if blocker := firstFileInPath(dir, filepath.Join(dir, "a", "b", "c")); blocker != filepath.Join(dir, "a", "b", "c") {
+		t.Errorf("the file at the end was not reported: %q", blocker)
+	}
+	if blocker := firstFileInPath(dir, filepath.Join(dir, "a", "nope", "deeper")); blocker != "" {
+		t.Errorf("an absent component was blamed: %q", blocker)
+	}
+	// Outside the plugin's own directory is never walked: the caller's key cannot reach there,
+	// and a helper that answered would be a path leak waiting to be printed.
+	if blocker := firstFileInPath(dir, filepath.Join(filepath.Dir(dir), "elsewhere")); blocker != "" {
+		t.Errorf("a path outside the base was walked: %q", blocker)
+	}
+}

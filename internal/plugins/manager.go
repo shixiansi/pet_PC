@@ -696,16 +696,30 @@ func extractZip(zipPath, dest string) error {
 	var total uint64
 	for _, f := range zr.File {
 		name := f.Name
+		// A DIRECTORY entry's name ends in "/" - that is what the zip format says a
+		// directory entry looks like, and every common packer writes them (PowerShell's
+		// Compress-Archive emits one per folder, even for folders that also have files in
+		// them). ValidRelPath splits on "/" and refuses an empty segment, so the trailing
+		// slash had to be trimmed BEFORE the check or this branch was unreachable and a
+		// perfectly ordinary package was refused with "非法条目路径" - which is exactly what
+		// happened to the QQ-bot package on 2026-10-29 (three failed installs, and the
+		// message named a folder as if it were a traversal attempt).
+		//
+		// The trim is confined to directory entries on purpose: for a FILE the trailing
+		// slash is a mistake, and ValidRelPath should keep refusing it.
+		if f.FileInfo().IsDir() {
+			name = strings.TrimSuffix(name, "/")
+		}
 		if !ValidRelPath(name) {
-			return fmt.Errorf("插件包含非法条目路径：%q", name)
+			return fmt.Errorf("插件包含非法条目路径：%q", f.Name)
 		}
 		if filepath.IsAbs(name) || filepath.VolumeName(name) != "" {
-			return fmt.Errorf("插件包含非法条目路径：%q", name)
+			return fmt.Errorf("插件包含非法条目路径：%q", f.Name)
 		}
 		full := filepath.Join(root, filepath.FromSlash(name))
 		rel, err := filepath.Rel(root, full)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("插件包含非法条目路径：%q", name)
+			return fmt.Errorf("插件包含非法条目路径：%q", f.Name)
 		}
 		if !f.FileInfo().Mode().IsRegular() && !f.FileInfo().IsDir() {
 			return fmt.Errorf("插件包含非普通文件条目：%q", name)

@@ -145,12 +145,48 @@ func StorageSet(dir string, payload []byte) (any, error) {
 		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		// Translate the ONE cause a plugin can actually fix, and it is the one that looks
+		// like anything but a plugin bug: a key that is a FILE in one call and a FOLDER in
+		// another (`s/<hash>` and `s/<hash>/meta`) makes MkdirAll fail with Windows'
+		// "The system cannot find the path specified", which reads as a disk or permission
+		// problem. The QQ-bot plugin spent six of those on 2026-10-29 before anyone looked at
+		// the key names. Anything else keeps the original error, because guessing at other
+		// causes would replace a precise message with a vague one.
+		if blocker := firstFileInPath(dir, filepath.Dir(path)); blocker != "" {
+			return nil, fmt.Errorf(
+				"storage key %q 用不了：%q 已经是一个文件，不能同时当目录（一个键只能有一种身份）",
+				in.Key, blocker)
+		}
 		return nil, err
 	}
 	if err := os.WriteFile(path, []byte(in.Value), 0o644); err != nil {
 		return nil, err
 	}
 	return map[string]any{"ok": true}, nil
+}
+
+// firstFileInPath reports the first component of path (relative to base) that exists as a FILE,
+// or "" when the whole prefix is folders or absent.
+//
+// It is only called after a failed MkdirAll, so the cost of walking a handful of segments is
+// paid on an error path and never on the happy one.
+func firstFileInPath(base, path string) string {
+	rel, err := filepath.Rel(base, path)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	current := base
+	for _, segment := range strings.Split(rel, string(filepath.Separator)) {
+		current = filepath.Join(current, segment)
+		info, err := os.Stat(current)
+		if err != nil {
+			return "" // absent: MkdirAll could have created it, so this is not the cause
+		}
+		if !info.IsDir() {
+			return current
+		}
+	}
+	return ""
 }
 
 // StorageRemove deletes one private value.

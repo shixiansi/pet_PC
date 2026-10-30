@@ -208,6 +208,112 @@ func TestInstallAcceptsAGoodPackage(t *testing.T) {
 	}
 }
 
+// TestExtractZipAcceptsDirectoryEntries covers the branch that used to be dead code.
+//
+// A zip may carry an entry for a FOLDER - name ends in "/", mode says directory - and every
+// common packer writes them: PowerShell's Compress-Archive emits one per folder. The path
+// check ran before the "is this a directory" test and refused the trailing slash as an empty
+// segment, so a perfectly ordinary package was rejected with 「非法条目路径」 naming a folder
+// as if it were a traversal attempt. That is what happened to the QQ-bot package on
+// 2026-10-29 (three failed installs, "lib/" in the message).
+//
+// The files-only packages every earlier test built could not catch it, which is why this one
+// constructs the archive by hand instead of going through makeZip.
+func TestExtractZipAcceptsDirectoryEntries(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "pkg.zip")
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	addDir := func(name string) {
+		h := &zip.FileHeader{Name: name}
+		h.SetMode(os.ModeDir | 0o755)
+		if _, err := zw.CreateHeader(h); err != nil {
+			t.Fatalf("zip dir %s: %v", name, err)
+		}
+	}
+	addFile := func(name, body string) {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("zip file %s: %v", name, err)
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatalf("zip write %s: %v", name, err)
+		}
+	}
+	// An empty folder, a folder that also has files, and a nested one: the three shapes a
+	// packer writes and the three that failed differently before the fix.
+	addDir("lib/")
+	addDir("lib/nested/")
+	addFile("manifest.json", `{"id":"com.example.demo"}`)
+	addFile("lib/core.js", "export const x = 1;\n")
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+	if err := os.WriteFile(zipPath, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write zip: %v", err)
+	}
+
+	dest := filepath.Join(dir, "out")
+	if err := extractZip(zipPath, dest); err != nil {
+		t.Fatalf("a package with directory entries must install: %v", err)
+	}
+	for _, folder := range []string{"lib", filepath.Join("lib", "nested")} {
+		info, err := os.Stat(filepath.Join(dest, folder))
+		if err != nil {
+			t.Fatalf("folder %s: %v", folder, err)
+		}
+		if !info.IsDir() {
+			t.Errorf("%s is not a directory", folder)
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(dest, "lib", "core.js"))
+	if err != nil {
+		t.Fatalf("read lib/core.js: %v", err)
+	}
+	if string(got) != "export const x = 1;\n" {
+		t.Errorf("lib/core.js content = %q", got)
+	}
+}
+
+// TestExtractZipStillRefusesTraversalAfterTrimmingTheSlash keeps the fix from becoming a hole:
+// the trim applies to entries the READER calls a directory, so "../" and an absolute path are
+// still refused. (There is no "file whose name ends in /" to worry about: the zip format defines
+// a trailing slash as the directory marker, so Go's reader reports IsDir() for it - which is
+// exactly the signal the trim keys off.)
+func TestExtractZipStillRefusesTraversalAfterTrimmingTheSlash(t *testing.T) {
+	cases := []struct{ label, name string }{
+		{"parent dir entry", "../"},
+		{"nested escape", "lib/../../"},
+		{"absolute dir", "/etc/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			dir := t.TempDir()
+			zipPath := filepath.Join(dir, "pkg.zip")
+			var buf bytes.Buffer
+			zw := zip.NewWriter(&buf)
+			h := &zip.FileHeader{Name: tc.name}
+			h.SetMode(os.ModeDir | 0o755)
+			if _, err := zw.CreateHeader(h); err != nil {
+				t.Fatalf("zip dir: %v", err)
+			}
+			if err := zw.Close(); err != nil {
+				t.Fatalf("zip close: %v", err)
+			}
+			if err := os.WriteFile(zipPath, buf.Bytes(), 0o644); err != nil {
+				t.Fatalf("write zip: %v", err)
+			}
+			err := extractZip(zipPath, filepath.Join(dir, "out"))
+			if err == nil {
+				t.Fatalf("%s (%q) must be refused", tc.label, tc.name)
+			}
+			if !strings.Contains(err.Error(), "非法条目路径") {
+				t.Fatalf("error %q must name the illegal entry", err)
+			}
+		})
+	}
+}
+
 // TestInstallRejectsBadDigest covers T16's refusing half, including the part
 // that matters most: the installed set is unchanged and nothing was left behind.
 func TestInstallRejectsBadDigest(t *testing.T) {
