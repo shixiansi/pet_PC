@@ -368,6 +368,25 @@ export namespace main {
 
 }
 
+export namespace plugins {
+	
+	export class HostInfo {
+	    program: string;
+	    methods: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new HostInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.program = source["program"];
+	        this.methods = source["methods"];
+	    }
+	}
+
+}
+
 export namespace store {
 	
 	export class Position {

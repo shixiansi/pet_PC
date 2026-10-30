@@ -268,6 +268,20 @@ export const Grant = (id: string, granted: string[]): Promise<void | unknown> =>
 export const SetEnabled = (id: string, on: boolean): Promise<void | unknown> =>
   DEV ? later(undefined) : host.SetEnabled(id, on);
 
+/**
+ * What THIS program serves, for `init.host` (see `internal/plugins.HostInfo`).
+ *
+ * No dev fake, and for the same reason `PluginRequest` has none: a plausible one would be a
+ * hand-written copy of `marketRegistry`'s method table, and a copy that drifts is exactly the
+ * failure this field exists to remove - a plugin would be told "yes, this window serves
+ * `llm.profile`" by a browser session and refused by the .exe. In dev the frame simply gets no
+ * `host`, and a plugin falls back to `surface.slot`, which is the pre-existing rule.
+ */
+export const PluginHostInfo = (): Promise<plugins.HostInfo> => {
+  if (!DEV) return host.PluginHostInfo();
+  return Promise.reject(new Error('浏览器里没有 Go 侧的能力表（init.host 会缺省，插件按 slot 判断）'));
+};
+
 // --- 市场目录：只为了回答「有没有更新」 ------------------------------------------
 //
 // The catalogue is here for ONE reason so far, and it is not browsing: a plugin's interface

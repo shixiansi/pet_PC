@@ -271,6 +271,20 @@ func (a *App) PluginsInstalled() ([]PluginView, error) {
 	return out, nil
 }
 
+// PluginHostInfo answers "what does THIS program serve".
+//
+// The table is `pluginMethods` - the same map the dispatcher consults - so the answer cannot
+// drift from the gate. That is the whole point: a second list written for the page would be a
+// second thing to keep in sync, and this repository has already paid for that mistake twice
+// (the permission count, and the background-permission list in main.js).
+//
+// The page puts this into `init.host` for every frame (frontend/src/plugin-host.js), so a
+// plugin can ask `host.methods.includes('llm.profile')` instead of hardcoding which window it
+// is in. See plugins.HostInfo for why that matters.
+func (a *App) PluginHostInfo() plugins.HostInfo {
+	return plugins.HostInfoOf("pet", pluginMethods)
+}
+
 // pluginViewOf projects one manager row.
 func pluginViewOf(r plugins.Installed) PluginView {
 	v := PluginView{

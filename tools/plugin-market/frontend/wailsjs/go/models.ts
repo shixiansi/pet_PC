@@ -589,6 +589,20 @@ export namespace plugins {
 		}
 	}
 	
+	export class HostInfo {
+	    program: string;
+	    methods: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new HostInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.program = source["program"];
+	        this.methods = source["methods"];
+	    }
+	}
 	export class Rect {
 	    dx: number;
 	    dy: number;
@@ -630,6 +644,8 @@ export namespace plugins {
 	    background?: boolean;
 	    shareLLM?: boolean;
 	    shareRead?: string[];
+	    serves?: string[];
+	    callTargets?: string[];
 	    assets?: string[];
 	    entry: string;
 	
@@ -653,6 +669,8 @@ export namespace plugins {
 	        this.background = source["background"];
 	        this.shareLLM = source["shareLLM"];
 	        this.shareRead = source["shareRead"];
+	        this.serves = source["serves"];
+	        this.callTargets = source["callTargets"];
 	        this.assets = source["assets"];
 	        this.entry = source["entry"];
 	    }

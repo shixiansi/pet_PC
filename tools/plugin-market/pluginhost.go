@@ -144,6 +144,17 @@ func (m *Market) marketRegistry() *plugins.Registry {
 	return r
 }
 
+// PluginHostInfo answers "what does THIS program serve", for `init.host`.
+//
+// The list is this program's own registry - the same map `PluginRequest` dispatches through -
+// so it cannot claim a capability the gate would refuse. That matters more here than in the pet:
+// the difference between the two hosts is the whole reason this field exists, and a plugin that
+// had to infer it from `surface.slot` kept getting it wrong in the one direction that costs a
+// WARN line per poll (see plugins.HostInfo).
+func (m *Market) PluginHostInfo() plugins.HostInfo {
+	return plugins.HostInfoOf("workshop", m.marketRegistry().Methods())
+}
+
 // PluginRequest is the ONE way a plugin reaches this program.
 //
 // The signature matches the pet's binding exactly, and deliberately: the plugin's

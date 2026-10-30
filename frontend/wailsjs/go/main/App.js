@@ -74,6 +74,10 @@ export function PetImageURL() {
   return window['go']['main']['App']['PetImageURL']();
 }
 
+export function PluginHostInfo() {
+  return window['go']['main']['App']['PluginHostInfo']();
+}
+
 export function PluginMarketCandidates() {
   return window['go']['main']['App']['PluginMarketCandidates']();
 }

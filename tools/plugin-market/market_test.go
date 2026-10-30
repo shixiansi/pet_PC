@@ -677,3 +677,42 @@ func TestUninstallKeepsPrivateDataUnlessPurged(t *testing.T) {
 		t.Fatalf("the index still lists %d plugins", len(rows))
 	}
 }
+
+// --- the workshop's own capability answer -----------------------------------
+
+// TestPluginHostInfoIsTheWorkshopTable pins that `init.host` cannot promise what the gate refuses.
+//
+// The workshop is the mount where "does this window serve X" used to be answered by guessing, so
+// a list that disagreed with `marketRegistry` would be worse than no list: it would tell a plugin
+// to call `llm.profile` here and then refuse it - one WARN line per poll, which is exactly how the
+// real machine spent 445 lines on a single plugin.
+//
+// It also pins the PROGRAM NAME, because that string is how a plugin says "I am in the control
+// center" without translating between `surface.slot` vocabulary and a second one.
+func TestPluginHostInfoIsTheWorkshopTable(t *testing.T) {
+	m := newTestMarket(t, "")
+	info := m.PluginHostInfo()
+	if info.Program != "workshop" {
+		t.Fatalf("Program = %q, want workshop", info.Program)
+	}
+	table := m.marketRegistry().Methods()
+	if len(info.Methods) != len(table) {
+		t.Fatalf("the answer names %d methods, the table has %d", len(info.Methods), len(table))
+	}
+	for i, name := range info.Methods {
+		if !m.marketRegistry().Has(name) {
+			t.Errorf("%q is advertised but the gate does not accept it", name)
+		}
+		if i > 0 && info.Methods[i-1] > name {
+			t.Errorf("Methods are not sorted at %d: %q after %q", i, name, info.Methods[i-1])
+		}
+	}
+	// The pet-only half must NOT be advertised here: that is the difference the field reports.
+	for _, petOnly := range []string{"llm.profile", "llm.providers", "llm.chat", "bubble.say", "plugin.call"} {
+		for _, advertised := range info.Methods {
+			if advertised == petOnly {
+				t.Errorf("%q is advertised in the workshop, where the gate refuses it", petOnly)
+			}
+		}
+	}
+}

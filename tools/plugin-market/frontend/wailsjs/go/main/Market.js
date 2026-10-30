@@ -54,6 +54,10 @@ export function PermissionLabels() {
   return window['go']['main']['Market']['PermissionLabels']();
 }
 
+export function PluginHostInfo() {
+  return window['go']['main']['Market']['PluginHostInfo']();
+}
+
 export function PluginMarketPath() {
   return window['go']['main']['Market']['PluginMarketPath']();
 }

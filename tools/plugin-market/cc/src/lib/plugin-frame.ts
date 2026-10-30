@@ -38,10 +38,41 @@
  * imperatively, on a stable mount point the page owns. `PluginFrame.svelte` is only the
  * adapter that decides WHEN.
  */
-import { PluginRequest } from './bridge';
+import { PluginHostInfo, PluginRequest } from './bridge';
 
 /** The protocol version, matching internal/plugins.BridgeJS. */
 const V = 1;
+
+/**
+ * What this program serves, as `{program, methods}` - the workshop's half of `init.host`.
+ *
+ * Fetched once per page load and read when a plugin says `ready` (init is the answer to that,
+ * not to the mount, so there is always a document load's worth of time to fill this in). Absent
+ * is a legal state: `init.host` is optional, and a plugin that does not find it falls back to
+ * `surface.slot` - the rule that existed before the field.
+ *
+ * WHY IT COMES FROM GO: the list is `marketRegistry`'s own table. A copy kept here would answer
+ * "does this window serve `llm.profile`" with something that is not the gate's answer, which is
+ * the mistake this field exists to stop (571 `本程序不支持该方法` lines in one day's logs).
+ */
+let hostInfo: { program: string; methods: string[] } | null = null;
+let hostInfoAsked = false;
+function loadHostInfo(): void {
+  if (hostInfoAsked) return;
+  hostInfoAsked = true;
+  void PluginHostInfo()
+    .then((info) => {
+      // Copied into a plain object: the binding's value may be a `models.ts` class instance,
+      // and anything object-shaped that came through Svelte would be a Proxy - which cannot
+      // cross `postMessage` (see mountPlugin's DataCloneError note).
+      hostInfo = info && typeof info.program === 'string' && Array.isArray(info.methods)
+        ? { program: info.program, methods: [...info.methods] }
+        : null;
+    })
+    .catch(() => {
+      hostInfo = null;
+    });
+}
 
 /** The colour scheme a frame is drawn in. */
 export type FrameTheme = 'light' | 'dark';
@@ -85,6 +116,11 @@ export function windowTheme(): FrameTheme {
  * granted to it.
  */
 export function mountPlugin(mount: HTMLElement, req: MountRequest, theme: FrameTheme): PluginFrame {
+  // Start the capability-table read on the first mount rather than at module load: this module
+  // is imported by tests too, and a top-level call would reach for a binding that does not exist
+  // in that environment. `init` is only sent once the plugin says `ready`, which is a document
+  // load later, so there is time for the promise to settle.
+  loadHostInfo();
   // Everything this frame will ever repeat back to the plugin is read ONCE here, out of
   // whatever the caller handed over.
   //
@@ -209,6 +245,9 @@ export function mountPlugin(mount: HTMLElement, req: MountRequest, theme: FrameT
         // The slot name is how a plugin with several appearances tells them apart: the pet
         // mounts the same document as 'background' or 'chat', and here it is the workshop.
         surface: { kind: 'panel', slot: 'workshop' },
+        // Which program this is, and what it answers. Optional in the protocol, and omitted
+        // when the read has not landed yet - a plugin that ignores it is unaffected.
+        ...(hostInfo ? { host: hostInfo } : {}),
       });
       return;
     }

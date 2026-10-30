@@ -32,6 +32,8 @@ export function MainSettings():Promise<store.Config>;
 
 export function PermissionLabels():Promise<Array<main.LabelPair>>;
 
+export function PluginHostInfo():Promise<plugins.HostInfo>;
+
 export function PluginMarketPath():Promise<string|boolean>;
 
 export function PluginRequest(arg1:string,arg2:string,arg3:string):Promise<string>;

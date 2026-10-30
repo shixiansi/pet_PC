@@ -54,7 +54,7 @@ function installBridge(handlers = {}) {
     'EndDrag', 'GetLayout', 'GetState', 'HidePet',
     'HidePetForUser', 'OpenChatPluginSurface', 'OpenPetMenu', 'OpenPluginMarket',
     'OpenPluginSurface', 'OpenTodoFromBubble', 'PageLog', 'PetBadge', 'SetPluginSurfaceBlocks',
-    'PetImageURL', 'PluginMarketCandidates',
+    'PetImageURL', 'PluginMarketCandidates', 'PluginHostInfo',
     'PluginMarketPath', 'PluginRequest', 'PluginsInstalled', 'Quit', 'Ready', 'RemindNow', 'ResetPetImage', 'ResetToDefaultPosition', 'SaveHotkeySettings', 'SaveReminderSettings', 'SetAutostart', 'SetBubbleHover',
     'SetCardTheme', 'SetReminderEnabled', 'SetScale', 'ToggleCardTheme',
     'SetSnapToEdge', 'ShowPet', 'ShowPetForUser', 'SnapNow', 'StartDrag', 

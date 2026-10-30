@@ -2224,6 +2224,48 @@ func TestCapabilityTableIsComplete(t *testing.T) {
 	}
 }
 
+// --- the host's own capability answer ---------------------------------------
+
+// TestPluginHostInfoIsTheDispatchTable pins the one thing that makes `init.host` worth having.
+//
+// A plugin decides from this list whether to send a request at all. So a name that appears here
+// but is absent from `pluginMethods` would invite a call the gate refuses - turning "this window
+// cannot do that" into "it can, try it", which is the mistake that produced 571 WARN lines on
+// 2026-10-30. The list is computed from the table rather than written out, and this test is what
+// keeps a future "just hardcode the four the workshop needs" from passing.
+func TestPluginHostInfoIsTheDispatchTable(t *testing.T) {
+	a := pluginApp(t)
+	info := a.PluginHostInfo()
+	if info.Program != "pet" {
+		t.Fatalf("Program = %q, want pet", info.Program)
+	}
+	if len(info.Methods) != len(pluginMethods) {
+		t.Fatalf("the answer names %d methods, the table has %d", len(info.Methods), len(pluginMethods))
+	}
+	for i, name := range info.Methods {
+		if _, ok := pluginMethods[name]; !ok {
+			t.Errorf("%q is advertised but not dispatchable", name)
+		}
+		// Sorted: the list travels into a plugin's document, and Go's map order is random.
+		if i > 0 && info.Methods[i-1] > name {
+			t.Errorf("Methods are not sorted at %d: %q after %q", i, name, info.Methods[i-1])
+		}
+	}
+	// And the direction that matters for a plugin's UI: everything callable is advertised.
+	for name := range pluginMethods {
+		found := false
+		for _, advertised := range info.Methods {
+			if advertised == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%q is dispatchable but not advertised", name)
+		}
+	}
+}
+
 // --- process.launch ---------------------------------------------------------
 
 // TestProcessLaunchRefusesBadPaths covers the checks that must happen BEFORE
