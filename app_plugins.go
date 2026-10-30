@@ -1074,7 +1074,15 @@ func pluginSurfaceHide(a *App, id string, _ []byte) (any, error) {
 // there while idle, transparent but still swallowing every click in its area.
 func pluginSurfaceBlocks(a *App, id string, payload []byte) (any, error) {
 	var req struct {
-		Hidden []int `json:"hidden"`
+		// A POINTER, so "absent" and "empty" are different requests.
+		//
+		// `hidden` is whole-set semantics (see SetPluginSurfaceBlocks), which is right for the call
+		// that CHANGES what is visible - but every frame of the plugin is a separate document with
+		// its own idea of the set, so a frame that only wants to grow its card used to send its own
+		// (empty) set and silently un-hide the other frame's block. It was harmless while nothing
+		// ever hid a block; the first plugin that did saw an empty card come back.
+		// Absent now means "leave the hidden set alone".
+		Hidden *[]int `json:"hidden"`
 		// JSON object keys are strings, so the declaration index arrives as one. Converted below
 		// rather than declared as a map[int]int, which encoding/json refuses to fill.
 		Sizes map[string]int `json:"sizes"`
@@ -1103,7 +1111,11 @@ func pluginSurfaceBlocks(a *App, id string, payload []byte) (any, error) {
 			a.log.Pluginf(logging.LevelWarn, "plugin", id, "%s", warning)
 		}
 	}
-	if _, err := a.SetPluginSurfaceBlocks(id, req.Hidden, sizes); err != nil {
+	var hidden []int
+	if req.Hidden != nil {
+		hidden = *req.Hidden
+	}
+	if _, err := a.SetPluginSurfaceBlocks(id, hidden, req.Hidden != nil, sizes); err != nil {
 		return nil, err
 	}
 	return map[string]any{"ok": true}, nil
@@ -1115,25 +1127,27 @@ func pluginSurfaceBlocks(a *App, id string, payload []byte) (any, error) {
 //
 // Indices outside the declaration are simply never matched by computePluginSurface, so an
 // out-of-range value is a no-op rather than an error: the declaration is the authority.
-func (a *App) SetPluginSurfaceBlocks(pluginID string, hidden []int, sizes map[int]int) (Layout, error) {
+func (a *App) SetPluginSurfaceBlocks(pluginID string, hidden []int, hiddenGiven bool, sizes map[int]int) (Layout, error) {
 	a.mu.Lock()
 	cur := a.pluginSurface
 	a.mu.Unlock()
 	if cur == nil || cur.PluginID != pluginID {
 		return Layout{}, fmt.Errorf("surface is not open for %s", pluginID)
 	}
-	set := make(map[int]bool, len(hidden))
-	for _, i := range hidden {
-		if i < 0 {
-			continue
-		}
-		set[i] = true
-	}
 	a.surfaceHiddenMu.Lock()
-	if len(set) == 0 {
-		a.surfaceHiddenBlocks = nil
-	} else {
-		a.surfaceHiddenBlocks = set
+	if hiddenGiven {
+		set := make(map[int]bool, len(hidden))
+		for _, i := range hidden {
+			if i < 0 {
+				continue
+			}
+			set[i] = true
+		}
+		if len(set) == 0 {
+			a.surfaceHiddenBlocks = nil
+		} else {
+			a.surfaceHiddenBlocks = set
+		}
 	}
 	if len(sizes) == 0 {
 		a.surfaceBlockSizes = nil
