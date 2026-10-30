@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -2487,4 +2488,98 @@ func TestChatImagesAllowInlinePicturesAndBoundThem(t *testing.T) {
 			t.Fatalf("error must say the pictures add up, got %q", err)
 		}
 	})
+}
+
+// --- 能力发现：plugins.services ---------------------------------------------
+
+// TestPluginServicesListsWhatEachPluginServes covers the "who can answer what" method.
+//
+// The pressure behind it: a caller can only reach the targets it DECLARES (`callTargets`), and
+// nothing told it what those targets were - so "who can answer a definition / a search" was
+// hardcoded in every consumer, and a newly installed provider stayed invisible until someone
+// edited the core. Reading the install state makes `serves` a promise people can hear.
+func TestPluginServicesListsWhatEachPluginServes(t *testing.T) {
+	a := pluginApp(t)
+	lexicon := installSampleWith(t, a, map[string]any{
+		"id":          "com.example.lexicon",
+		"serves":      []string{"slang", "wiki"},
+		"permissions": []string{"plugin.call"},
+	})
+	search := installSampleWith(t, a, map[string]any{
+		"id":          "com.example.search",
+		"serves":      []string{"search"},
+		"permissions": []string{"plugin.call"},
+	})
+	// 一个不提供任何方法的插件（纯界面 / 纯常驻）不该出现在列表里。
+	installSampleWith(t, a, map[string]any{
+		"id":          "com.example.plain",
+		"serves":      nil,
+		"permissions": []string{"storage"},
+	})
+	// 已停用的也不该出现：装着但关掉的功能不该被推荐出去。
+	disabled := installSampleWith(t, a, map[string]any{
+		"id":          "com.example.off",
+		"serves":      []string{"audio"},
+		"permissions": []string{"plugin.call"},
+	})
+	if err := a.pluginManager().SetEnabled(disabled, false); err != nil {
+		t.Fatalf("停用插件：%v", err)
+	}
+
+	raw, err := pluginServices(a, "com.example.caller", nil)
+	if err != nil {
+		t.Fatalf("plugins.services: %v", err)
+	}
+	blob, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("序列化：%v", err)
+	}
+	var decoded struct {
+		Services []struct {
+			ID     string   `json:"id"`
+			Name   string   `json:"name"`
+			Serves []string `json:"serves"`
+		} `json:"services"`
+	}
+	if err := json.Unmarshal(blob, &decoded); err != nil {
+		t.Fatalf("反序列化：%v", err)
+	}
+
+	got := map[string][]string{}
+	for _, row := range decoded.Services {
+		got[row.ID] = row.Serves
+	}
+	if _, ok := got[lexicon]; !ok {
+		t.Fatalf("提供 slang/wiki 的插件没有被列出来：%v", decoded.Services)
+	}
+	if want := []string{"slang", "wiki"}; !reflect.DeepEqual(got[lexicon], want) {
+		t.Fatalf("%s 的 serves 是 %v，want %v", lexicon, got[lexicon], want)
+	}
+	if _, ok := got[search]; !ok {
+		t.Fatalf("提供 search 的插件没有被列出来")
+	}
+	if _, ok := got["com.example.plain"]; ok {
+		t.Fatal("不提供任何方法的插件不该出现在列表里")
+	}
+	if _, ok := got[disabled]; ok {
+		t.Fatal("停用的插件不该出现在列表里")
+	}
+
+	// 自己不在列表里：一个插件问"谁能干什么"时，自己那张名片没有用。
+	self, err := pluginServices(a, lexicon, nil)
+	if err != nil {
+		t.Fatalf("plugins.services（自问）：%v", err)
+	}
+	selfBlob, _ := json.Marshal(self)
+	var selfDecoded struct {
+		Services []struct {
+			ID string `json:"id"`
+		} `json:"services"`
+	}
+	_ = json.Unmarshal(selfBlob, &selfDecoded)
+	for _, row := range selfDecoded.Services {
+		if row.ID == lexicon {
+			t.Fatal("调用方自己不该出现在列表里")
+		}
+	}
 }

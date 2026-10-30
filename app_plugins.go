@@ -410,6 +410,7 @@ var pluginMethods = map[string]pluginMethod{
 	// Asking another plugin a question: authorised here, delivered by the page (see
 	// pluginPluginCall). Gated on plugin.call, which BOTH ends must hold.
 	"plugin.call":    {perm: plugins.PermPluginCall, run: pluginPluginCall},
+		"plugins.services": {perm: plugins.PermPluginCall, run: pluginServices},
 	"surface.show":   {perm: plugins.PermPetSurface, run: pluginSurfaceShow},
 	"surface.hide":   {perm: plugins.PermPetSurface, run: pluginSurfaceHide},
 	"surface.blocks": {perm: plugins.PermPetSurface, run: pluginSurfaceBlocks},
@@ -1628,6 +1629,52 @@ func pluginShareRemove(a *App, id string, payload []byte) (any, error) {
 // the honest answer there is "本程序不支持该方法", exactly as for llm.chat.
 func pluginPluginCall(a *App, id string, payload []byte) (any, error) {
 	return plugins.CallPlugin(a.pluginManager(), id, payload)
+}
+
+// pluginServices lists WHO can answer plugin.call and WHAT each of them serves.
+//
+// WHY this is a host method rather than something each plugin figures out:
+//
+// A caller can only reach the targets it DECLARED in its manifest (`callTargets`), and nothing
+// in the host told it what those targets were - so "who can answer a definition / a search / a
+// video lookup" was hardcoded in every consumer. The memory core learned one plugin id per
+// feature, one release at a time, and a newly installed provider was invisible until someone
+// edited the core. Reading the install state instead makes "a feature plugin exists" the only
+// thing that has to happen for it to be used.
+//
+// The manifest's declaration is the whole point: `serves` is what a plugin PROMISES, and a
+// declaration nobody can discover is a promise nobody hears.
+//
+// Gated by plugin.call itself (the permission that lets a plugin talk to plugins at all), and
+// it deliberately leaks nothing else: name, description and served method names are exactly
+// what a caller needs to choose, and they are already public in the market catalogue.
+func pluginServices(a *App, id string, _ []byte) (any, error) {
+	type service struct {
+		ID          string   `json:"id"`
+		Name        string   `json:"name"`
+		Description string   `json:"description"`
+		Serves      []string `json:"serves"`
+	}
+	out := make([]service, 0, 8)
+	for _, row := range a.pluginManager().Plugins() {
+		if !row.Enabled || row.Manifest == nil || row.ID == id {
+			continue
+		}
+		if len(row.Manifest.Serves) == 0 {
+			continue
+		}
+		name := row.Manifest.Name
+		if name == "" {
+			name = row.ID
+		}
+		out = append(out, service{
+			ID:          row.ID,
+			Name:        name,
+			Description: row.Manifest.Description,
+			Serves:      append([]string{}, row.Manifest.Serves...),
+		})
+	}
+	return map[string]any{"services": out}, nil
 }
 
 // pluginLLMChat sends one message to the model the CALLING PLUGIN configured -
