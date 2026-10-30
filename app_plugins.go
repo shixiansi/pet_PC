@@ -402,32 +402,43 @@ var pluginMethods = map[string]pluginMethod{
 	// my own folder" is exactly what that permission already means. A separate switch
 	// would be one the user cannot describe the difference of - they would be choosing
 	// between two rows that both read "save data in your private directory".
-	"memory.read":    {perm: plugins.PermStorage, run: pluginMemoryRead},
-	"memory.append":  {perm: plugins.PermStorage, run: pluginMemoryAppend},
-	"share.set":      {perm: plugins.PermPluginShare, run: pluginShareSet},
-	"share.get":      {perm: plugins.PermPluginShare, run: pluginShareGet},
-	"share.remove":   {perm: plugins.PermPluginShare, run: pluginShareRemove},
+	"memory.read":   {perm: plugins.PermStorage, run: pluginMemoryRead},
+	"memory.append": {perm: plugins.PermStorage, run: pluginMemoryAppend},
+	"share.set":     {perm: plugins.PermPluginShare, run: pluginShareSet},
+	"share.get":     {perm: plugins.PermPluginShare, run: pluginShareGet},
+	"share.remove":  {perm: plugins.PermPluginShare, run: pluginShareRemove},
+	// Asking another plugin a question: authorised here, delivered by the page (see
+	// pluginPluginCall). Gated on plugin.call, which BOTH ends must hold.
+	"plugin.call":    {perm: plugins.PermPluginCall, run: pluginPluginCall},
 	"surface.show":   {perm: plugins.PermPetSurface, run: pluginSurfaceShow},
 	"surface.hide":   {perm: plugins.PermPetSurface, run: pluginSurfaceHide},
 	"surface.blocks": {perm: plugins.PermPetSurface, run: pluginSurfaceBlocks},
 	// pet.badge draws one line of text inside the pet's own box (app_pet_badge.go). Gated by
 	// pet.surface on purpose: same authority, and no new authorisation dialog on update.
-	"pet.badge":      {perm: plugins.PermPetSurface, run: pluginBadge},
-	"llm.chat":       {perm: plugins.PermLLMChat, run: pluginLLMChat},
-	"llm.profile":    {perm: plugins.PermLLMBorrow, run: pluginLLMProfile},
-	"config.get":     {perm: plugins.PermPluginConfig, run: pluginConfigGet},
-	"config.set":     {perm: plugins.PermPluginConfig, run: pluginConfigSet},
-	"audio.save":     {perm: plugins.PermAudio, run: pluginAudioSave},
-	"audio.import":   {perm: plugins.PermAudio, run: pluginAudioImport},
-	"audio.list":     {perm: plugins.PermAudio, run: pluginAudioList},
-	"audio.remove":   {perm: plugins.PermAudio, run: pluginAudioRemove},
-	"audio.play":     {perm: plugins.PermAudio, run: pluginAudioPlay},
-	"audio.stop":     {perm: plugins.PermAudio, run: pluginAudioStop},
-	"ws.open":        {perm: plugins.PermNetWS, run: pluginWSOpen},
-	"ws.send":        {perm: plugins.PermNetWS, run: pluginWSSend},
-	"ws.close":       {perm: plugins.PermNetWS, run: pluginWSClose},
-	"ws.state":       {perm: plugins.PermNetWS, run: pluginWSState},
-	"process.launch": {perm: plugins.PermProcess, run: pluginProcessLaunch},
+	"pet.badge":   {perm: plugins.PermPetSurface, run: pluginBadge},
+	"llm.chat":    {perm: plugins.PermLLMChat, run: pluginLLMChat},
+	"llm.profile": {perm: plugins.PermLLMBorrow, run: pluginLLMProfile},
+	// Which model channels exist, with the same permission: it is the list half of
+	// llm.profile's answer, and "may I use another plugin's model" is one question.
+	"llm.providers": {perm: plugins.PermLLMBorrow, run: pluginLLMProviders},
+	// This plugin's OWN channel table: several endpoints, several models each, several keys
+	// each. Gated on llm.chat ("my own model configuration"), and it talks to no network -
+	// it is a settings file plus DPAPI-encrypted keys (openspec/changes/llm-channels).
+	"llm.channels.get": {perm: plugins.PermLLMChat, run: pluginLLMChannelsGet},
+	"llm.channels.set": {perm: plugins.PermLLMChat, run: pluginLLMChannelsSet},
+	"config.get":       {perm: plugins.PermPluginConfig, run: pluginConfigGet},
+	"config.set":       {perm: plugins.PermPluginConfig, run: pluginConfigSet},
+	"audio.save":       {perm: plugins.PermAudio, run: pluginAudioSave},
+	"audio.import":     {perm: plugins.PermAudio, run: pluginAudioImport},
+	"audio.list":       {perm: plugins.PermAudio, run: pluginAudioList},
+	"audio.remove":     {perm: plugins.PermAudio, run: pluginAudioRemove},
+	"audio.play":       {perm: plugins.PermAudio, run: pluginAudioPlay},
+	"audio.stop":       {perm: plugins.PermAudio, run: pluginAudioStop},
+	"ws.open":          {perm: plugins.PermNetWS, run: pluginWSOpen},
+	"ws.send":          {perm: plugins.PermNetWS, run: pluginWSSend},
+	"ws.close":         {perm: plugins.PermNetWS, run: pluginWSClose},
+	"ws.state":         {perm: plugins.PermNetWS, run: pluginWSState},
+	"process.launch":   {perm: plugins.PermProcess, run: pluginProcessLaunch},
 	// Whether that program is still running, and how it ended. The pair is what lets a
 	// plugin wait for a downloader without blocking its own frame or asking for a
 	// filesystem capability.
@@ -1592,6 +1603,19 @@ func pluginShareRemove(a *App, id string, payload []byte) (any, error) {
 	return plugins.ShareRemove(a.pluginManager(), id, payload)
 }
 
+// pluginPluginCall authorises one plugin-to-plugin call.
+//
+// This method is the AUTHORISING half only: it answers with an envelope (see
+// plugins.CallEnvelope and openspec/changes/plugin-call). The page delivers it, because
+// the frames live there and Wails has no way for Go to ask a document a question and wait.
+//
+// The market program deliberately does NOT serve this: it mounts one plugin page at a time
+// and serves neither `events` nor a headless frame, so there is nothing on the other end -
+// the honest answer there is "本程序不支持该方法", exactly as for llm.chat.
+func pluginPluginCall(a *App, id string, payload []byte) (any, error) {
+	return plugins.CallPlugin(a.pluginManager(), id, payload)
+}
+
 // pluginLLMChat sends one message to the model the CALLING PLUGIN configured -
 // or, when it declares the llm.borrow permission and its own settings are
 // incomplete, to the model another plugin lent it (see resolvePluginChatCredential).
@@ -1678,6 +1702,15 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 		// vision: a plugin sends pictures to a vision model and plain text to the
 		// chat model without maintaining two endpoints, two keys and two budgets.
 		Model string `json:"model"`
+		// Provider names ONE model channel (another plugin's id) instead of letting the
+		// host pick the lowest-id lender. It is a routing choice inside the llm.borrow
+		// consent, not a wider permission: the named plugin must still be a ready lender,
+		// and the endpoint/key still never cross into this document.
+		Provider string `json:"provider"`
+		// Channel picks one row of that plugin's route table (empty = its default).
+		Channel string `json:"channel"`
+		// KeyID picks one credential slot of that channel (empty = the first one stored).
+		KeyID string `json:"keyId"`
 		// Images are absolute http(s) URLs for the model to look at.
 		Images []string `json:"images"`
 		// Tools are NAMES from the host's catalog (app_plugin_tools.go), not schemas.
@@ -1707,7 +1740,12 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 		return nil, err
 	}
 
-	cred, err := a.resolvePluginChatCredential(id, row, cfgStore)
+	cred, err := a.resolvePluginChatCredential(id, row, cfgStore, llmPick{
+		Provider: in.Provider,
+		Channel:  in.Channel,
+		Model:    strings.TrimSpace(in.Model),
+		KeyID:    in.KeyID,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -2148,7 +2186,53 @@ func pluginOwnChatCredential(man plugins.Manifest, cfgStore *plugins.ConfigStore
 // A lender must be installed, ENABLED, and declare `shareLLM`; among several, the
 // lowest id wins, so the answer does not depend on install order (which is not
 // visible anywhere the user can see it).
-func (a *App) resolvePluginChatCredential(id string, row plugins.Installed, cfgStore *plugins.ConfigStore) (pluginChatCredential, error) {
+//
+// `provider` is `llm.chat`'s way of NAMING one of them (openspec/changes/llm-channels).
+// It exists because "the lowest id wins" is a tie-break, not a policy: a user with an
+// OpenAI channel and a local Ollama channel could not say which one a group should use.
+// Naming a channel skips the own-first rule - the caller asked for THAT endpoint - but it
+// does not skip the consent: llm.borrow is still required, and the named plugin must be a
+// real lender that could answer right now. No new permission: "use a model another plugin
+// configured" is one category of consent, and which one of them is a routing choice inside it.
+func (a *App) resolvePluginChatCredential(id string, row plugins.Installed, cfgStore *plugins.ConfigStore, pick llmPick) (pluginChatCredential, error) {
+	want := strings.TrimSpace(pick.Provider)
+	if want != "" {
+		if want == id {
+			return pluginChatCredential{}, errors.New("llm.chat 点名的模型渠道就是它自己：渠道要由别的插件提供")
+		}
+		if !hasPermission(row.Granted, plugins.PermLLMBorrow) {
+			return pluginChatCredential{}, fmt.Errorf("llm.chat 点名了模型渠道 %s，但「%s」没有 llm.borrow 权限", want, row.Manifest.Name)
+		}
+		lenderRow, ok := a.pluginManager().Get(want)
+		if !ok || !lenderRow.Enabled || lenderRow.Manifest == nil || !lenderRow.Manifest.ShareLLM {
+			return pluginChatCredential{}, fmt.Errorf("没有可用的模型渠道 %s：它要已安装、已启用，并声明 shareLLM（用 llm.providers 看有哪些）", want)
+		}
+		// A named channel is used or reported - never silently replaced by the default.
+		cred, ready, err := a.credentialFrom(want, *lenderRow.Manifest, pick)
+		if err != nil {
+			return pluginChatCredential{}, err
+		}
+		if !ready {
+			return pluginChatCredential{}, fmt.Errorf("模型渠道 %s 现在用不了：它没有可用的渠道/密钥（用 llm.channels.get 看它配了什么）", want)
+		}
+		cred.lender = want
+		cred.lenderName = lenderRow.Manifest.Name
+		return cred, nil
+	}
+
+	// Own first, and own means BOTH forms: the route table this plugin keeps, then the
+	// single-endpoint manifest config it has always had.
+	if cred, ready, err := a.credentialFrom(id, *row.Manifest, pick); err != nil {
+		return pluginChatCredential{}, err
+	} else if ready {
+		return cred, nil
+	} else if a.hasChannels(id) {
+		// The table exists and cannot be used: say which part is missing instead of
+		// falling through to "borrow from someone else", which would answer from a
+		// different account and look like it worked.
+		return pluginChatCredential{}, fmt.Errorf("「%s」的模型渠道现在用不了：检查地址、模型与密钥（llm.channels.get）", row.Manifest.Name)
+	}
+
 	own, ready := pluginOwnChatCredential(*row.Manifest, cfgStore)
 	if ready {
 		return own, nil
@@ -2162,16 +2246,173 @@ func (a *App) resolvePluginChatCredential(id string, row plugins.Installed, cfgS
 		}
 		return pluginChatCredential{}, errors.New("还没有填写 API Key")
 	}
-	lender := a.findLLMLender(id)
+	lender := a.findLLMLender(id, "")
 	if lender == nil {
 		return pluginChatCredential{}, fmt.Errorf("「%s」还没有可用的大模型配置：它自己没填，也没有其它插件声明可以借出（shareLLM）", row.Manifest.Name)
 	}
 	return *lender, nil
 }
 
+// llmPick is WHICH model settings one call asked for.
+//
+// Provider is another plugin's id (borrow); Channel is one row of that plugin's route
+// table; Model overrides the channel's default for this call; KeyID picks one credential
+// slot. All four empty is the old behaviour ("whatever this plugin would use").
+type llmPick struct {
+	Provider string
+	Channel  string
+	Model    string
+	KeyID    string
+}
+
+// credentialFrom builds one credential from a plugin's route table, falling back to its
+// manifest config only when it has no table at all.
+//
+// The fallback is deliberately NOT "try the table, then try config": once a plugin has a
+// table, answering from the old single endpoint would spend a different account and look
+// like it worked. A table that exists but cannot answer is an error the caller reports.
+func (a *App) credentialFrom(id string, man plugins.Manifest, pick llmPick) (pluginChatCredential, bool, error) {
+	if table, ok := a.channelTable(id); ok {
+		cred, ready, err := a.channelCredential(id, man, table, pick)
+		return cred, ready, err
+	}
+	cfgStore, err := a.pluginConfigStore(id)
+	if err != nil {
+		return pluginChatCredential{}, false, nil
+	}
+	cred, ready := pluginOwnChatCredential(man, cfgStore)
+	if pick.Model != "" {
+		cred.cfg.LLMModel = pick.Model
+	}
+	return cred, ready, nil
+}
+
+// channelTable reads a plugin's route table, reporting whether it has one.
+func (a *App) channelTable(id string) (plugins.ChannelTable, bool) {
+	dir, err := a.pluginManager().PrivateDir(id)
+	if err != nil {
+		return plugins.ChannelTable{}, false
+	}
+	table := plugins.ReadChannelTable(dir, a.pluginHost.keeper)
+	return table, len(table.Channels) > 0
+}
+
+func (a *App) hasChannels(id string) bool {
+	_, ok := a.channelTable(id)
+	return ok
+}
+
+// channelCredential picks one channel, one model and one key out of a table.
+//
+// Two rules worth stating: the model comes from the channel's own list (a per-call
+// `model` still wins), and the base URL has to pass the PROVIDER plugin's net.fetch
+// allow-list. Without that last check a table row would be a way to point the host's HTTP
+// client at any address - the table is plugin-written data, and "the user typed it" is not
+// something this function can verify.
+func (a *App) channelCredential(id string, man plugins.Manifest, table plugins.ChannelTable, pick llmPick) (pluginChatCredential, bool, error) {
+	channel, err := pickChannel(table, pick.Channel)
+	if err != nil {
+		return pluginChatCredential{}, false, err
+	}
+	base := strings.TrimSpace(channel.BaseURL)
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" {
+		return pluginChatCredential{}, false, fmt.Errorf("渠道 %s 的地址无效：%s", channel.ID, base)
+	}
+	hosts := append(append([]string{}, man.NetHosts...), plugins.ConfigHosts(man, a.pluginConfigValues(id))...)
+	if !plugins.HostAllowed(hosts, u.Host) {
+		return pluginChatCredential{}, false, fmt.Errorf(
+			"渠道 %s 指向 %s，但「%s」的 manifest 的 netHosts 没声明它（渠道的地址也要过 net.fetch 的白名单）",
+			channel.ID, u.Host, man.Name)
+	}
+
+	model := strings.TrimSpace(pick.Model)
+	if model == "" {
+		model = strings.TrimSpace(channel.DefaultModel)
+	}
+	if model == "" && len(channel.Models) > 0 {
+		model = strings.TrimSpace(channel.Models[0])
+	}
+	if model == "" {
+		return pluginChatCredential{}, false, nil
+	}
+
+	key := ""
+	for _, candidate := range channel.Keys {
+		if pick.KeyID != "" && candidate.ID != pick.KeyID {
+			continue
+		}
+		if !candidate.Set {
+			continue
+		}
+		// The table carries masks, not values: the plaintext is fetched here, by the host,
+		// for this request only - and it is the only place in this path that sees it.
+		secret, err := a.pluginHost.keeper.Get(plugins.ChannelKeyPath(a.pluginPrivateDirOrEmpty(id), channel.ID, candidate.ID))
+		if err != nil || secret == "" {
+			continue
+		}
+		key = secret
+		break
+	}
+	if pick.KeyID != "" && key == "" {
+		return pluginChatCredential{}, false, fmt.Errorf("渠道 %s 的 key %s 没有保存密钥", channel.ID, pick.KeyID)
+	}
+	if key == "" && pluginNeedsKey(channel.Provider) {
+		return pluginChatCredential{}, false, nil
+	}
+
+	cfg := store.Config{}
+	if cfgStore, err := a.pluginConfigStore(id); err == nil {
+		cfg = pluginChatConfig(man, cfgStore.Values())
+	}
+	cfg.LLMBaseURL = base
+	cfg.LLMModel = model
+	cfg.LLMProvider = channel.Provider
+	return pluginChatCredential{cfg: cfg, key: key}, true, nil
+}
+
+// pickChannel resolves the channel id the caller asked for, or the table's default.
+func pickChannel(table plugins.ChannelTable, want string) (plugins.ModelChannel, error) {
+	want = strings.TrimSpace(want)
+	if want != "" {
+		for _, channel := range table.Channels {
+			if channel.ID == want {
+				return channel, nil
+			}
+		}
+		return plugins.ModelChannel{}, fmt.Errorf("没有渠道 %s（这个插件配了 %d 个）", want, len(table.Channels))
+	}
+	if table.DefaultChannel != "" {
+		for _, channel := range table.Channels {
+			if channel.ID == table.DefaultChannel {
+				return channel, nil
+			}
+		}
+	}
+	if len(table.Channels) == 0 {
+		return plugins.ModelChannel{}, errors.New("这个插件没有配置任何模型渠道")
+	}
+	return table.Channels[0], nil
+}
+
+// pluginPrivateDirOrEmpty is the "we already checked this above" form: the caller is a
+// path builder, and an empty directory simply makes the read fail with the same outcome as
+// a missing key.
+func (a *App) pluginPrivateDirOrEmpty(id string) string {
+	dir, err := a.pluginManager().PrivateDir(id)
+	if err != nil {
+		return ""
+	}
+	return dir
+}
+
 // findLLMLender returns the first plugin that lends its model settings and can
 // actually answer right now.
-func (a *App) findLLMLender(exclude string) *pluginChatCredential {
+//
+// `only` restricts the search to one plugin id (llm.chat's `provider`); "" keeps the
+// tie-break rule ("lowest id of the ready lenders"). Both paths share the same predicate
+// for "could answer right now", so a named channel that would fail is never chosen either.
+func (a *App) findLLMLender(exclude string, only string) *pluginChatCredential {
 	rows := a.pluginManager().Plugins()
 	ids := make([]string, 0, len(rows))
 	byID := make(map[string]plugins.Installed, len(rows))
@@ -2184,16 +2425,18 @@ func (a *App) findLLMLender(exclude string) *pluginChatCredential {
 		if id == exclude {
 			continue
 		}
+		if only != "" && id != only {
+			continue
+		}
 		r := byID[id]
 		if !r.Enabled || r.Manifest == nil || !r.Manifest.ShareLLM {
 			continue
 		}
-		store, err := a.pluginConfigStore(id)
-		if err != nil {
-			continue
-		}
-		cred, ready := pluginOwnChatCredential(*r.Manifest, store)
-		if !ready {
+		// The same "could answer right now" question the resolver asks, which since
+		// openspec/changes/llm-channels includes a route table (a lender may have no
+		// manifest endpoint at all and live entirely in its channels).
+		cred, ready, err := a.credentialFrom(id, *r.Manifest, llmPick{})
+		if err != nil || !ready {
 			continue
 		}
 		cred.lender = id
@@ -2236,7 +2479,7 @@ func pluginLLMProfile(a *App, id string, _ []byte) (any, error) {
 	if !allowed {
 		return out, nil
 	}
-	if lender := a.findLLMLender(id); lender != nil {
+	if lender := a.findLLMLender(id, ""); lender != nil {
 		out["ready"] = true
 		out["source"] = "borrowed"
 		out["model"] = lender.cfg.LLMModel
@@ -2248,12 +2491,124 @@ func pluginLLMProfile(a *App, id string, _ []byte) (any, error) {
 	return out, nil
 }
 
-// pluginChatImages validates the picture URLs one llm.chat call may send.
+// pluginLLMProviders lists the model channels this plugin could use.
 //
-// The rule is the net.fetch allow-list (manifest netHosts plus the host-whitelist
-// setting), NOT a separate one: "where may this plugin reach" is one question, and a
-// second answer to it would eventually disagree - with the disagreement being a plugin
-// that can download a picture but not upload it, or vice versa.
+// It is the "which channels are there" half of openspec/changes/llm-channels: llm.profile
+// answers "what would I use right now", which is one channel; a plugin that wants to offer
+// a choice (or just tell the user why a named channel did not work) needs the list.
+//
+// WHAT IT DELIBERATELY DOES NOT RETURN: the lenders' base URLs and keys. The boundary is the
+// one llm.profile already draws - a borrower is told WHOSE settings would be used and which
+// model they name, never where they point or what unlocks them. `ready` is derived from the
+// same predicate the resolver uses, so a channel listed here as ready cannot fail on
+// selection for a configuration reason.
+func pluginLLMProviders(a *App, id string, _ []byte) (any, error) {
+	row, ok := a.pluginManager().Get(id)
+	if !ok || row.Manifest == nil {
+		return nil, fmt.Errorf("插件 %s 未启用", id)
+	}
+	if !hasPermission(row.Granted, plugins.PermLLMBorrow) {
+		return nil, fmt.Errorf("插件 %s 未获权限 %s", id, plugins.PermLLMBorrow)
+	}
+
+	rows := a.pluginManager().Plugins()
+	ids := make([]string, 0, len(rows))
+	byID := make(map[string]plugins.Installed, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.ID)
+		byID[r.ID] = r
+	}
+	sort.Strings(ids)
+
+	providers := make([]map[string]any, 0, len(ids))
+	for _, pid := range ids {
+		r := byID[pid]
+		if !r.Enabled || r.Manifest == nil || !r.Manifest.ShareLLM {
+			continue
+		}
+		// Same predicate as the resolver, so a channel-only lender (a route table and no
+		// manifest endpoint) is listed as ready - and one that would fail is not.
+		cred, ready, err := a.credentialFrom(pid, *r.Manifest, llmPick{})
+		if err != nil {
+			ready = false
+		}
+		entry := map[string]any{
+			"id":    pid,
+			"name":  r.Manifest.Name,
+			"model": cred.cfg.LLMModel,
+			"ready": ready,
+			// "this is the plugin asking" - a list that hid that would make a caller
+			// show itself as a channel it could borrow from, which it cannot.
+			"self": pid == id,
+		}
+		// The rows themselves, without addresses or keys: a caller that wants to name one
+		// needs to know the ids and the models, and nothing else.
+		if table, ok := a.channelTable(pid); ok {
+			rows := make([]map[string]any, 0, len(table.Channels))
+			for _, ch := range table.Channels {
+				rows = append(rows, map[string]any{
+					"id":           ch.ID,
+					"name":         ch.Name,
+					"models":       ch.Models,
+					"defaultModel": ch.DefaultModel,
+					"keys":         len(ch.Keys),
+				})
+			}
+			entry["channels"] = rows
+			entry["defaultChannel"] = table.DefaultChannel
+		}
+		providers = append(providers, entry)
+	}
+
+	defaultID := ""
+	if lender := a.findLLMLender(id, ""); lender != nil {
+		defaultID = lender.lender
+	}
+	// Best effort, and deliberately not fatal: a caller that only wants to DISPLAY where its
+	// settings come from should not fail because this read did. The call it makes next will
+	// report the real problem with a much better sentence.
+	ownReady, ownModel := false, ""
+	if store, err := a.pluginConfigStore(id); err == nil {
+		own, ready := pluginOwnChatCredential(*row.Manifest, store)
+		ownReady, ownModel = ready, own.cfg.LLMModel
+	}
+	return map[string]any{
+		"providers": providers,
+		"default":   defaultID,
+		"own":       map[string]any{"ready": ownReady, "model": ownModel},
+	}, nil
+}
+
+// The channel table's two methods are thin forwards to internal/plugins, for the same
+// reason the share tray's three are: the control center serves them too (the channel
+// editor runs in its 插件 page), and two copies of "where does the table live" would drift.
+func pluginLLMChannelsGet(a *App, id string, _ []byte) (any, error) {
+	return plugins.ChannelsGet(a.pluginManager(), a.pluginHost.keeper, id)
+}
+
+func pluginLLMChannelsSet(a *App, id string, payload []byte) (any, error) {
+	return plugins.ChannelsSet(a.pluginManager(), a.pluginHost.keeper, id, payload)
+}
+
+// pluginChatImages validates the pictures one llm.chat call may send.
+//
+// TWO FORMS are accepted, and they answer two different questions:
+//
+//  1. an absolute http(s) URL — "a picture already on the web". The rule is the net.fetch
+//     allow-list (manifest netHosts plus the host-whitelist setting), NOT a separate one:
+//     "where may this plugin reach" is one question, and a second answer to it would
+//     eventually disagree - with the disagreement being a plugin that can download a
+//     picture but not upload it, or vice versa.
+//  2. a `data:image/<type>;base64,…` URI — "a picture the USER just picked". There is no
+//     host to allow-list, because the bytes never came from a host: they came from the
+//     user's own file dialog. Refusing this form meant a plugin could only attach pictures
+//     that already had a public URL, which is not what a chat composer promises.
+//
+// The second form is bounded harder than the first, because its bytes travel through this
+// process (JSON through the bridge) instead of being fetched by the model endpoint: the
+// MIME type must be an image, each picture decodes to at most maxChatImageBytes, and one
+// call may carry at most maxChatImageTotalBytes. The model's wire format is unchanged -
+// `image_url.url` takes a data URI as-is, which every OpenAI-compatible endpoint accepts.
 //
 // The count is capped because every picture is billed as tokens on every turn: four is
 // already a lot of image, and a plugin that wanted more is describing a screenshot
@@ -2269,14 +2624,28 @@ func (a *App) pluginChatImages(id string, man plugins.Manifest, raw []string) ([
 	hosts := append(append([]string{}, man.NetHosts...),
 		plugins.ConfigHosts(man, a.pluginConfigValues(id))...)
 	out := make([]string, 0, len(raw))
+	inlineBytes := 0
 	for _, candidate := range raw {
 		trimmed := strings.TrimSpace(candidate)
 		if trimmed == "" {
 			continue
 		}
+		if strings.HasPrefix(trimmed, "data:") {
+			size, err := validateChatImageData(trimmed)
+			if err != nil {
+				return nil, err
+			}
+			inlineBytes += size
+			if inlineBytes > maxChatImageTotalBytes {
+				return nil, fmt.Errorf("llm.chat 这一轮的图片合计超过 %d MiB（解码后）：收到 %d MiB",
+					maxChatImageTotalBytes>>20, inlineBytes>>20)
+			}
+			out = append(out, trimmed)
+			continue
+		}
 		u, err := url.Parse(trimmed)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return nil, fmt.Errorf("llm.chat 的图片地址必须是 http/https：%s", trimmed)
+			return nil, fmt.Errorf("llm.chat 的图片地址必须是 http/https，或者 data:image/…;base64 的内嵌图片：%s", trimmed)
 		}
 		if !plugins.HostAllowed(hosts, u.Host) {
 			return nil, fmt.Errorf("llm.chat 的图片来自未声明的域名：%s", u.Host)
@@ -2284,6 +2653,45 @@ func (a *App) pluginChatImages(id string, man plugins.Manifest, raw []string) ([
 		out = append(out, trimmed)
 	}
 	return out, nil
+}
+
+// The bounds on an INLINE picture (the one the user picked off their disk).
+//
+// 4 MiB decoded is a phone photograph at full size; 8 MiB total keeps one call near what a
+// vision endpoint will accept without proxies in between starting to refuse it. Both are
+// the CONTRACT rather than tuning: a plugin that exceeds them is told the number.
+const (
+	maxChatImageBytes      = 4 << 20
+	maxChatImageTotalBytes = 8 << 20
+)
+
+// validateChatImageData checks one inline `data:` picture and returns its decoded size.
+func validateChatImageData(uri string) (int, error) {
+	const prefix = "data:"
+	comma := strings.IndexByte(uri, ',')
+	if comma <= len(prefix) {
+		return 0, fmt.Errorf("llm.chat 的内嵌图片必须写成 data:image/<type>;base64,<数据>")
+	}
+	header := uri[len(prefix):comma]
+	payload := uri[comma+1:]
+	if !strings.HasSuffix(strings.ToLower(header), ";base64") {
+		return 0, fmt.Errorf("llm.chat 的内嵌图片只支持 base64 编码（data:image/<type>;base64,…）")
+	}
+	mime := strings.TrimSuffix(strings.ToLower(header), ";base64")
+	switch mime {
+	case "image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif":
+	default:
+		return 0, fmt.Errorf("llm.chat 的内嵌图片只接受 png/jpeg/webp/gif，收到 %q", mime)
+	}
+	size := base64.StdEncoding.DecodedLen(len(payload))
+	if size > maxChatImageBytes {
+		return 0, fmt.Errorf("llm.chat 的单张内嵌图片解码后 %d MiB，超过上限 %d MiB",
+			size>>20, maxChatImageBytes>>20)
+	}
+	if _, err := base64.StdEncoding.DecodeString(payload); err != nil {
+		return 0, fmt.Errorf("llm.chat 的内嵌图片不是合法 base64：%w", err)
+	}
+	return size, nil
 }
 
 // pluginSecretItem returns the key of the first secret setting a plugin

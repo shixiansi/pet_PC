@@ -14,9 +14,16 @@ type Message struct {
 	// addition to the text. Empty for every text-only request, which is what keeps
 	// the wire format byte-identical for everything that existed before vision.
 	//
-	// The URLs are NOT downloaded by us: a vision endpoint fetches them itself, so
-	// routing the bytes through this process would cost a round trip and a base64
-	// blow-up for nothing.
+	// A `data:image/<type>;base64,…` URI is ALSO allowed, and it means something
+	// different: a picture the USER picked off their own disk, not one the endpoint
+	// can fetch. Its bytes travel through this process, so the plugin gate bounds
+	// the MIME type and the decoded size (app_plugins.go's pluginChatImages) before
+	// they ever reach here. The wire format is unchanged - `image_url.url` takes
+	// either form as-is.
+	//
+	// The http(s) URLs are NOT downloaded by us: a vision endpoint fetches them
+	// itself, so routing the bytes through this process would cost a round trip and
+	// a base64 blow-up for nothing.
 	Images []string `json:"-"`
 	// ToolCalls makes this an ASSISTANT turn that asked to run tools. Set by the
 	// caller replaying what the model said in a previous round.

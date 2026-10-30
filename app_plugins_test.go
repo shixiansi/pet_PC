@@ -2391,3 +2391,100 @@ func quoteJSON(s string) string {
 	}
 	return string(b)
 }
+
+// --- llm.chat 的图片 ---------------------------------------------------------
+
+// TestChatImagesAllowInlinePicturesAndBoundThem covers the two forms one llm.chat call may
+// carry, and the bounds on the second one.
+//
+// The inline form exists because a chat composer promises "attach a picture", and a picture
+// the user just picked off their disk has no host to allow-list. Its bytes travel through
+// this process, so the type and the size are checked HERE - the model endpoint is the only
+// other place that would see them, and it is too late there.
+//
+// This path had no test at all before: the http(s) allow-list was exercised only indirectly,
+// by whichever plugin happened to send a picture.
+func TestChatImagesAllowInlinePicturesAndBoundThem(t *testing.T) {
+	a := pluginApp(t)
+	id := installSampleWith(t, a, map[string]any{
+		"permissions": []string{"llm.chat", "net.fetch"},
+		"netHosts":    []string{"cdn.example.com"},
+	})
+	row, ok := a.pluginManager().Get(id)
+	if !ok || row.Manifest == nil {
+		t.Fatalf("the fixture plugin is not installed")
+	}
+
+	// A real (tiny) PNG, so "valid base64" is not the only thing being asserted.
+	const tinyPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+	inline := "data:image/png;base64," + tinyPNG
+
+	t.Run("http(s) on a declared host still works", func(t *testing.T) {
+		got, err := a.pluginChatImages(id, *row.Manifest, []string{"https://cdn.example.com/a.png"})
+		if err != nil {
+			t.Fatalf("a declared host was refused: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("got %v", got)
+		}
+	})
+
+	t.Run("http(s) on an undeclared host is still refused", func(t *testing.T) {
+		if _, err := a.pluginChatImages(id, *row.Manifest, []string{"https://evil.example/x.png"}); err == nil {
+			t.Fatal("an undeclared host was accepted")
+		} else if !strings.Contains(err.Error(), "未声明的域名") {
+			t.Fatalf("error must name the reason, got %q", err)
+		}
+	})
+
+	t.Run("an inline picture passes through unchanged", func(t *testing.T) {
+		got, err := a.pluginChatImages(id, *row.Manifest, []string{inline})
+		if err != nil {
+			t.Fatalf("an inline picture was refused: %v", err)
+		}
+		if len(got) != 1 || got[0] != inline {
+			t.Fatalf("the data URI must survive verbatim, got %v", got)
+		}
+	})
+
+	t.Run("only image types, and only base64", func(t *testing.T) {
+		cases := []struct{ uri, want string }{
+			{"data:text/plain;base64," + tinyPNG, "png/jpeg/webp/gif"},
+			{"data:image/png," + tinyPNG, "base64"},
+			{"data:image/png;base64,!!!not base64!!!", "base64"},
+		}
+		for _, c := range cases {
+			if _, err := a.pluginChatImages(id, *row.Manifest, []string{c.uri}); err == nil {
+				t.Errorf("%q was accepted", c.uri)
+			} else if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("%q: error %q does not mention %q", c.uri, err, c.want)
+			}
+		}
+	})
+
+	t.Run("a picture larger than the per-image cap is refused by name", func(t *testing.T) {
+		// Just over the decoded limit; the payload is one big repetitive string, so this
+		// costs a few MB of memory and nothing else.
+		tooBig := "data:image/png;base64," + strings.Repeat("A", base64.StdEncoding.EncodedLen(maxChatImageBytes)+8)
+		_, err := a.pluginChatImages(id, *row.Manifest, []string{tooBig})
+		if err == nil {
+			t.Fatal("an oversized picture was accepted")
+		}
+		if !strings.Contains(err.Error(), "上限") {
+			t.Fatalf("error must name the limit, got %q", err)
+		}
+	})
+
+	t.Run("several pictures may not exceed the per-call cap", func(t *testing.T) {
+		// ~3 MiB decoded each, three of them: over the 8 MiB per-call budget, under the
+		// 4 MiB per-image one. Reusing one string keeps the test cheap.
+		chunk := "data:image/jpeg;base64," + strings.Repeat("A", base64.StdEncoding.EncodedLen(3<<20))
+		_, err := a.pluginChatImages(id, *row.Manifest, []string{chunk, chunk, chunk})
+		if err == nil {
+			t.Fatal("a call carrying 9 MiB of pictures was accepted")
+		}
+		if !strings.Contains(err.Error(), "合计") {
+			t.Fatalf("error must say the pictures add up, got %q", err)
+		}
+	})
+}
