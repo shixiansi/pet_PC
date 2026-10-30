@@ -291,7 +291,10 @@ function applyLayout(layout) {
 function refreshInstalledThenApply() {
   if (installedRefreshInFlight) return;
   installedRefreshInFlight = true;
-  App.PluginsInstalled()
+  // Same reason as refreshInstalled: a frame mounted from here must already know what this
+  // program serves, or its `init` goes out without `host`.
+  ensureHostInfo()
+    .then(() => App.PluginsInstalled())
     .then((rows) => {
       installedPlugins = rows || [];
       renderBackgroundPlugins();
@@ -853,6 +856,10 @@ async function refreshInstalled() {
   if (installedRefreshInFlight) return installedPlugins;
   installedRefreshInFlight = true;
   try {
+    // What this program serves, before any frame is mounted: `init.host` is how a plugin
+    // learns which methods exist HERE, instead of hardcoding the slot→method matrix (see
+    // PluginHost.setHostInfo). Memoised, so this costs one round trip per launch.
+    await ensureHostInfo();
     try {
       installedPlugins = await App.PluginsInstalled();
     } catch (err) {
@@ -869,6 +876,32 @@ async function refreshInstalled() {
   } finally {
     installedRefreshInFlight = false;
   }
+}
+
+/**
+ * Reads the host's capability table once, and hands it to the plugin host.
+ *
+ * A failure is not fatal: `init.host` is an optional field, and a plugin that does not find it
+ * falls back to `surface.slot` - the rule that existed before this. So the catch keeps the
+ * pet's plugins working on a build where the binding is missing, rather than taking the whole
+ * plugin subsystem down over an optimisation.
+ */
+let hostInfoPromise = null;
+function ensureHostInfo() {
+  if (!hostInfoPromise) {
+    hostInfoPromise = App.PluginHostInfo()
+      .then((info) => {
+        pluginHost?.setHostInfo(info);
+        return info;
+      })
+      .catch(() => {
+        // Not memoised as a success: the next poll retries, because a binding that failed
+        // once (a page loaded against an older exe) may well work on the next attempt.
+        hostInfoPromise = null;
+        return null;
+      });
+  }
+  return hostInfoPromise;
 }
 
 /**

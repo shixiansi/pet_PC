@@ -176,8 +176,11 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 不支持就干脆不挂它们，等于把界面藏起来；正确做法是把**规则**搬到 `internal/plugins/share.go`
 让两个宿主共用（`RegisterShare`）。
 
-文档判断"我在哪个窗口"**只用 `init.surface.slot`**：桌宠给 `chat` / `todos` / `pomodoro` /
-`background`，控制中心给 `workshop`。`kind` 不能用来判断——常驻帧的 `kind` 也是 `panel`。
+文档判断"我在哪个窗口"**优先用 `init.host`**（`{program, methods}`，两个程序各自从自己的能力表
+算出来，见 `internal/plugins.HostInfo`），退化时才是 `init.surface.slot`：桌宠给 `chat` /
+`todos` / `pomodoro` / `background`，控制中心给 `workshop`。`kind` 不能用来判断——常驻帧的
+`kind` 也是 `panel`。**能问"这个窗口服务不服务 X"就别背那张表**：`host.methods.includes(m)`
+与宿主闸门是同一个答案（真机上 571 行 `本程序不支持该方法`，全部来自背错表或者干脆不问）。
 在 `workshop` 里缺的能力要**说出口**（对话插件把输入框变成只读并写明去哪发，番茄钟隐藏计时
 按钮并写明计时在桌宠上），一个点了没反应的控件比没有控件更糟。
 

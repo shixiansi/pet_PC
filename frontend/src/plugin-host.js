@@ -72,6 +72,21 @@ const TYPE_INIT = 'init';
 const TYPE_REQUEST = 'request';
 const TYPE_RESPONSE = 'response';
 const TYPE_EVENT = 'event';
+
+/**
+ * A granted set as one comparable string.
+ *
+ * Sorted and joined so the value answers "is this the same set" rather than "did the
+ * array happen to be built in the same order": the two lists reaching this file come from
+ * different producers (Go's plugin index for one, the same index re-read 1.5 s later for
+ * the other), and an order-sensitive comparison would remount a frame for nothing.
+ *
+ * Exported for the test that pins the remount-on-grant-change behaviour; it is the one
+ * piece of that behaviour that can be asserted without a live iframe.
+ */
+export function grantedKey(list) {
+  return (Array.isArray(list) ? [...list] : []).slice().sort().join(',');
+}
 /**
  * The host telling a MOUNTED frame that its rectangle changed.
  *
@@ -111,6 +126,7 @@ class PluginFrame {
    * @param {number} [opts.rectCount]
    * @param {object|null} [opts.rect]
    * @param {function} opts.onRequest   (method, payload) => Promise<any>
+   * @param {object|null} [opts.host]   `{program, methods}` for init.host
    */
   constructor(opts) {
     this.pluginId = opts.pluginId;
@@ -132,6 +148,9 @@ class PluginFrame {
     this.rectCount = opts.rectCount ?? 1;
     this.rect = opts.rect || null;
     this.onRequest = opts.onRequest;
+    // What this program serves, as `{program, methods}` - see initMessage. Null until the
+    // startup read lands, and null is a legal value: `init.host` is optional.
+    this.host = opts.host || null;
 
     /** True once this frame has been answered with its one init. */
     this.initialised = false;
@@ -181,7 +200,7 @@ class PluginFrame {
       surface.rectCount = this.rectCount;
       surface.rect = this.rect;
     }
-    return {
+    const message = {
       v: V,
       type: TYPE_INIT,
       pluginId: this.pluginId,
@@ -190,6 +209,17 @@ class PluginFrame {
       surface,
       theme: currentTheme(),
     };
+    // WHICH PROGRAM THIS IS, and which methods it answers.
+    //
+    // Without it a plugin can only tell the two hosts apart by `surface.slot`, and "does this
+    // window serve llm.profile" becomes a matrix every plugin author re-derives by hand - the
+    // shape that produced 571 `本程序不支持该方法` lines in one day's logs. The field is
+    // OPTIONAL: a plugin that never looks at `host` behaves exactly as before, which is what
+    // lets this ship without republishing every installed plugin.
+    if (this.host) {
+      message.host = { program: this.host.program, methods: [...this.host.methods] };
+    }
+    return message;
   }
 
   /**
@@ -340,6 +370,24 @@ export class PluginHost {
     /** The version the current surface frames were built from, or ''. */
     this.surfaceVersion = '';
     /**
+     * The GRANTED SET the current surface frames were built from, as `grantedKey`.
+     *
+     * It is part of "is this the same surface" for the same reason the version is, and the
+     * reason is a bug this field exists to kill: `init` carries `granted` ONCE, and a plugin
+     * is taught to gate its own behaviour on it (`if (granted.has('pet.bubble')) …` - see
+     * market/docs/plugin-dev.md §2). Grants are edited in the CONTROL CENTER, a different
+     * process, so a frame mounted before the user ticked a box would hold that stale answer
+     * for the rest of the session: the capability gate in Go re-reads plugins.json on every
+     * call and would say yes, while the plugin had already decided never to ask.
+     *
+     * The real machine showed exactly that: weather-env's headless frame mounted while only
+     * `net.fetch` was granted, the user then granted `pet.surface`, and the plugin's badge -
+     * guarded by `granted.has('pet.surface')` - never once appeared, with no error anywhere.
+     * The market had already got this right by putting `granted` in its iframe key
+     * (cc/src/components/PluginFrame.svelte); this is the pet agreeing with it.
+     */
+    this.surfaceGranted = '';
+    /**
      * The headless frames, keyed by plugin id.
      *
      * ONE PER PLUGIN that declared `background` and holds a permission that fills
@@ -352,6 +400,14 @@ export class PluginHost {
      * router delivers to.
      */
     this.backgroundFrames = new Map();
+
+    /**
+     * What this program serves, as `{program, methods}`, or null before the startup read.
+     *
+     * Every frame gets it as `init.host` (see PluginFrame.initMessage). Null is a legal value:
+     * the field is optional in the protocol, and a plugin that never reads it is unaffected.
+     */
+    this.host = null;
 
     this.onMessage = this.onMessage.bind(this);
     window.addEventListener('message', this.onMessage);
@@ -370,6 +426,32 @@ export class PluginHost {
    */
   isOpen() {
     return this.surfaceFrames.size > 0;
+  }
+
+  /**
+   * Records what this program serves, for every `init` from now on.
+   *
+   * Called once, from the startup read (`App.PluginHostInfo`), and awaited before the frames
+   * are mounted: a frame that mounts first would get no `host` at all and would fall back to
+   * `surface.slot` - correct but second best. Existing frames are updated too, which closes the
+   * one race that cannot be ordered away: `init` is sent when the PLUGIN says `ready`, so a
+   * frame can be mounted before this lands.
+   */
+  setHostInfo(info) {
+    if (!info || typeof info.program !== 'string' || !Array.isArray(info.methods)) {
+      this.host = null;
+      for (const frame of this.allFrames()) frame.host = null;
+      return;
+    }
+    // Copied rather than referenced: the CC's bridge hands back Svelte proxies, and a proxy
+    // cannot cross `postMessage` (the DataCloneError this project already paid for once).
+    this.host = { program: info.program, methods: [...info.methods] };
+    for (const frame of this.allFrames()) frame.host = this.host;
+  }
+
+  /** Every mounted frame, of both kinds. */
+  allFrames() {
+    return [...this.surfaceFrames.values(), ...this.backgroundFrames.values()];
   }
 
   /**
@@ -403,15 +485,25 @@ export class PluginHost {
    * to swallow a click meant for the pet. `display: none` accomplishes all three,
    * and a hidden iframe keeps running, which is exactly what is wanted.
    *
-   * Re-mounted only when the plugin or its version changes, for the same reason
-   * the slot frame is: an update keeps the id and replaces the files behind it.
+   * Re-mounted when the plugin, its version, or its GRANTED SET changes. The version
+   * because an update keeps the id and replaces the files behind it; the granted set
+   * because `init` carries it once and a plugin is taught to gate on it (see
+   * `surfaceGranted` for the real-machine bug that produced this rule).
    *
    * @param {object} plugin a row from PluginsInstalled
    */
   openBackground(plugin) {
     if (!plugin || !plugin.id) return;
     const existing = this.backgroundFrames.get(plugin.id);
-    if (existing && existing.version === (plugin.version || '')) {
+    // The GRANTED set is part of "still the same frame", for the reason surfaceGranted
+    // documents: `init` carries it once, and a plugin that gates on it would otherwise keep
+    // obeying a set the user has since changed. Rebuilding is the only honest fix, because
+    // the protocol has no "your permissions changed" message - and adding one would leave
+    // every installed plugin unable to hear it.
+    const granted = grantedKey(plugin.granted);
+    if (existing &&
+        existing.version === (plugin.version || '') &&
+        existing.grantedKey === granted) {
       return;
     }
     if (existing) this.closeBackground(plugin.id);
@@ -429,8 +521,10 @@ export class PluginHost {
       slot: 'background',
       permissions: plugin.permissions || [],
       granted: plugin.granted || [],
+      host: this.host,
       onRequest: (m, p) => App.PluginRequest(plugin.id, m, JSON.stringify(p)),
     });
+    frame.grantedKey = granted;
     this.backgroundFrames.set(plugin.id, frame);
     frame.el.dataset.slot = 'background';
     mount.append(frame.el);
@@ -595,12 +689,15 @@ export class PluginHost {
     const sameSet =
       this.surfaceFrames.size === wanted.length &&
       wanted.every((w) => this.surfaceFrames.has(w.index));
+    const granted = grantedKey(view?.granted);
     if (this.surfacePluginId !== surface.pluginId ||
         this.surfaceVersion !== (view?.version || '') ||
+        this.surfaceGranted !== granted ||
         !sameSet) {
       this.clearSurface();
       this.surfacePluginId = surface.pluginId;
       this.surfaceVersion = view?.version || '';
+      this.surfaceGranted = granted;
       for (const { rect, index } of wanted) {
         const frame = new PluginFrame({
           pluginId: surface.pluginId,
@@ -616,6 +713,7 @@ export class PluginHost {
           rectIndex: index,
           rectCount: rects.length,
           rect,
+          host: this.host,
           onRequest: (m, p) => App.PluginRequest(surface.pluginId, m, JSON.stringify(p)),
         });
         this.surfaceFrames.set(index, frame);
@@ -670,5 +768,6 @@ export class PluginHost {
     this.surfaceFrames = new Map();
     this.surfacePluginId = '';
     this.surfaceVersion = '';
+    this.surfaceGranted = '';
   }
 }
