@@ -61,6 +61,88 @@ func TestValidManifestParses(t *testing.T) {
 	}
 }
 
+// sidecarManifest returns a manifest map that declares a helper script, with `over`
+// applied on top so each case can break exactly one rule.
+func sidecarManifest(over map[string]any) map[string]any {
+	m := map[string]any{
+		"permissions": []string{"process", "events"},
+		"background":  true,
+		"assets":      []string{"helper.ps1"},
+		"sidecar":     map[string]any{"script": "helper.ps1"},
+	}
+	for k, v := range over {
+		if v == nil {
+			delete(m, k)
+			continue
+		}
+		m[k] = v
+	}
+	return m
+}
+
+// TestManifestSidecar pins the four rules that keep a `sidecar` declaration honest.
+//
+// Each one is a failure mode that happened for real before the rule existed: a script
+// outside the package (a manifest naming a path it does not ship), a script missing from
+// `assets` (packaged by nobody, "找不到文件" at run time), no `process` permission (a
+// program started without the user's consent), and no `background` frame (a process
+// nobody reads).
+func TestManifestSidecar(t *testing.T) {
+	if _, err := ParseManifest(manifestJSON(t, sidecarManifest(nil))); err != nil {
+		t.Fatalf("a complete sidecar declaration must parse: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		over map[string]any
+		want string
+	}{
+		{
+			// assets 保持合法，只让 script 跑出去：这样断言的是 sidecar 那条规则本身，
+			// 而不是 assets 的（那一条有它自己的用例）。
+			name: "脚本跑出插件目录",
+			over: map[string]any{"sidecar": map[string]any{"script": "../evil.ps1"}},
+			want: "sidecar.script",
+		},
+		{
+			name: "脚本没写进 assets",
+			over: map[string]any{"assets": []string{"other.ps1"}},
+			want: "assets",
+		},
+		{
+			name: "不是 .ps1 / .exe",
+			over: map[string]any{"sidecar": map[string]any{"script": "helper.js"}, "assets": []string{"helper.js"}},
+			want: ".ps1",
+		},
+		{
+			name: "没有 process 权限",
+			over: map[string]any{"permissions": []string{"events"}},
+			want: PermProcess,
+		},
+		{
+			name: "没有 background 帧",
+			over: map[string]any{"background": nil},
+			want: "background",
+		},
+		{
+			name: "脚本路径为空",
+			over: map[string]any{"sidecar": map[string]any{"script": "  "}},
+			want: "sidecar.script",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseManifest(manifestJSON(t, sidecarManifest(tc.over)))
+			if err == nil {
+				t.Fatalf("want a refusal mentioning %q, got none", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want it to mention %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // TestManifestRequiredFields covers T10: every required text field missing or
 // malformed, one at a time, and each failure must name the offending field.
 func TestManifestRequiredFields(t *testing.T) {

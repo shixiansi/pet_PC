@@ -15,6 +15,7 @@ package plugins
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -129,6 +130,24 @@ type Manifest struct {
 	// Each path is validated with ValidRelPath - the SAME rule the asset route and
 	// the installer use - so a package cannot name a file outside itself.
 	Assets []string `json:"assets,omitempty"`
+	// Sidecar is the optional helper PROGRAM a plugin ships alongside its document
+	// (openspec/changes/plugin-process-and-index, step 3).
+	//
+	// # WHY THE HOST LAUNCHES IT
+	//
+	// Five plugins had grown the same pattern by hand: ship a PowerShell script, expose
+	// `helperPath` + `helperScript` as two ABSOLUTE PATH settings, launch it through
+	// process.launch, then poll a file it writes. On 2026-10-31 four of the five had never
+	// run at all - the user had not filled the two paths - and the plugins looked
+	// installed and broken at the same time. Every one of those steps is something the
+	// host can do for all of them, and the child bookkeeping it needs already exists
+	// (process.kill / the reaper).
+	//
+	// The declaration is deliberately small: WHERE the script is, and what to pass it.
+	// The host supplies the rest - the interpreter, the plugin's private directory
+	// (`PETPC_PLUGIN_DATA`), the plugin id, and the lifetime (started when the plugin is
+	// enabled, stopped when it is disabled, uninstalled or updated).
+	Sidecar *SidecarSpec `json:"sidecar,omitempty"`
 	// Entry is the HTML file that renders both the panel view and the surface
 	// view. It is a path relative to the plugin directory.
 	Entry string `json:"entry"`
@@ -401,7 +420,106 @@ func (m Manifest) Validate() error {
 	if err := m.validateAssets(); err != nil {
 		return err
 	}
+	if err := m.validateSidecar(); err != nil {
+		return err
+	}
 	return m.validateSurface()
+}
+
+// SidecarSpec names the helper program a plugin ships.
+type SidecarSpec struct {
+	// Script is a path RELATIVE to the plugin's own directory, ending in .ps1 or .exe.
+	//
+	// Relative rather than absolute for the same reason process.launch insists on
+	// absolute: the meaning must not depend on where the pet was started from. It is the
+	// package's own file, so the installer's ValidRelPath rule is the right one - a
+	// manifest cannot name a file outside itself.
+	Script string `json:"script"`
+	// Args are passed after the script. Small and bounded: this is a helper, not a
+	// command line the manifest gets to compose.
+	Args []string `json:"args,omitempty"`
+}
+
+// The bounds on sidecar.args. Same shape as process.launch's, one order smaller: a
+// helper script takes a directory and a flag or two, and a manifest that needs 32
+// arguments is describing something else.
+const (
+	maxSidecarArgs    = 8
+	maxSidecarArgLen  = 256
+	maxSidecarArgsSum = 1024
+)
+
+// validateSidecar keeps the declaration honest.
+//
+// Four rules, each of which was a real failure mode before it existed:
+//
+//  1. the script must be a path inside the package (ValidRelPath), .ps1 or .exe;
+//  2. it must ALSO be listed in `assets` - the packagers ship exactly manifest +
+//     entry + the three fixed resources + assets, so a script that is not in assets
+//     would not be in the package and the host would fail to start a file that exists
+//     only in the repository;
+//  3. the manifest must request `process`: a sidecar IS "start a program on this
+//     machine", and the install dialog has to be able to say so. Launching it without
+//     that consent would make the permission meaningless;
+//  4. it must declare `background`, because the resident frame is the half that talks
+//     to the helper - a sidecar with no reader is a process nobody asked for.
+func (m Manifest) validateSidecar() error {
+	if m.Sidecar == nil {
+		return nil
+	}
+	script := strings.TrimSpace(m.Sidecar.Script)
+	if script == "" {
+		return errors.New("manifest 的 sidecar.script 不能为空")
+	}
+	if !ValidRelPath(script) {
+		return fmt.Errorf("manifest 的 sidecar.script 必须是插件目录内的相对路径：%q", m.Sidecar.Script)
+	}
+	switch strings.ToLower(filepath.Ext(script)) {
+	case ".ps1", ".exe":
+	default:
+		return fmt.Errorf("manifest 的 sidecar.script 只支持 .ps1 或 .exe：%q", m.Sidecar.Script)
+	}
+	declared := false
+	for _, asset := range m.Assets {
+		if asset == script {
+			declared = true
+			break
+		}
+	}
+	if !declared {
+		return fmt.Errorf("manifest 的 sidecar.script 必须同时写进 assets（否则不会打进包里）：%q", script)
+	}
+	hasProcess := false
+	for _, perm := range m.Permissions {
+		if perm == PermProcess {
+			hasProcess = true
+			break
+		}
+	}
+	if !hasProcess {
+		return fmt.Errorf("manifest 声明了 sidecar 就必须申请 %s（它要启动一个本机程序）", PermProcess)
+	}
+	if !m.Background {
+		return errors.New("manifest 声明了 sidecar 就必须同时声明 background：常驻帧才是读它输出的那一半")
+	}
+	if len(m.Sidecar.Args) > maxSidecarArgs {
+		return fmt.Errorf("manifest 的 sidecar.args 最多 %d 个，收到 %d 个", maxSidecarArgs, len(m.Sidecar.Args))
+	}
+	total := 0
+	for i, arg := range m.Sidecar.Args {
+		if strings.ContainsAny(arg, "\r\n") {
+			return fmt.Errorf("manifest 的 sidecar.args 第 %d 个含换行", i+1)
+		}
+		runes := len([]rune(arg))
+		if runes > maxSidecarArgLen {
+			return fmt.Errorf("manifest 的 sidecar.args 第 %d 个超过 %d 字符", i+1, maxSidecarArgLen)
+		}
+		total += runes
+	}
+	if total > maxSidecarArgsSum {
+		return fmt.Errorf("manifest 的 sidecar.args 总长度 %d 超过 %d 字符", total, maxSidecarArgsSum)
+	}
+	return nil
 }
 
 // validateBackground pairs the headless-frame request with the permission that

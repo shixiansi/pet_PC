@@ -153,6 +153,10 @@ type pluginHost struct {
 	childMu sync.Mutex
 	// children maps a pid to the plugin that started it. Bounded by maxTrackedChildren.
 	children map[int]*pluginChildProc
+	// sidecarMu guards sidecars: which plugin's helper has already been started in this
+	// run, and at which version.
+	sidecarMu sync.Mutex
+	sidecars  map[string]string
 }
 
 // managerLocked opens the plugin manager on first use.
@@ -3234,14 +3238,115 @@ func pluginProcessKill(a *App, id string, payload []byte) (any, error) {
 const pluginChildReapInterval = 5 * time.Second
 
 // startPluginChildReaper begins the periodic reap. Called once from the startup sequence.
+//
+// The same tick also starts the helpers of plugins that declare a `sidecar`: the two
+// jobs are the two halves of one question ("which helper programs should be running
+// right now"), and giving them one timer keeps them from disagreeing.
 func (a *App) startPluginChildReaper() {
+	a.ensurePluginSidecars()
 	go func() {
 		ticker := time.NewTicker(pluginChildReapInterval)
 		defer ticker.Stop()
 		for range ticker.C {
 			a.reapPluginChildren()
+			a.ensurePluginSidecars()
 		}
 	}()
+}
+
+// ensurePluginSidecars starts the helper of every enabled plugin that declares one.
+//
+// See Manifest.Sidecar for why the host launches it instead of each plugin doing it by
+// hand. The three conditions here are the ones that make it the USER's decision rather
+// than the manifest's:
+//
+//   - the plugin is enabled,
+//   - its manifest loaded (row.Error is empty - a broken manifest must not start a
+//     program),
+//   - the user granted `process`, which the manifest validator already required the
+//     plugin to request.
+func (a *App) ensurePluginSidecars() {
+	for _, row := range a.pluginManager().Plugins() {
+		if !row.Enabled || row.Error != "" || row.Manifest == nil || row.Manifest.Sidecar == nil {
+			continue
+		}
+		if !plugins.HasGranted(row.Granted, plugins.PermProcess) {
+			continue
+		}
+		a.startPluginSidecar(row)
+	}
+}
+
+// startPluginSidecar launches one plugin's helper, at most once per (plugin, version).
+//
+// # WHY ONCE
+//
+// A helper that exits is NOT restarted on the next tick. The reaper runs every five
+// seconds, so a restart-on-exit rule would be a crash loop inside a background goroutine:
+// the log fills with identical lines and the machine spins. A version change resets the
+// record (an update deserves a fresh start), and so does restarting the pet. If the
+// helper needs to be resilient, it is a program: it can retry its own work.
+func (a *App) startPluginSidecar(row plugins.Installed) {
+	spec := row.Manifest.Sidecar
+	version := row.Version
+
+	a.pluginHost.sidecarMu.Lock()
+	if a.pluginHost.sidecars == nil {
+		a.pluginHost.sidecars = map[string]string{}
+	}
+	if started, ok := a.pluginHost.sidecars[row.ID]; ok && started == version {
+		a.pluginHost.sidecarMu.Unlock()
+		return
+	}
+	// Recorded BEFORE the start, so two ticks cannot race into two helpers and a start
+	// that fails is not retried every five seconds.
+	a.pluginHost.sidecars[row.ID] = version
+	a.pluginHost.sidecarMu.Unlock()
+
+	script := filepath.Join(row.Dir, filepath.FromSlash(spec.Script))
+	if _, err := os.Stat(script); err != nil {
+		a.log.Pluginf(logging.LevelWarn, "plugin", row.ID,
+			"辅助脚本启动失败：找不到 %s（sidecar.script 声明了但包里没有）：%v", spec.Script, err)
+		return
+	}
+	dataDir, err := a.pluginManager().PrivateDir(row.ID)
+	if err != nil {
+		a.log.Pluginf(logging.LevelWarn, "plugin", row.ID, "辅助脚本启动失败：拿不到私有目录：%v", err)
+		return
+	}
+
+	args := append([]string{}, spec.Args...)
+	var cmd *exec.Cmd
+	if strings.EqualFold(filepath.Ext(script), ".ps1") {
+		// -NoProfile: the user's profile could print, block, or redefine things.
+		// -ExecutionPolicy Bypass: the package is already installed content the user
+		// approved; refusing to run it here would only teach people to change the
+		// machine-wide policy, which is worse.
+		ps := filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+		psArgs := append([]string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script}, args...)
+		cmd = exec.Command(ps, psArgs...)
+	} else {
+		cmd = exec.Command(script, args...)
+	}
+	cmd.Dir = filepath.Dir(script)
+	cmd.SysProcAttr = pluginLaunchAttr()
+	// The helper learns where to write from the ENVIRONMENT, not from two absolute-path
+	// settings the user had to fill in by hand - that hand-filling is exactly what left
+	// four plugins inert on 2026-10-31.
+	cmd.Env = append(os.Environ(),
+		"PETPC_PLUGIN_ID="+row.ID,
+		"PETPC_PLUGIN_DATA="+dataDir,
+	)
+	if err := cmd.Start(); err != nil {
+		a.log.Pluginf(logging.LevelWarn, "plugin", row.ID, "辅助脚本启动失败：%v", err)
+		return
+	}
+	a.pluginHost.trackChild(row.ID, version, cmd.Process.Pid, cmd.Process)
+	go func() {
+		a.pluginHost.finishChild(cmd.Process.Pid, cmd.Wait())
+	}()
+	a.log.Pluginf(logging.LevelInfo, "plugin", row.ID,
+		"已启动辅助脚本 %s（pid=%d，数据目录 %s）", spec.Script, cmd.Process.Pid, dataDir)
 }
 
 // reapPluginChildren stops the children of plugins that are gone, disabled, or updated.

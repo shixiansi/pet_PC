@@ -2623,6 +2623,151 @@ func TestReapLeavesChildrenOfHealthyPlugins(t *testing.T) {
 	}
 }
 
+// --- sidecar（manifest 声明的辅助脚本） -------------------------------------
+
+// installSidecarPlugin installs a package whose zip ALSO carries the helper script, so
+// the `sidecar.script` declaration points at a file that is really in the package (the
+// manifest validator refuses a script that is not in `assets`, and the installer only
+// extracts what the package contains).
+func installSidecarPlugin(t *testing.T, a *App, man map[string]any, script, body string) string {
+	t.Helper()
+	manifestBytes, err := json.Marshal(man)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	files := map[string]string{
+		"manifest.json": string(manifestBytes),
+		"panel.html":    "<!doctype html><p>test</p>",
+		script:          body,
+	}
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range files {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("zip create: %v", err)
+		}
+		if _, err := w.Write([]byte(content)); err != nil {
+			t.Fatalf("zip write: %v", err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+	data := buf.Bytes()
+	sum := sha256.Sum256(data)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+
+	entry := plugins.MarketEntry{
+		ID:          man["id"].(string),
+		Name:        man["name"].(string),
+		Version:     man["version"].(string),
+		Author:      man["author"].(string),
+		Description: man["description"].(string),
+		Permissions: stringsFrom(man["permissions"]),
+		Download:    srv.URL + "/pkg.zip",
+		SHA256:      hex.EncodeToString(sum[:]),
+	}
+	if _, err := a.pluginManager().Install(entry); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	id := entry.ID
+	managerGrant(t, a, id)
+	managerSetEnabled(t, a, id, true)
+	return id
+}
+
+// sidecarManifest is the smallest legal sidecar declaration: process + background, the
+// script listed in assets, and nothing else.
+func sidecarManifest(id, script string) map[string]any {
+	return map[string]any{
+		"id":          id,
+		"name":        "带辅助脚本的插件",
+		"version":     "1.0.0",
+		"author":      "tester",
+		"description": "用于测试的插件",
+		"permissions": []string{"process", "events"},
+		"background":  true,
+		"entry":       "panel.html",
+		"assets":      []string{script},
+		"sidecar":     map[string]any{"script": script},
+	}
+}
+
+// TestSidecarStartsAndIsReaped is the whole point of the declaration: the host starts the
+// helper, tracks it like any other child, and takes it away when the plugin goes.
+func TestSidecarStartsAndIsReaped(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("sidecars are .ps1 or .exe; this is Windows-only")
+	}
+	a := pluginApp(t)
+	id := installSidecarPlugin(t, a, sidecarManifest("com.example.sidecar", "helper.ps1"),
+		"helper.ps1", "Start-Sleep -Seconds 30\n")
+
+	a.ensurePluginSidecars()
+
+	// The child is tracked under the plugin's id, which is what makes process.kill and
+	// the reaper work on it.
+	var pid int
+	deadline := time.Now().Add(5 * time.Second)
+	for pid == 0 {
+		a.pluginHost.childMu.Lock()
+		for p, child := range a.pluginHost.children {
+			if child.pluginID == id {
+				pid = p
+			}
+		}
+		a.pluginHost.childMu.Unlock()
+		if pid == 0 {
+			if time.Now().After(deadline) {
+				t.Fatal("the sidecar was never started")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+
+	// A second call must not start a second helper (the tick runs every five seconds).
+	a.ensurePluginSidecars()
+	a.pluginHost.childMu.Lock()
+	count := 0
+	for _, child := range a.pluginHost.children {
+		if child.pluginID == id {
+			count++
+		}
+	}
+	a.pluginHost.childMu.Unlock()
+	if count != 1 {
+		t.Fatalf("tracked children for the plugin = %d, want 1 (the tick must be idempotent)", count)
+	}
+
+	// Disabling the plugin takes the helper with it.
+	managerSetEnabled(t, a, id, false)
+	a.reapPluginChildren()
+	waitChildReaped(t, a, pid)
+}
+
+// TestSidecarNeedsTheGrantedProcessPermission: the manifest asks, the USER decides. A
+// plugin whose `process` grant was unticked must not have a program started for it.
+func TestSidecarNeedsTheGrantedProcessPermission(t *testing.T) {
+	a := pluginApp(t)
+	id := installTestPlugin(t, a, sidecarManifest("com.example.nosidecar", "helper.ps1"))
+	if err := a.pluginManager().SetEnabled(id, true); err != nil {
+		t.Fatalf("SetEnabled: %v", err)
+	}
+	// Granted nothing at all.
+	a.ensurePluginSidecars()
+	a.pluginHost.childMu.Lock()
+	defer a.pluginHost.childMu.Unlock()
+	for pid, child := range a.pluginHost.children {
+		if child.pluginID == id {
+			t.Fatalf("started a sidecar (pid %d) for a plugin that was not granted process", pid)
+		}
+	}
+}
+
 // quoteJSON renders s as a JSON string literal, for payloads built by hand.
 func quoteJSON(s string) string {
 	b, err := json.Marshal(s)
