@@ -262,6 +262,21 @@ func sortedPermissions(names []string) []string {
 // `config.set`, so both editors take one path.
 const EventConfigChanged = "config.changed"
 
+// EventStorageChanged is "one of the files in YOUR private directory changed".
+//
+// Delivered DIRECTLY to the owning plugin, not through the subscription list above: a plugin
+// cannot subscribe to its own directory, and nobody else may hear it. Same for EventShareChanged
+// below, which is the tray (`share/<name>`) - a key that lives in the publisher's directory but is
+// about a value somebody else reads.
+//
+// Both names are constants because BOTH programs emit them (the pet and the control center mount the
+// same documents), and two spellings of one event name is how a plugin ends up listening for a name
+// nobody sends.
+const (
+	EventStorageChanged = "storage.changed"
+	EventShareChanged   = "share.changed"
+)
+
 // SubscribableEvents is the complete set of state-change events a plugin may
 // subscribe to.
 //

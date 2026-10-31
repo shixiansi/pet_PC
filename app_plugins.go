@@ -1792,7 +1792,7 @@ func shareRecipients(rows []plugins.Installed, publisherID, name string) []strin
 // the watcher that noticed a tray file change) cannot drift apart.
 func (a *App) emitShareChanged(to, owner, name string) {
 	at := time.Now().Format(time.RFC3339)
-	a.emitPluginEvent(to, "share.changed", map[string]any{
+	a.emitPluginEvent(to, plugins.EventShareChanged, map[string]any{
 		"key":   plugins.SharedKey(owner, name),
 		"owner": owner,
 		"name":  name,

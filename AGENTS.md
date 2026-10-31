@@ -286,13 +286,24 @@ DPAPI（[internal/desktop/crypto_windows.go](internal/desktop/crypto_windows.go)
    `PETPC_PLUGIN_DATA` 拿上下文，宿主负责启动与回收。**别再让插件自己 `process.launch`**：
    插件拿不到自己的安装目录，于是"自己启动"必然要求用户手填两个绝对路径——2026-10-31 的实测是
    五个这样写的插件里四个从来没跑起来过。测试：`TestSidecar*` / `TestManifestSidecar`。
-3. **变化是推的，不是拉的**。`share.changed`（发给声明了 `<owner>/<name>` 的读者 **+ 发布者
-   自己的帧**；跨程序靠"牌盘是文件"那条路）、`storage.changed`（自己的私有目录）与
-   `storage.pressure`（私有目录跨过 80% 的那一次，回落才重置——它存在的意义是"还来得及"，
-   真到上限就只剩 `storage.set` 被拒）。两个宿主都
-   必须发：`.dev/check-frontend.cjs` 那条「插件页挂载每个插件自己的文档」硬编码了
+3. **变化是推的，不是拉的**，而且**两个宿主都要推**。三条事件：`config.changed`、
+   `storage.changed`（自己的私有目录）、`share.changed`（声明了 `<owner>/<name>` 的读者
+   **+ 发布者自己的帧**；跨程序靠"牌盘是文件"那条路）。另有 `storage.pressure`（私有目录跨过
+   80% 的那一次，回落才重置——它存在的意义是"还来得及"，真到上限就只剩 `storage.set` 被拒；
+   目前只有桌宠发）。
+
+   **为什么是两个**：两个程序都挂插件文档（桌宠的列 + 控制中心的插件页），所以"你的数据变了"
+   在两边都得说；只做一边的代价是实打实的——todo 每 2 秒 `storage.get`、ast-coder 每 5 秒
+   `config.get`，就因为它们不知道另一侧会不会告诉它们。规则（什么算变了）只有一份，在
+   `internal/plugins/watch.go`；每个宿主只留"走自己的 manager + 发自己的通道"（桌宠
+   `emitPluginEvent`，控制中心 `pet:plugin-event` 的 `emitPluginEvent`）。**控制中心不服务
+   `events.subscribe`**（订阅是桌宠的闸门），它的 `config.changed` 直达那条变化所属的插件，
+   payload 里同样带 `pluginId`，所以插件的处理器两种都认。
+
+   守门：`.dev/check-frontend.cjs` 那条「插件页挂载每个插件自己的文档」硬编码了
    `RegisterShare(..., m.notifyShareReaders)`——服务牌盘却不通知就是回归。测试：
-   `TestShareSetNotifiesDeclaredReaders` / `TestStorageWatch*` / `TestShareRecipients`。
+   `TestShareSetNotifiesDeclaredReaders` / `TestStorageWatch*` / `TestShareRecipients`（桌宠）、
+   `TestMarketEvents*`（控制中心）。
 4. **1 秒轮询是反模式**。为"等一个文件 / 一个共享键变化"写 `setInterval(…, 1000)`，会在日志里
    变成几万行 DEBUG（2026-10-31 实测占 94%），而它等的东西一天变不了几次。用事件 + 15 秒兜底。
    例外是**时钟类**定时器：番茄钟的 `tick`（计时）与视图的倒计时重绘，它们的 1 秒是功能本身。

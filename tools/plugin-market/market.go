@@ -131,6 +131,10 @@ func (m *Market) startup(ctx context.Context) {
 	// Handing over the value the window is about to open with is what keeps the first tick from
 	// re-announcing it.
 	m.startThemeWatch(m.Theme())
+	// The control center mounts the same plugin documents the pet does, so a plugin's own settings
+	// or data changing has to reach the frames in THIS window too - otherwise its list can only
+	// poll (which is exactly what todo and ast-coder were doing). See pluginwatch.go.
+	m.startPluginWatches()
 }
 
 // shutdown exists so the window's lifecycle is explicit; there is nothing to

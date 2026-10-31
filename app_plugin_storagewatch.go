@@ -143,7 +143,7 @@ func (a *App) emitChangedStorage(prev map[string]map[string]plugins.FileStamp) m
 				continue
 			}
 			// Addressed to ONE plugin: this is its own directory, and nobody else may read it.
-			a.emitPluginEvent(id, "storage.changed", map[string]any{"key": key, "at": at})
+			a.emitPluginEvent(id, plugins.EventStorageChanged, map[string]any{"key": key, "at": at})
 		}
 	}
 	return cur

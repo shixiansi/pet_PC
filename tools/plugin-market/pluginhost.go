@@ -500,6 +500,24 @@ func marketConfigSet(host any, call plugins.Call, payload []byte) (any, error) {
 // three of them poll their OWN command key from inside that page (ast-coder / voice-call /
 // live-danmaku). The pet cannot answer for them - the frames live here - so without this the poll
 // stays a poll. See docs/plugin-dev.md §7.1 in the plugin repository.
+// emitPluginEvent is this program's one way of telling a frame that something happened.
+//
+// The channel is a Wails event (`pet:plugin-event`) rather than a message on a pipe: the same name
+// and the same shape the pet uses, so `plugin-frame.ts` routes both without caring which program
+// sent it. `pluginId` is the routing key - a frame compares it against its own id and drops the
+// rest, which is what makes a broadcast safe here.
+func (m *Market) emitPluginEvent(id, name string, payload map[string]any) {
+	if m.ctx == nil {
+		return
+	}
+	runtime.EventsEmit(m.ctx, "pet:plugin-event", map[string]any{
+		"pluginId": id,
+		"name":     name,
+		"at":       time.Now().Format(time.RFC3339),
+		"payload":  payload,
+	})
+}
+
 func (m *Market) notifyShareReaders(publisherID, name string) {
 	if m.ctx == nil {
 		return
@@ -507,12 +525,8 @@ func (m *Market) notifyShareReaders(publisherID, name string) {
 	at := time.Now().Format(time.RFC3339)
 	key := plugins.SharedKey(publisherID, name)
 	for _, id := range shareRecipients(m.manager.Plugins(), publisherID, name) {
-		runtime.EventsEmit(m.ctx, "pet:plugin-event", map[string]any{
-			"pluginId": id,
-			"name":     "share.changed",
-			"at":       at,
-			"payload":  map[string]any{"key": key, "owner": publisherID, "name": name, "at": at},
-		})
+		m.emitPluginEvent(id, plugins.EventShareChanged,
+			map[string]any{"key": key, "owner": publisherID, "name": name, "at": at})
 	}
 }
 
