@@ -8,6 +8,5 @@
 
 ## 后续
 
-- [ ] 把它们写进 CI：`go test ./internal/plugins` 在托管 runner 上没有 `market/`，这两条会自动
-      SKIP——所以"字节漂了"只能在本地发现。要让它进 CI，就得在 CI 里也检出插件仓（两个仓库分开，
-      需要在 workflow 里多一步 checkout + 路径约定）
+- [x] 把它们写进 CI —— 已由 `openspec/changes/ci-contract-job` 完成：`contract` job 把公开的
+      插件仓检出到 `market/`，于是这里的字节对比与 `check-frontend.cjs` 都在 CI 里跑

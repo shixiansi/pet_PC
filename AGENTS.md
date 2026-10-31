@@ -322,6 +322,11 @@ cd tools/plugin-market/frontend    && npm ci && npm run build && npm test
 node .dev\check-frontend.cjs
 ```
 
+另外有一个 `contract` job：它把**公开的插件仓**检出到 `market/`，于是
+`internal/plugins` 的 sample 字节对比（§3.7）与 `.dev/check-frontend.cjs` 的 138 条静态接线
+检查真的会在 CI 里跑——在此之前它们只在开发机上跑过，而"没检出所以 SKIP"的代价是十个内置包
+里九个漂了整整一轮没人知道。
+
 CI 刻意没覆盖的东西和原因，写在 `ci.yml` 的文件头——**别以为 CI 绿了就是全绿**。
 
 ## 5. 提交与文档
