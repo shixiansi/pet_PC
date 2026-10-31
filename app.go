@@ -287,6 +287,10 @@ func (a *App) startup(ctx context.Context) {
 		// Settings are edited in the control center; this is how this process finds out.
 		// See app_plugin_configwatch.go for why the plugin must not poll for it.
 		a.startPluginConfigWatch()
+	// The programs plugins started do not notice a disable or an update on their own,
+	// and a plugin's frame cannot reap them (it is torn down with the update). The host
+	// is the only party that outlives both.
+	a.startPluginChildReaper()
 		a.restorePosition()
 		// Voice moved to a plugin, so the pet no longer prepares a player or opens
 		// the user's library - it emits facts and the plugin decides what to say.

@@ -2384,6 +2384,245 @@ func TestProcessLaunchNeedsThePermission(t *testing.T) {
 	}
 }
 
+// --- process.kill 与子进程回收 ----------------------------------------------
+
+// launchSleeper starts a ~5 second child through the host and returns its pid.
+//
+// cmd.exe + `ping` is the smallest program that is certainly an .exe, certainly
+// harmless and certainly still running when the assertions below fire.
+func launchSleeper(t *testing.T, a *App, id string) int {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		t.Skip("process.launch insists on a .exe, so this is Windows-only")
+	}
+	shell := filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
+	if _, err := os.Stat(shell); err != nil {
+		t.Skipf("no cmd.exe at %s", shell)
+	}
+	out, err := a.PluginRequest(id, "process.launch",
+		`{"path":`+quoteJSON(shell)+`,"args":["/c","ping -n 6 127.0.0.1 >nul"]}`)
+	if err != nil {
+		t.Fatalf("process.launch: %v", err)
+	}
+	var res struct {
+		PID int `json:"pid"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("result %q is not {pid}: %v", out, err)
+	}
+	if res.PID <= 0 {
+		t.Fatalf("pid = %d, want a real process id", res.PID)
+	}
+	return res.PID
+}
+
+// waitChildRunning polls process.state until it agrees with want.
+func waitChildRunning(t *testing.T, a *App, id string, pid int, want bool) {
+	t.Helper()
+	deadline := time.Now().Add(4 * time.Second)
+	for {
+		out, err := a.PluginRequest(id, "process.state", fmt.Sprintf(`{"pid":%d}`, pid))
+		if err != nil {
+			t.Fatalf("process.state: %v", err)
+		}
+		var st struct {
+			Known   bool `json:"known"`
+			Running bool `json:"running"`
+		}
+		if err := json.Unmarshal([]byte(out), &st); err != nil {
+			t.Fatalf("state %q is not JSON: %v", out, err)
+		}
+		if st.Known && st.Running == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("process.state still says running=%v (known=%v), want %v", st.Running, st.Known, want)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// childStillRunning reads the host's own table, for the cases where the plugin can no
+// longer ask (it was disabled, so PluginRequest refuses everything).
+func childStillRunning(a *App, pid int) bool {
+	a.pluginHost.childMu.Lock()
+	defer a.pluginHost.childMu.Unlock()
+	child, ok := a.pluginHost.children[pid]
+	if !ok {
+		return false
+	}
+	return child.handle != nil && !child.proc.done
+}
+
+func waitChildReaped(t *testing.T, a *App, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(4 * time.Second)
+	for childStillRunning(a, pid) {
+		if time.Now().After(deadline) {
+			t.Fatalf("pid %d is still running after the reap", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestProcessKillStopsTheChildItStarted is the whole point of the method: a plugin can
+// stop the program it started, and the host's own table agrees afterwards.
+func TestProcessKillStopsTheChildItStarted(t *testing.T) {
+	a := pluginApp(t)
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"process"}})
+	pid := launchSleeper(t, a, id)
+	waitChildRunning(t, a, id, pid, true)
+
+	out, err := a.PluginRequest(id, "process.kill", fmt.Sprintf(`{"pid":%d}`, pid))
+	if err != nil {
+		t.Fatalf("process.kill: %v", err)
+	}
+	var res struct {
+		Killed bool `json:"killed"`
+		Known  bool `json:"known"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("result %q is not JSON: %v", out, err)
+	}
+	if !res.Killed || !res.Known {
+		t.Fatalf("result = %s, want killed and known", out)
+	}
+	waitChildRunning(t, a, id, pid, false)
+}
+
+// TestProcessKillRefusesAnotherPluginsChild: pids are guessable, so ownership is the
+// check that makes this method safe to hand to every plugin that has `process`.
+func TestProcessKillRefusesAnotherPluginsChild(t *testing.T) {
+	a := pluginApp(t)
+	owner := installSampleWith(t, a, map[string]any{
+		"id": "com.example.owner", "permissions": []string{"process"},
+	})
+	other := installSampleWith(t, a, map[string]any{
+		"id": "com.example.other", "permissions": []string{"process"},
+	})
+	pid := launchSleeper(t, a, owner)
+
+	_, err := a.PluginRequest(other, "process.kill", fmt.Sprintf(`{"pid":%d}`, pid))
+	if err == nil || !strings.Contains(err.Error(), "不是本插件启动的") {
+		t.Fatalf("error = %v, want a refusal naming the ownership", err)
+	}
+	// And the refusal really changed nothing.
+	if !childStillRunning(a, pid) {
+		t.Fatal("the refusal killed the other plugin's process")
+	}
+	// Leave nothing behind for the rest of the run.
+	if _, err := a.PluginRequest(owner, "process.kill", fmt.Sprintf(`{"pid":%d}`, pid)); err != nil {
+		t.Fatalf("cleanup kill: %v", err)
+	}
+}
+
+// TestProcessKillIsIdempotentAfterExit: "make sure it is not running" must not fail just
+// because the program already stopped on its own.
+func TestProcessKillIsIdempotentAfterExit(t *testing.T) {
+	a := pluginApp(t)
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"process"}})
+	pid := launchSleeper(t, a, id)
+	waitChildRunning(t, a, id, pid, true)
+	if _, err := a.PluginRequest(id, "process.kill", fmt.Sprintf(`{"pid":%d}`, pid)); err != nil {
+		t.Fatalf("first kill: %v", err)
+	}
+	waitChildRunning(t, a, id, pid, false)
+
+	out, err := a.PluginRequest(id, "process.kill", fmt.Sprintf(`{"pid":%d}`, pid))
+	if err != nil {
+		t.Fatalf("second kill: %v", err)
+	}
+	var res struct {
+		Killed bool `json:"killed"`
+		Known  bool `json:"known"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("result %q is not JSON: %v", out, err)
+	}
+	if res.Killed || !res.Known {
+		t.Fatalf("result = %s, want killed:false known:true", out)
+	}
+}
+
+// TestProcessKillUnknownPidIsNotAnError: a pid from a previous run of the pet is
+// legitimately unknown, and the same rule as process.state applies.
+func TestProcessKillUnknownPidIsNotAnError(t *testing.T) {
+	a := pluginApp(t)
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"process"}})
+	out, err := a.PluginRequest(id, "process.kill", `{"pid":999999}`)
+	if err != nil {
+		t.Fatalf("process.kill: %v", err)
+	}
+	var res struct {
+		Killed bool `json:"killed"`
+		Known  bool `json:"known"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("result %q is not JSON: %v", out, err)
+	}
+	if res.Killed || res.Known {
+		t.Fatalf("result = %s, want killed:false known:false", out)
+	}
+}
+
+// TestProcessKillNeedsThePermission pins the same order as launch: the permission is
+// checked before the payload is parsed.
+func TestProcessKillNeedsThePermission(t *testing.T) {
+	a := pluginApp(t)
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"pet.bubble"}})
+	_, err := a.PluginRequest(id, "process.kill", `{"pid":1}`)
+	if err == nil || !strings.Contains(err.Error(), plugins.PermProcess) {
+		t.Fatalf("error = %v, want a refusal naming %s", err, plugins.PermProcess)
+	}
+}
+
+// TestReapStopsChildrenOfDisabledPlugins: switching a plugin off has to take its
+// programs with it, or the helper keeps writing files nobody reads.
+func TestReapStopsChildrenOfDisabledPlugins(t *testing.T) {
+	a := pluginApp(t)
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"process"}})
+	pid := launchSleeper(t, a, id)
+	waitChildRunning(t, a, id, pid, true)
+
+	managerSetEnabled(t, a, id, false)
+	a.reapPluginChildren()
+	waitChildReaped(t, a, pid)
+}
+
+// TestReapStopsChildrenOfUpdatedPlugins: an update remounts the frames, so the child the
+// OLD version started is nobody's - which is exactly the 2026-10-31 orphan.
+func TestReapStopsChildrenOfUpdatedPlugins(t *testing.T) {
+	a := pluginApp(t)
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"process"}})
+	pid := launchSleeper(t, a, id)
+	waitChildRunning(t, a, id, pid, true)
+
+	// Pretend the child was started by an older version of the same plugin.
+	a.pluginHost.childMu.Lock()
+	a.pluginHost.children[pid].version = "0.0.1-old"
+	a.pluginHost.childMu.Unlock()
+
+	a.reapPluginChildren()
+	waitChildReaped(t, a, pid)
+}
+
+// TestReapLeavesChildrenOfHealthyPlugins is the other half of the contract: a protocol
+// side that is still wanted must not be stopped by a background tick.
+func TestReapLeavesChildrenOfHealthyPlugins(t *testing.T) {
+	a := pluginApp(t)
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"process"}})
+	pid := launchSleeper(t, a, id)
+	waitChildRunning(t, a, id, pid, true)
+
+	a.reapPluginChildren()
+	if !childStillRunning(a, pid) {
+		t.Fatal("the reaper stopped a child of an enabled, unchanged plugin")
+	}
+	if _, err := a.PluginRequest(id, "process.kill", fmt.Sprintf(`{"pid":%d}`, pid)); err != nil {
+		t.Fatalf("cleanup kill: %v", err)
+	}
+}
+
 // quoteJSON renders s as a JSON string literal, for payloads built by hand.
 func quoteJSON(s string) string {
 	b, err := json.Marshal(s)

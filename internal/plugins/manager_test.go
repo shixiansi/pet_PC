@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -746,4 +747,108 @@ func patchZipSize(t *testing.T, data []byte, name string, size uint64) []byte {
 func digestOf(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// --- the contended rename ---------------------------------------------------
+//
+// `plugins.json` has two writer programs and one reader: the control center saves
+// grants, the pet re-reads the file every 1.5s. On Windows a rename over a file
+// somebody has open fails with ERROR_ACCESS_DENIED - the real log line was
+// "保存授权失败：rename …plugins.json: Access is denied" - so the atomic write
+// retries. These tests pin the retry, its bound, and the fact that it is wired
+// into saveIndex rather than only into the helper.
+
+// withRenameStub swaps the package's rename for the duration of one test.
+func withRenameStub(t *testing.T, fn func(from, to string) error) *int {
+	t.Helper()
+	orig := renameFile
+	calls := 0
+	renameFile = func(from, to string) error {
+		calls++
+		return fn(from, to)
+	}
+	t.Cleanup(func() { renameFile = orig })
+	return &calls
+}
+
+// sharingViolation is what Windows reports for "that file is open elsewhere".
+func sharingViolation(from, to string) error {
+	return &os.LinkError{Op: "rename", Old: from, New: to, Err: syscall.Errno(32)}
+}
+
+func TestRenameWithRetrySurvivesASharingViolation(t *testing.T) {
+	attempts := 0
+	withRenameStub(t, func(from, to string) error {
+		// Fail twice, then let it through: a reader's handle is microseconds long.
+		attempts++
+		if attempts < 3 {
+			return sharingViolation(from, to)
+		}
+		return nil
+	})
+	if err := renameWithRetry("a", "b"); err != nil {
+		t.Fatalf("renameWithRetry: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts = %d, want 3 (two violations, then success)", attempts)
+	}
+}
+
+func TestRenameWithRetryGivesUpAfterTheBound(t *testing.T) {
+	attempts := 0
+	withRenameStub(t, func(from, to string) error {
+		attempts++
+		return sharingViolation(from, to)
+	})
+	err := renameWithRetry("a", "b")
+	if err == nil {
+		t.Fatal("a rename that never succeeds has to report the failure")
+	}
+	if attempts != 8 {
+		t.Fatalf("attempts = %d, want the documented bound of 8", attempts)
+	}
+}
+
+func TestRenameWithRetryDoesNotRetryOtherErrors(t *testing.T) {
+	attempts := 0
+	withRenameStub(t, func(from, to string) error {
+		attempts++
+		return os.ErrNotExist
+	})
+	if err := renameWithRetry("a", "b"); err == nil {
+		t.Fatal("want the original error")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1: a missing file must not look like contention", attempts)
+	}
+}
+
+// TestSaveIndexRetriesAContendedRename proves the retry is in the SAVE path, not just in
+// the helper: a grant saved while the pet holds the file open must still land.
+func TestSaveIndexRetriesAContendedRename(t *testing.T) {
+	m := newTestManager(t)
+	entry, _ := testEntryFromFiles(t, sampleZipFiles(), nil)
+	if _, err := m.Install(entry); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	id := entry.ID
+	attempts := 0
+	withRenameStub(t, func(from, to string) error {
+		attempts++
+		if attempts == 1 {
+			return sharingViolation(from, to)
+		}
+		return os.Rename(from, to)
+	})
+	if err := m.SetEnabled(id, true); err != nil {
+		t.Fatalf("SetEnabled with one contended rename: %v", err)
+	}
+	if attempts < 2 {
+		t.Fatalf("attempts = %d, want the save to have retried", attempts)
+	}
+	// And the write really landed.
+	row, ok := m.Get(id)
+	if !ok || !row.Enabled {
+		t.Fatalf("row = %+v (ok=%v), want enabled", row, ok)
+	}
 }

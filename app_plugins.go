@@ -444,6 +444,12 @@ var pluginMethods = map[string]pluginMethod{
 	// plugin wait for a downloader without blocking its own frame or asking for a
 	// filesystem capability.
 	"process.state": {perm: plugins.PermProcess, run: pluginProcessState},
+	// Stopping what the plugin itself started. Added 2026-11-01 after a real machine
+	// showed the gap: a helper script a plugin had launched kept running with the OLD
+	// file names after that plugin was updated, and the only way to stop it was Task
+	// Manager. Same permission as launch - whoever may start a program may stop the one
+	// it started, and nobody else may (the ownership check is in pluginProcessKill).
+	"process.kill": {perm: plugins.PermProcess, run: pluginProcessKill},
 }
 
 // PluginRequest is the ONE way a plugin reaches the host.
@@ -3027,7 +3033,10 @@ func pluginProcessLaunch(a *App, id string, payload []byte) (any, error) {
 	// whether and how it ended. That fact is what lets a plugin tell "still working" from
 	// "finished" without a filesystem capability it does not have (the video bridge's
 	// downloader is the motivating case).
-	a.pluginHost.trackChild(id, pid)
+	// The VERSION travels with the child so the reaper can tell an update from a still-
+	// installed plugin (see reapPluginChildren). The handle travels with it so
+	// process.kill can stop this exact process without going through the pid.
+	a.pluginHost.trackChild(id, a.pluginVersionOf(id), pid, cmd.Process)
 	go func() {
 		a.pluginHost.finishChild(pid, cmd.Wait())
 	}()
@@ -3048,13 +3057,23 @@ type childProc struct {
 type pluginChildProc struct {
 	proc     *childProc
 	pluginID string
+	// version is the plugin version that started this child. The reaper compares it
+	// with the installed version to tell "the plugin was updated" (the frames were
+	// remounted, so this child is nobody's) from "the plugin is still the one that
+	// started it".
+	version string
+	// handle is the OS process handle, kept ONLY so process.kill can stop it. It is
+	// dropped once the child exits: killing through a handle to a finished process is
+	// harmless (ErrProcessDone), but holding it afterwards would make a recycled pid
+	// look alive in the reaper.
+	handle *os.Process
 }
 
 // maxTrackedChildren bounds the table. A plugin that starts a hundred programs is not a
 // use case, and forgetting the oldest entry keeps a stuck one from growing this forever.
 const maxTrackedChildren = 32
 
-func (h *pluginHost) trackChild(pluginID string, pid int) *childProc {
+func (h *pluginHost) trackChild(pluginID, version string, pid int, handle *os.Process) *childProc {
 	h.childMu.Lock()
 	defer h.childMu.Unlock()
 	if h.children == nil {
@@ -3072,7 +3091,7 @@ func (h *pluginHost) trackChild(pluginID string, pid int) *childProc {
 		delete(h.children, oldest)
 	}
 	proc := &childProc{startedAt: time.Now(), exitCode: -1}
-	h.children[pid] = &pluginChildProc{proc: proc, pluginID: pluginID}
+	h.children[pid] = &pluginChildProc{proc: proc, pluginID: pluginID, version: version, handle: handle}
 	return proc
 }
 
@@ -3084,6 +3103,9 @@ func (h *pluginHost) finishChild(pid int, err error) {
 		return
 	}
 	child.proc.done = true
+	// The handle is dropped here, not kept: after the exit this entry is only a memory of
+	// how it ended, and a kept handle would let the reaper see a recycled pid as alive.
+	child.handle = nil
 	child.proc.exitCode = 0
 	if err != nil {
 		child.proc.exitCode = -1
@@ -3125,6 +3147,189 @@ func pluginProcessState(a *App, id string, payload []byte) (any, error) {
 		"exitCode": child.proc.exitCode,
 		"ranMs":    time.Since(child.proc.startedAt).Milliseconds(),
 	}, nil
+}
+
+// pluginVersionOf is the installed version of a plugin, or "" when it cannot be read.
+//
+// "" is not an error here: the reaper treats an unknown version as "do not reap on a
+// version change", because killing a child over a manifest that failed to load would be
+// destroying something on the strength of a missing fact.
+func (a *App) pluginVersionOf(id string) string {
+	row, ok := a.pluginManager().Get(id)
+	if !ok || row.Manifest == nil {
+		return ""
+	}
+	return row.Manifest.Version
+}
+
+// pluginProcessKill stops a program THIS plugin started.
+//
+// # WHY IT EXISTS
+//
+// process.launch could start a program and nothing could stop it. On 2026-10-31 that
+// stopped being theoretical: privacy-guard's helper kept running after the plugin was
+// updated, still writing `outbox/clipboard.json` while the new version read
+// `outbox/clipboard`, and the user had to find it in Task Manager. The plugin knew the
+// pid; it simply had no way to act on it.
+//
+// # THE OWNERSHIP CHECK IS THE POINT
+//
+// Pids are guessable. "Stop that process" is therefore authorised by the CHILD TABLE,
+// not by the number: a plugin may only stop a pid this host recorded as its own. The
+// refusal names the pid and says whose it is not, because a plugin that guessed has a
+// bug and needs to read that in its own log.
+//
+// # THE THREE ANSWERS
+//
+//   - running and ours      -> killed, `{killed:true, known:true, pid}`
+//   - ours but already gone -> NOT an error: `{killed:false, known:true, exitCode}`.
+//     The caller's intent ("make sure it is not running") is already satisfied, and
+//     turning that into a failure would make every cleanup path in every plugin need a
+//     special case.
+//   - not in the table      -> `{killed:false, known:false}`, also not an error: a pid
+//     from a previous run of the pet is legitimately unknown (same rule as
+//     process.state).
+func pluginProcessKill(a *App, id string, payload []byte) (any, error) {
+	var in struct {
+		PID int `json:"pid"`
+	}
+	if err := decodePayload(payload, &in); err != nil {
+		return nil, err
+	}
+	if in.PID <= 0 {
+		return nil, errors.New("process.kill 需要 pid")
+	}
+	h := &a.pluginHost
+	h.childMu.Lock()
+	child, ok := h.children[in.PID]
+	if !ok {
+		h.childMu.Unlock()
+		return map[string]any{"killed": false, "known": false}, nil
+	}
+	if child.pluginID != id {
+		h.childMu.Unlock()
+		return nil, fmt.Errorf("进程 %d 不是本插件启动的，不能停它", in.PID)
+	}
+	handle, done, exitCode := child.handle, child.proc.done, child.proc.exitCode
+	h.childMu.Unlock()
+
+	if done || handle == nil {
+		return map[string]any{"killed": false, "known": true, "exitCode": exitCode}, nil
+	}
+	if err := handle.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		return nil, fmt.Errorf("停进程 %d 失败：%v", in.PID, err)
+	}
+	// The Wait goroutine started by process.launch settles the exit code; this handler
+	// does not wait for it, because a plugin's request must not block on a process dying.
+	return map[string]any{"killed": true, "known": true, "pid": in.PID}, nil
+}
+
+// pluginChildReapInterval is how often the pet checks whether the programs it started
+// still belong to a plugin that is installed, enabled, and at the version that started
+// them.
+//
+// Five seconds: the frontend re-reads the installed list every 1.5s, so a disable is
+// already visible to the frames well before this fires. The reaper only has to be faster
+// than a user noticing an orphan in Task Manager.
+const pluginChildReapInterval = 5 * time.Second
+
+// startPluginChildReaper begins the periodic reap. Called once from the startup sequence.
+func (a *App) startPluginChildReaper() {
+	go func() {
+		ticker := time.NewTicker(pluginChildReapInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			a.reapPluginChildren()
+		}
+	}()
+}
+
+// reapPluginChildren stops the children of plugins that are gone, disabled, or updated.
+//
+// # WHY THIS EXISTS AT ALL
+//
+// A helper script does not notice that its plugin was switched off or replaced: it keeps
+// running, keeps writing files, and - after an update - keeps writing them under the OLD
+// names, which is precisely the failure that made process.kill necessary. The plugin's
+// frame cannot fix it either: the frame is torn down with the update, and its pid table
+// dies with it. The host is the only party that outlives both, so the host reaps.
+//
+// # WHAT IT DELIBERATELY DOES NOT DO
+//
+// It leaves alone the children of plugins that are still installed, enabled and at the
+// same version - including at shutdown. That is not an oversight: process.launch
+// releases the child on purpose so a protocol side (Yogurt and its peers) keeps running
+// across a pet restart, and killing those would log the user's chat bot out every time
+// they quit the pet. What shutdown does instead is NAME the survivors
+// (logSurvivingChildren), because "the pet quit and something is still running" has to
+// be visible somewhere.
+func (a *App) reapPluginChildren() {
+	// The installed snapshot is taken BEFORE childMu: the lock order everywhere else is
+	// manager -> childMu (launch reads the version, then tracks), and taking them the
+	// other way round here would be a deadlock waiting for a slow disk.
+	installed := map[string]plugins.Installed{}
+	for _, row := range a.pluginManager().Plugins() {
+		installed[row.ID] = row
+	}
+
+	type victim struct {
+		pid    int
+		id     string
+		reason string
+		handle *os.Process
+	}
+	var victims []victim
+	a.pluginHost.childMu.Lock()
+	for pid, child := range a.pluginHost.children {
+		if child.proc.done || child.handle == nil {
+			continue
+		}
+		row, ok := installed[child.pluginID]
+		switch {
+		case !ok:
+			victims = append(victims, victim{pid, child.pluginID, "插件已卸载", child.handle})
+		case !row.Enabled:
+			victims = append(victims, victim{pid, child.pluginID, "插件已停用", child.handle})
+		case row.Version != "" && child.version != "" && row.Version != child.version:
+			victims = append(victims, victim{pid, child.pluginID, "插件已更新到 " + row.Version, child.handle})
+		}
+	}
+	a.pluginHost.childMu.Unlock()
+
+	for _, v := range victims {
+		if err := v.handle.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			a.log.Pluginf(logging.LevelWarn, "plugin", v.id,
+				"回收子进程 pid=%d 失败（%s）：%v", v.pid, v.reason, err)
+			continue
+		}
+		a.log.Pluginf(logging.LevelInfo, "plugin", v.id,
+			"停掉了它启动的子进程 pid=%d（%s）", v.pid, v.reason)
+	}
+}
+
+// logSurvivingChildren names the programs that will outlive the pet.
+//
+// See reapPluginChildren for why they are not stopped. The line exists so that the next
+// "why is this process still running" question has an answer in the log instead of in
+// Task Manager - the exact question the 2026-10-31 orphan produced.
+func (a *App) logSurvivingChildren() {
+	a.pluginHost.childMu.Lock()
+	type survivor struct {
+		pid int
+		id  string
+	}
+	var alive []survivor
+	for pid, child := range a.pluginHost.children {
+		if child.proc.done || child.handle == nil {
+			continue
+		}
+		alive = append(alive, survivor{pid, child.pluginID})
+	}
+	a.pluginHost.childMu.Unlock()
+	for _, s := range alive {
+		a.log.Pluginf(logging.LevelInfo, "plugin", s.id,
+			"桌宠退出，它启动的 pid=%d 继续运行（协议端这类进程按设计不随桌宠退出）", s.pid)
+	}
 }
 
 // decodePayload unmarshals a plugin payload. An empty payload is an empty

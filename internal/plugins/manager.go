@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -227,7 +228,71 @@ func atomicWriteFile(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(name, path)
+	return renameWithRetry(name, path)
+}
+
+// renameFile is a variable so a test can make the rename fail the way Windows does
+// without needing a second process to hold the file open.
+var renameFile = os.Rename
+
+// renameWithRetry replaces the destination, retrying the two sharing violations Windows
+// reports when another process has the target open.
+//
+// # WHY A RETRY AND NOT A LOCK
+//
+// `plugins.json` has two writers and one reader, and they are different PROGRAMS: the
+// control center saves grants and enable flags, the pet re-reads the same file every 1.5
+// seconds to keep its frames in step. Go opens a file for reading without
+// FILE_SHARE_DELETE, so a rename over it fails with ERROR_ACCESS_DENIED even though
+// nobody is writing. The atomic write is still correct - a reader never sees half a file
+// - it just is not atomic ACROSS processes, and no advisory lock can fix that: the
+// blocker is a read, not a competing writer.
+//
+// 2026-10-31 14:42:53 is this failure in a real log:
+//
+//	WARN market … 保存授权失败：rename …\.tmp-3417680078 …\plugins.json: Access is denied
+//
+// The grant it was saving showed as ticked in the UI while the running gate kept
+// refusing the plugin, and nothing in the system was going to reconcile the two.
+//
+// The backoff is short and bounded (8 attempts, ~200ms in total): the blocker is a read
+// that takes microseconds, so waiting longer would only hide a real problem behind a
+// hang. A non-sharing error is returned on the first attempt - a full disk must not look
+// like contention.
+func renameWithRetry(from, to string) error {
+	const attempts = 8
+	var err error
+	for i := 0; i < attempts; i++ {
+		if err = renameFile(from, to); err == nil {
+			return nil
+		}
+		if !isSharingViolation(err) {
+			return err
+		}
+		time.Sleep(time.Duration(4*(i+1)) * time.Millisecond)
+	}
+	return err
+}
+
+// isSharingViolation reports whether a rename failed because the destination is open
+// elsewhere.
+//
+// Both codes matter on Windows: ERROR_SHARING_VIOLATION (32) is "somebody has it open",
+// ERROR_ACCESS_DENIED (5) is what a rename over an open handle actually returns. Elsewhere
+// EACCES/EPERM stand in for the same situation (an open directory entry), and treating
+// them the same costs one retry that will simply succeed.
+func isSharingViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) {
+		return true
+	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return errno == 32 || errno == 5
+	}
+	return false
 }
 
 // quarantine renames an unreadable file to "<name>.bak" so the bad content is

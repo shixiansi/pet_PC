@@ -247,5 +247,11 @@ func (a *App) shutdown() {
 		// until it notices and, for a chat protocol side, may keep queueing events
 		// at a session nobody is reading.
 		a.closePluginWS()
+		// Children of plugins that are gone, disabled or updated are stopped here as
+		// well, so a disable-and-quit leaves nothing behind. The ones that survive are
+		// NAMED rather than killed: process.launch releases a child on purpose so a
+		// protocol side outlives the pet (see reapPluginChildren).
+		a.reapPluginChildren()
+		a.logSurvivingChildren()
 	})
 }
