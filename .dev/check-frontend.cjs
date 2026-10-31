@@ -2273,7 +2273,12 @@ check(
       // No surface refusal: a block of coordinates measured from the pet is not a reason to
       // hide a plugin's page from the only window with room for it.
       !/surface/.test(body) &&
-      /plugins\.RegisterShare\(r, gateAdapter\{m\.manager\}\)/.test(marketPluginHost) &&
+      // The tray AND its notifier. A host that serves share.* but never tells anyone the value
+      // changed leaves every `command` key polling - which is exactly what this window's plugins
+      // did until 2026-11-01 (docs/plugin-dev.md §7.1), so the callback is part of the contract.
+      /plugins\.RegisterShare\(r, gateAdapter\{m\.manager\}, m\.notifyShareReaders\)/.test(
+        marketPluginHost,
+      ) &&
       // The pet's forwards live in app_plugins.go (that is where its capability table is),
       // not in app.go.
       /plugins\.ShareSet\(a\.pluginManager\(\)/.test(

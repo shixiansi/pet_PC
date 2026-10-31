@@ -38,6 +38,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"PetPC/internal/logging"
@@ -145,6 +146,7 @@ func (a *App) startPluginStorageWatch() {
 // Split out of the goroutine so a test can drive exactly one tick.
 func (a *App) emitChangedStorage(prev map[string]map[string]storageStamp) map[string]map[string]storageStamp {
 	cur := a.pluginStorageStamps()
+	rows := a.pluginManager().Plugins()
 	for id, keys := range changedStorageKeys(prev, cur) {
 		// Sorted for a stable order: a plugin that logs these sees the same sequence twice, and a
 		// test does not have to sort.
@@ -157,10 +159,39 @@ func (a *App) emitChangedStorage(prev map[string]map[string]storageStamp) map[st
 		}
 		at := time.Now().Format(time.RFC3339)
 		for _, key := range keys {
+			// The tray lives INSIDE the publisher's private directory (`share/<name>`), so this
+			// walk sees it too - and that is the only way a publish made by the OTHER program
+			// reaches a frame mounted in this one. The control center's workshop page writes
+			// `coder-command`; the frame that reads it runs in the pet. That program's own
+			// `share.changed` can only reach its own windows, so the pet notices the file and
+			// routes it through the same recipient rule.
+			if name, ok := shareTrayName(key); ok {
+				for _, to := range shareRecipients(rows, id, name) {
+					a.emitShareChanged(to, id, name)
+				}
+				continue
+			}
 			// Addressed to ONE plugin: this is its own directory, and nobody else may read it.
 			a.emitPluginEvent(id, "storage.changed", map[string]any{"key": key, "at": at})
 		}
 	}
 	return cur
+}
+
+// shareTrayName reports whether a private-directory key is a published value, and which name it
+// was published under.
+//
+// `share/` is the host's folder (`shareFileName` in share.go), not the plugin's: a key that lands
+// there is a tray value, and the plugin's own `storage.get` cannot name it.
+func shareTrayName(key string) (string, bool) {
+	const prefix = "share/"
+	if !strings.HasPrefix(key, prefix) {
+		return "", false
+	}
+	name := strings.TrimPrefix(key, prefix)
+	if name == "" || strings.Contains(name, "/") {
+		return "", false
+	}
+	return name, true
 }
 

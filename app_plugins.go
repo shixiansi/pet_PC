@@ -1658,34 +1658,52 @@ func (a *App) notifyShareReaders(publisherID string, payload []byte) {
 	if err := json.Unmarshal(payload, &in); err != nil || in.Name == "" {
 		return
 	}
-	key := plugins.SharedKey(publisherID, in.Name)
-	at := time.Now().Format(time.RFC3339)
-	for _, row := range a.pluginManager().Plugins() {
+	for _, id := range shareRecipients(a.pluginManager().Plugins(), publisherID, in.Name) {
+		a.emitShareChanged(id, publisherID, in.Name)
+	}
+}
+
+// shareRecipients is WHO hears about one publish: the plugins that declared the exact
+// "<owner>/<name>" pair, plus the publisher's own frames.
+//
+// The publisher's own frames are included deliberately: one installation is several documents
+// (a view and a headless timer), and the only channel between them is this tray. `command` keys
+// are exactly that - the view writes, the timer reads - and before this they polled once a
+// second for a value that changes only when the user presses something. Self-notification costs
+// one frame-internal read per publish and zero host round trips.
+//
+// No `shareRead` entry is needed for one's own keys, which matches `share.get`: reading your own
+// values has never needed a declaration.
+//
+// Pure, and shared with the private-directory watcher (app_plugin_storagewatch.go), which routes
+// a tray file that changed under ANOTHER program's pen through the same rule.
+func shareRecipients(rows []plugins.Installed, publisherID, name string) []string {
+	var out []string
+	for _, row := range rows {
 		if !row.Enabled || row.Error != "" || row.Manifest == nil {
 			continue
 		}
 		if !plugins.HasGranted(row.Granted, plugins.PermPluginShare) {
 			continue
 		}
-		// The publisher's OWN frames are included, and that is deliberate: one installation
-		// is several documents (a view and a headless timer), and the only channel between
-		// them is this tray. `command` keys are exactly that - the view writes, the timer
-		// reads - and before this they polled once a second for a value that changes only
-		// when the user presses something. Self-notification costs one frame-internal read
-		// per publish and zero host round trips.
-		//
-		// No `shareRead` entry is needed for one's own keys, which matches `share.get`: it
-		// has always allowed reading your own values without declaring them.
-		if row.ID != publisherID && !plugins.DeclaredShareRead(row.Manifest.ShareRead, publisherID, in.Name) {
+		if row.ID != publisherID && !plugins.DeclaredShareRead(row.Manifest.ShareRead, publisherID, name) {
 			continue
 		}
-		a.emitPluginEvent(row.ID, "share.changed", map[string]any{
-			"key":   key,
-			"owner": publisherID,
-			"name":  in.Name,
-			"at":    at,
-		})
+		out = append(out, row.ID)
 	}
+	return out
+}
+
+// emitShareChanged is the one place the payload is shaped, so the two senders (a `share.set` and
+// the watcher that noticed a tray file change) cannot drift apart.
+func (a *App) emitShareChanged(to, owner, name string) {
+	at := time.Now().Format(time.RFC3339)
+	a.emitPluginEvent(to, "share.changed", map[string]any{
+		"key":   plugins.SharedKey(owner, name),
+		"owner": owner,
+		"name":  name,
+		"at":    at,
+	})
 }
 
 func pluginShareGet(a *App, id string, payload []byte) (any, error) {

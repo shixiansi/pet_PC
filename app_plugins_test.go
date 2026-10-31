@@ -2695,6 +2695,60 @@ func TestStorageWatchNotifiesTheOwnerOnly(t *testing.T) {
 	}
 }
 
+// TestStorageWatchRoutesTrayFilesAsShareChanged is the cross-PROGRAM half.
+//
+// The tray lives inside the publisher's private directory (`share/<name>`), so the pet's walk
+// sees a publish made by the CONTROL CENTER - and that is the only way a command written in the
+// workshop page reaches the frame that reads it, which runs here. Without this routing the event
+// would stop at the program that handled the `share.set`, and ast-coder / voice-call /
+// live-danmaku would keep polling.
+func TestStorageWatchRoutesTrayFilesAsShareChanged(t *testing.T) {
+	a := pluginApp(t)
+	events := collectPluginEvents(a)
+	owner := installSampleWith(t, a, map[string]any{"id": "com.example.owner", "permissions": []string{"plugin.share"}})
+	reader := installSampleWith(t, a, map[string]any{
+		"id": "com.example.reader", "permissions": []string{"plugin.share"},
+		"shareRead": []string{"com.example.owner/command"},
+	})
+
+	dir, err := a.pluginManager().PrivateDir(owner)
+	if err != nil {
+		t.Fatalf("PrivateDir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "share"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Exactly the file share.set would have written, as if the OTHER program wrote it.
+	if err := os.WriteFile(filepath.Join(dir, "share", "command"), []byte(`{"op":"watch-start"}`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	a.emitChangedStorage(map[string]map[string]storageStamp{})
+
+	got := events("share.changed")
+	if len(got) != 2 {
+		t.Fatalf("share.changed events = %d, want 2 (owner + declared reader)", len(got))
+	}
+	seen := map[string]bool{}
+	for _, ev := range got {
+		seen[ev.PluginID] = true
+		payload, ok := ev.Payload.(map[string]any)
+		if !ok {
+			t.Fatalf("payload = %#v, want an object", ev.Payload)
+		}
+		if payload["key"] != "com.example.owner/command" {
+			t.Fatalf("payload.key = %v, want the <owner>/<name> pair", payload["key"])
+		}
+	}
+	if !seen[owner] || !seen[reader] {
+		t.Fatalf("recipients = %v, want the owner and the declared reader", seen)
+	}
+	// And it is NOT reported as the plugin's own storage: that key is the host's folder.
+	if leaked := events("storage.changed"); len(leaked) != 0 {
+		t.Fatalf("storage.changed events = %d, want 0 (a tray file is not the plugin's data)", len(leaked))
+	}
+}
+
 // --- share.changed（发布 → 声明过它的读者） ---------------------------------
 
 // TestShareSetNotifiesDeclaredReaders pins the new down-link: publishing a key wakes the
