@@ -141,6 +141,57 @@ body {
   cursor: grabbing;
 }
 
+/* --- the pet's body, when a plugin draws it -------------------------------- */
+
+/* The mount point for the plugin that owns the pet's appearance (manifest `body`).
+ *
+ * It is INSIDE #pet and covers exactly its box, because that box is the whole of what the
+ * window is cropped to while nothing else is up: a pet drawn outside it would be sliced by
+ * the native region, and enlarging the region to fit it would leave a strip that the page
+ * never paints and that eats clicks meant for the desktop (AGENTS.md §3.2).
+ *
+ * No z-index here on purpose. #pet is a stacking context of its own (z-index: 2), and the
+ * two badges and the hover button are absolutely positioned AFTER this element in the
+ * markup, so they paint above the frame by document order. Giving this one a z-index would
+ * have put it above them - the countdown and the corner badge would disappear behind the
+ * pet's own face. */
+.pet-body {
+  position: absolute;
+  inset: 0;
+}
+
+/* The frame is TRANSPARENT and INERT.
+ *
+ * Transparent because whatever the plugin does not paint has to show the desktop: a plate
+ * behind it would tint the pet's outline (the same failure the floating surface had, see
+ * #plugin-surface .plugin-frame).
+ *
+ * Inert (`pointer-events: none`) because every gesture that happens ON the pet is the
+ * host's, not the plugin's: dragging moves the window, the right-click opens the pet's own
+ * menu, hovering reveals the conversation button, and the picture is what those gestures
+ * happen to. An iframe that took the pointer would leave a pet that cannot be moved,
+ * cannot be right-clicked and cannot be hidden - a much worse pet than an unanimated one.
+ * A plugin that wants a clickable pet has the floating surface and the bubble for it. */
+#pet-body .plugin-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+/* While a plugin draws the pet, the bundled picture is not painted at all.
+ *
+ * Two pets at once is the one outcome that is unambiguously wrong, and it is what a
+ * half-transparent plugin drawing would look like. The <img> stays in the document because
+ * removing it would mean rebuilding it (and its decoded bitmap) on every uninstall; it is
+ * merely not shown. */
+#pet.body-from-plugin #pet-image {
+  visibility: hidden;
+}
+
 #pet-image {
   width: 100%;
   height: 100%;

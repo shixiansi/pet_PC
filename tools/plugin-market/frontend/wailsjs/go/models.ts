@@ -204,20 +204,6 @@ export namespace main {
 		    return a;
 		}
 	}
-	export class HostKey {
-	    Path: string;
-	    Present: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new HostKey(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Path = source["Path"];
-	        this.Present = source["Present"];
-	    }
-	}
 	export class LabelPair {
 	    ID: string;
 	    Label: string;
@@ -603,6 +589,20 @@ export namespace plugins {
 	        this.methods = source["methods"];
 	    }
 	}
+	export class SidecarSpec {
+	    script: string;
+	    args?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SidecarSpec(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.script = source["script"];
+	        this.args = source["args"];
+	    }
+	}
 	export class Rect {
 	    dx: number;
 	    dy: number;
@@ -640,6 +640,7 @@ export namespace plugins {
 	    panel: boolean;
 	    panelSlot?: string;
 	    surface?: Rect[];
+	    body?: boolean;
 	    config?: ConfigItem[];
 	    background?: boolean;
 	    shareLLM?: boolean;
@@ -647,6 +648,7 @@ export namespace plugins {
 	    serves?: string[];
 	    callTargets?: string[];
 	    assets?: string[];
+	    sidecar?: SidecarSpec;
 	    entry: string;
 	
 	    static createFrom(source: any = {}) {
@@ -665,6 +667,7 @@ export namespace plugins {
 	        this.panel = source["panel"];
 	        this.panelSlot = source["panelSlot"];
 	        this.surface = this.convertValues(source["surface"], Rect);
+	        this.body = source["body"];
 	        this.config = this.convertValues(source["config"], ConfigItem);
 	        this.background = source["background"];
 	        this.shareLLM = source["shareLLM"];
@@ -672,6 +675,7 @@ export namespace plugins {
 	        this.serves = source["serves"];
 	        this.callTargets = source["callTargets"];
 	        this.assets = source["assets"];
+	        this.sidecar = this.convertValues(source["sidecar"], SidecarSpec);
 	        this.entry = source["entry"];
 	    }
 	
@@ -807,6 +811,7 @@ export namespace plugins {
 		    return a;
 		}
 	}
+	
 
 }
 

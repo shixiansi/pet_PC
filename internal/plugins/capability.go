@@ -43,7 +43,15 @@ const (
 	PermNetFetch = "net.fetch"
 	// PermStorage lets a plugin keep small values in its own private directory.
 	PermStorage = "storage"
-	// PermPetSurface lets a plugin show a floating surface beside the pet.
+	// PermPetSurface lets a plugin draw on and beside the pet: a floating surface in the slot
+	// next to it, a line of text on it (`pet.badge`), and - since the pet's own appearance
+	// became a plugin's job - the pet's body itself (manifest `body`).
+	//
+	// One word for three shapes on purpose: what the user is consenting to is "this plugin puts
+	// its own pixels on my pet", and splitting it into `pet.surface` / `pet.badge` / `pet.body`
+	// would ask three times about one thing. There is no `pet.body` permission - a permission
+	// must gate at least one METHOD, and the body is a manifest declaration gated on this one,
+	// exactly the shape `background` has.
 	PermPetSurface = "pet.surface"
 	// PermLLMChat lets a plugin send a message to the model the user has
 	// already configured in the pet. The key stays in the host.
@@ -228,7 +236,7 @@ var PermissionLabels = map[string]string{
 	PermNetFetch:       "访问网络（仅限插件声明的域名）",
 	PermNetCredentials: "以你保存的网站登录凭据发请求（凭据本身不会显示给插件）",
 	PermStorage:        "在自己的私有目录里保存数据",
-	PermPetSurface:     "在桌宠旁显示自定义浮层面",
+	PermPetSurface:     "在桌宠身上或旁边显示你自己的界面（浮层面、头顶的一行字、宠物本体）",
 	PermLLMChat:        "调用你已配置的大模型（流式返回）",
 	PermPluginConfig:   "保存你自己的插件配置",
 	PermAudio:          "保存并播放音频（例如语音提醒）",

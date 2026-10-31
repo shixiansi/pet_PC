@@ -43,8 +43,17 @@ func TestDiagnosticsNamesTheFilesThatAreNotThere(t *testing.T) {
 	if !strings.Contains(report, "settings.json") || !strings.Contains(report, fmt.Sprintf("%d B", len(settings))) {
 		t.Errorf("settings.json line has no size:\n%s", report)
 	}
-	if !strings.Contains(report, "todos.json") || !strings.Contains(report, "不存在") {
+	if !strings.Contains(report, "plugins.json") || !strings.Contains(report, "不存在") {
 		t.Errorf("a missing file was skipped instead of reported:\n%s", report)
+	}
+	// The files that RETIRED must not be reported at all. A line saying "todos.json 不存在"
+	// is not neutral: it reads as a problem to fix, while the file's absence is the intended
+	// state (the list lives in the todo plugin's private storage now), and llm-key.bin is the
+	// pet's old model key, moved into the conversation plugin by the one-time migration.
+	for _, gone := range []string{"todos.json", "llm-key.bin", "pomodoro.json"} {
+		if strings.Contains(report, gone) {
+			t.Errorf("the report still names the retired file %s:\n%s", gone, report)
+		}
 	}
 	if !strings.Contains(report, "（没有已装插件）") {
 		t.Errorf("an empty plugin list was not stated:\n%s", report)
@@ -88,10 +97,27 @@ func TestDiagnosticsCarriesTheLogTailAndSaysWhyItMayBeEmpty(t *testing.T) {
 	}
 }
 
+// TestDiagnosticsNeverContainsTheSecret pins the half of a report that must stay true no matter
+// what the report says: nothing secret leaves the machine.
+//
+// It used to be about llm-key.bin, which this program reported the PRESENCE of without ever
+// opening. That file is retired now (密钥按插件隔离存在 plugin-data/<id>/secret-*.bin, and the
+// old one is re-encrypted into the conversation plugin's directory by the one-time migration),
+// so the report no longer names it at all - which is the stronger statement, and the one worth
+// asserting: a report that cannot see a file cannot leak it.
 func TestDiagnosticsNeverContainsTheSecret(t *testing.T) {
 	m, dir := diagMarket(t)
 	const secret = "sk-THIS-MUST-NOT-LEAVE-THE-PROCESS"
-	if err := os.WriteFile(filepath.Join(dir, hostKeyFile), []byte(secret), 0o644); err != nil {
+	// Both shapes: the pet's retired key file, and a plugin's own secret inside its private
+	// directory. Neither is on the report's path any more.
+	if err := os.WriteFile(filepath.Join(dir, "llm-key.bin"), []byte(secret), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	private := filepath.Join(dir, "plugin-data", "com.example.chat")
+	if err := os.MkdirAll(private, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(private, "secret-llmApiKey.bin"), []byte(secret), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -100,39 +126,10 @@ func TestDiagnosticsNeverContainsTheSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(report, secret) {
-		t.Fatalf("the report carries the key file's contents:\n%s", report)
+		t.Fatalf("the report carries secret bytes:\n%s", report)
 	}
-	// It still has to be USEFUL: the file's presence and size, and that it was not decrypted.
-	if !strings.Contains(report, hostKeyFile) || !strings.Contains(report, "密文") {
-		t.Errorf("the key section does not say what it did and did not read:\n%s", report)
-	}
-}
-
-func TestHostKeyReportsPresenceWithoutReadingIt(t *testing.T) {
-	m, dir := diagMarket(t)
-
-	key := m.HostKey()
-	if key.Present {
-		t.Fatalf("HostKey reports a key with an empty data directory: %+v", key)
-	}
-	if filepath.Base(key.Path) != hostKeyFile {
-		t.Errorf("HostKey looked at %q, want ...%s", key.Path, hostKeyFile)
-	}
-
-	// An EMPTY file is not a key: the pet writes the encrypted blob, so zero bytes means a
-	// half-finished write, and reporting that as "已设置" would send the user hunting in the
-	// wrong place.
-	if err := os.WriteFile(key.Path, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if m.HostKey().Present {
-		t.Error("an empty key file was reported as present")
-	}
-	if err := os.WriteFile(filepath.Join(dir, hostKeyFile), []byte("ciphertext"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if !m.HostKey().Present {
-		t.Error("a non-empty key file was reported as absent")
+	if strings.Contains(report, "llm-key.bin") {
+		t.Errorf("the report still names the retired key file:\n%s", report)
 	}
 }
 

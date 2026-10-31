@@ -20,9 +20,11 @@ package main
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"sync"
 
+	"PetPC/internal/desktop"
 	"PetPC/internal/logging"
 )
 
@@ -72,15 +74,29 @@ func (w *sidecarLogWriter) Write(p []byte) (int, error) {
 		if i < 0 {
 			break
 		}
-		line := string(w.buf[:i])
+		line := w.buf[:i]
 		w.buf = w.buf[i+1:]
-		w.emit(line)
+		w.emit(decodeSidecarLine(line))
 	}
 	if len(w.buf) >= sidecarBufferMax {
-		w.emit(string(w.buf))
+		w.emit(decodeSidecarLine(w.buf))
 		w.buf = w.buf[:0]
 	}
 	return len(p), nil
+}
+
+// decodeSidecarLine turns one raw line into text, dropping the CR of a CRLF pair.
+//
+// The DECODING is the load-bearing half and it is not UTF-8: PowerShell writes the machine's
+// ANSI code page, so the old `string(bytes)` produced the mojibake that made these very log
+// lines useless (see desktop.DecodeChildOutput). Splitting the CR off BEFORE decoding is
+// deliberate: a stray 0x0D is ASCII either way, and trimming it inside the decoder would make
+// that function locale-dependent.
+func decodeSidecarLine(raw []byte) string {
+	if n := len(raw); n > 0 && raw[n-1] == '\r' {
+		raw = raw[:n-1]
+	}
+	return desktop.DecodeChildOutput(raw)
 }
 
 // Flush logs whatever is left without a trailing newline. Called when the child exits: the last
@@ -89,7 +105,7 @@ func (w *sidecarLogWriter) Flush() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if len(w.buf) > 0 {
-		w.emit(string(w.buf))
+		w.emit(decodeSidecarLine(w.buf))
 		w.buf = w.buf[:0]
 	}
 }
@@ -114,4 +130,45 @@ func (w *sidecarLogWriter) emit(line string) {
 		return
 	}
 	w.log.Pluginf(w.level, "sidecar", w.plugin, "%s", line)
+}
+
+// sidecarScriptEncoding explains why a .ps1 will not even PARSE, or returns "" when it will.
+//
+// # THE TRAP THIS NAMES
+//
+// Windows PowerShell 5.1 decodes a BOM-less script with the machine's ANSI code page. A file
+// saved as UTF-8 without a BOM therefore has its Chinese comments read as GBK, and a
+// multi-byte character can eat the quote or brace that follows it - the script then dies at
+// startup with `Missing closing '}'` pointing at a perfectly good line, and the real cause is
+// invisible. AGENTS.md §7 records the same trap for this repo's own `.ps1` files; the sidecar
+// launcher hits it for every plugin's script, and on 2026-10-31 it is why four of them never
+// produced a single byte (the plugins' own warning - "辅助脚本可能没起来" - was a guess; this
+// line is the diagnosis).
+//
+// It is deliberately a WARNING and not a refusal: the host cannot re-encode somebody's file
+// (a re-encoded copy would change `$PSScriptRoot`-relative behaviour, and silently rewriting
+// an installed package is worse than a bad script), and a script whose non-ASCII bytes happen
+// to survive mis-decoding does still run. What the host owes the user is the sentence, in
+// front of the mojibake.
+func sidecarScriptEncoding(path string, body []byte) string {
+	if !strings.EqualFold(filepath.Ext(path), ".ps1") {
+		// .exe sidecars are binaries; their encoding is not a text question.
+		return ""
+	}
+	if bytes.HasPrefix(body, []byte{0xEF, 0xBB, 0xBF}) {
+		return ""
+	}
+	nonASCII := false
+	for _, b := range body {
+		if b >= 0x80 {
+			nonASCII = true
+			break
+		}
+	}
+	if !nonASCII {
+		return ""
+	}
+	return "脚本没有 UTF-8 BOM 而含非 ASCII 字符：Windows PowerShell 5.1 会按本机 ANSI 代码页解析它，" +
+		"一句中文注释就能吃掉后面的引号或花括号，脚本会在启动时抛 ParserError（行号指向的位置往往看不出问题）。" +
+		"给它加上 UTF-8 BOM，或把脚本写成纯 ASCII（AGENTS.md §7）"
 }

@@ -18,8 +18,6 @@ export function GetConfig(arg1:string):Promise<main.PluginConfig>;
 
 export function Grant(arg1:string,arg2:Array<string>):Promise<void>;
 
-export function HostKey():Promise<main.HostKey>;
-
 export function HotkeyLabels():Promise<desktop.HotkeyView>;
 
 export function Install(arg1:string):Promise<void>;

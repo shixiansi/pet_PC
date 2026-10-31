@@ -81,6 +81,11 @@ type PluginView struct {
 	// this would make "which plugin runs in the background" a second lookup that
 	// can disagree with the list it is rendering.
 	Background bool `json:"background"`
+	// Body is the "draw the pet itself" declaration. It travels with the row for the same
+	// reason Background does: the page decides which frame to mount, and a page that had to
+	// read a manifest per plugin to learn this would make "who owns the pet" a second lookup
+	// that can disagree with the list it is rendering.
+	Body bool `json:"body"`
 	// Entry is the plugin's HTML entry point, so the tab can build the sandboxed
 	// iframe's URL without a second lookup.
 	Entry string `json:"entry,omitempty"`
@@ -319,6 +324,7 @@ func pluginViewOf(r plugins.Installed) PluginView {
 		v.PanelSlot = r.Manifest.PanelSlot
 		v.Surface = len(r.Manifest.Surface) > 0
 		v.Background = r.Manifest.Background
+		v.Body = r.Manifest.Body
 		v.Entry = r.Manifest.Entry
 		v.Pending = plugins.Pending(*r.Manifest, r.Granted)
 	} else {
@@ -3606,6 +3612,17 @@ func (a *App) startPluginSidecar(row plugins.Installed) {
 	args := append([]string{}, spec.Args...)
 	var cmd *exec.Cmd
 	if strings.EqualFold(filepath.Ext(script), ".ps1") {
+		// Say WHY it is about to die, before it dies. A BOM-less UTF-8 script with Chinese in
+		// it is mis-parsed by Windows PowerShell 5.1 (ANSI code page), and the only evidence
+		// used to be a ParserError pointing at a line that looks fine - see
+		// sidecarScriptEncoding. The warning does not block the launch: the host may not
+		// rewrite a package it installed, and a script can survive mis-decoding.
+		if body, err := os.ReadFile(script); err == nil {
+			if why := sidecarScriptEncoding(script, body); why != "" {
+				a.log.Pluginf(logging.LevelWarn, "plugin", row.ID,
+					"辅助脚本 %s 很可能起不来：%s", spec.Script, why)
+			}
+		}
 		// -NoProfile: the user's profile could print, block, or redefine things.
 		// -ExecutionPolicy Bypass: the package is already installed content the user
 		// approved; refusing to run it here would only teach people to change the

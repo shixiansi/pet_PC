@@ -608,17 +608,73 @@ func TestManifestBackground(t *testing.T) {
 		t.Fatalf("a background-only plugin parsed as %+v", only)
 	}
 
-	// But SOMETHING must load the entry: declaring none of the three means the
+	// But SOMETHING must load the entry: declaring none of the four means the
 	// entry names a file nothing would ever run.
 	_, err = ParseManifest(manifestJSON(t, map[string]any{
 		"permissions": []string{"events"},
 		"panel":       false,
 	}))
 	if err == nil {
-		t.Fatal("a plugin with no panel, no surface and no background must be rejected")
+		t.Fatal("a plugin with no panel, no surface, no background and no body must be rejected")
 	}
-	if !strings.Contains(err.Error(), "background") {
-		t.Fatalf("error %q must name background as one of the three mount points", err)
+	if !strings.Contains(err.Error(), "background") || !strings.Contains(err.Error(), "body") {
+		t.Fatalf("error %q must name background and body as mount points", err)
+	}
+}
+
+// TestManifestBodyPinsThePetAndItsPermission covers the `body` declaration: the entry
+// document is mounted into the pet's own rectangle, so the user has to have been shown
+// the permission that says a plugin paints there.
+func TestManifestBodyPinsThePetAndItsPermission(t *testing.T) {
+	// The honest declaration: body + the permission the install dialog words.
+	m, err := ParseManifest(manifestJSON(t, map[string]any{
+		"permissions": []string{"pet.surface"},
+		"body":        true,
+	}))
+	if err != nil {
+		t.Fatalf("body with pet.surface must parse: %v", err)
+	}
+	if !m.Body {
+		t.Fatal("body was not preserved")
+	}
+
+	// Absent by default, so every manifest already on a user's machine parses as before.
+	plain, err := ParseManifest(manifestJSON(t, map[string]any{
+		"permissions": []string{"pet.surface"},
+		"panel":       true,
+	}))
+	if err != nil {
+		t.Fatalf("a manifest without body must parse: %v", err)
+	}
+	if plain.Body {
+		t.Error("body defaults to false")
+	}
+
+	// A body-only plugin is a legal mount point on its own: the pet's rectangle is where its
+	// document goes, and it needs no panel, no surface block and no headless frame.
+	only, err := ParseManifest(manifestJSON(t, map[string]any{
+		"permissions": []string{"pet.surface"},
+		"body":        true,
+		"panel":       false,
+	}))
+	if err != nil {
+		t.Fatalf("a body-only plugin must parse: %v", err)
+	}
+	if !only.Body || only.Panel || len(only.Surface) != 0 {
+		t.Fatalf("a body-only plugin parsed as %+v", only)
+	}
+
+	// Painting the pet without the permission the dialog words is refused: it would be the
+	// one thing on screen the user never agreed to.
+	_, err = ParseManifest(manifestJSON(t, map[string]any{
+		"permissions": []string{"storage"},
+		"body":        true,
+	}))
+	if err == nil {
+		t.Fatal("body without pet.surface must be rejected")
+	}
+	if !strings.Contains(err.Error(), "body") || !strings.Contains(err.Error(), PermPetSurface) {
+		t.Fatalf("error %q must name body and %s", err, PermPetSurface)
 	}
 }
 

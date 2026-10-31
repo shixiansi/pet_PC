@@ -203,7 +203,7 @@ const LABELS: Array<[id: string, label: string]> = [
   ['net.fetch', '访问网络（仅限插件声明的域名）'],
   ['net.credentials', '以你保存的网站登录凭据发请求（凭据本身不会显示给插件）'],
   ['storage', '在自己的私有目录里保存数据'],
-  ['pet.surface', '在桌宠旁显示自定义浮层面'],
+  ['pet.surface', '在桌宠身上或旁边显示你自己的界面（浮层面、头顶的一行字、宠物本体）'],
   ['llm.chat', '调用你已配置的大模型（流式返回）'],
   ['plugin.config', '保存你自己的插件配置'],
   ['audio', '保存并播放音频（例如语音提醒）'],
@@ -608,10 +608,14 @@ export const SetTheme = (name: string): Promise<void | unknown> => {
 
 // --- 高级页的诊断面 --------------------------------------------------------------
 
-export type HostKeyState = main.HostKey;
-
 // The same text the Go side builds, shortened but not reshaped: a fake that drops the
 // "不存在的文件也要说出来" lines would let the page look right while the real report is empty.
+//
+// The file table is the REAL one (settingsapi_diagnostics.go's dataFiles): no todos.json, no
+// llm-key.bin, no pomodoro*.json. Those moved out of this directory's meaning - the first two
+// into the todo plugin's private storage, the key into the conversation plugin's - and a stub
+// that still listed them would keep the retired shape alive in the only place a browser-only
+// session can see it.
 const FAKE_REPORT = `PetPC 诊断报告
 生成时间: 2026-10-28 18:40:12
 数据目录: C:\\fake\\PetPC
@@ -621,8 +625,6 @@ settings.json                 412 B  2026-10-28 18:31:04
 config.json                   188 B  2026-10-28 18:38:51
 plugins.json                  264 B  2026-10-18 09:20:11
 plugin-market.json             64 B  2026-10-02 21:05:44
-todos.json                    398 B  2026-10-28 09:12:00
-llm-key.bin                   452 B  2026-10-18 09:21:30
 logs/pet.log                18422 B  2026-10-28 18:40:02
 logs/market.log               812 B  2026-10-28 18:39:58
 
@@ -633,9 +635,6 @@ com.example.broken  v0.0.3  停用  权限 0（已授 0）
 
 == 警告 ==
 （无）
-
-== 密钥 ==
-llm-key.bin 存在（DPAPI 密文，本程序不解密）
 
 == 日志 ==
 目录: C:\\fake\\PetPC\\logs（轮转上限 2048 KB，每个程序两个文件）
@@ -649,10 +648,6 @@ market.log.1                   0 B  2026-10-28 09:12:44
 2026-10-28 18:39:58.010 INFO  market com.shixiansi.plugin-chat 授权已保存：[llm.chat pet.bubble pet.surface plugin.config storage]
 `;
 
-export const HostKey = (): Promise<HostKeyState> =>
-  DEV
-    ? later(main.HostKey.createFrom({ Path: 'C:\\fake\\PetPC\\llm-key.bin', Present: true }))
-    : host.HostKey();
 export const Diagnostics = (): Promise<string> => (DEV ? later(FAKE_REPORT) : host.Diagnostics());
 
 // --- 日志页 -------------------------------------------------------------------------

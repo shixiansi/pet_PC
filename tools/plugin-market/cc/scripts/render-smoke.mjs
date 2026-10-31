@@ -442,10 +442,17 @@ seg('浅色')?.click();
 await settle();
 check('偏好：再点回来', w.document.documentElement.dataset.theme === 'light');
 await open('高级');
-check('高级：模型配置来自 store.Config', text().includes('deepseek') && text().includes('deepseek-chat'));
-check('高级：密钥状态来自 HostKey()', text().includes('已设置（DPAPI 密文）') && text().includes('llm-key.bin'));
+// The 密钥 and 模型 cards are GONE, and this asserts their absence rather than their content:
+// both reported things that had already moved out of this program's reach (the pet's old
+// llm-key.bin, and the host Config's 13 llm* fields, which now live in the conversation
+// plugin's own settings). A page that grew them back would be showing a switch nobody owns.
+check('高级：不再显示已退休的密钥卡与模型卡',
+  !text().includes('llm-key.bin') && !text().includes('DPAPI 密文') && !text().includes('deepseek-chat'));
 check('高级：数据目录来自 DataDir()', text().includes('C:\\fake\\PetPC'));
 check('高级：整组对话提醒搬过来了', text().includes('开启对话提醒') && text().includes('活跃时段') && text().includes('没有待办时也提醒'));
+check('高级：提醒说明指向待办插件，而不是宿主那个已退休的循环',
+  text().includes('待办插件的') && !text().includes('每 30 秒读一次设置'));
+check('高级：数据表不再列 todos.json', !text().includes('todos.json'));
 const numberValues = [...w.document.querySelectorAll('input[type="number"]')].map((i) => i.value);
 check('高级：提醒间隔来自 reminderIntervalMin（30）', numberValues.includes('30'));
 

@@ -26,10 +26,6 @@ export function Grant(arg1, arg2) {
   return window['go']['main']['Market']['Grant'](arg1, arg2);
 }
 
-export function HostKey() {
-  return window['go']['main']['Market']['HostKey']();
-}
-
 export function HotkeyLabels() {
   return window['go']['main']['Market']['HotkeyLabels']();
 }

@@ -10,8 +10,30 @@
   <!-- Everything is positioned from the layout the Go side computes. -->
   <div id="stage">
     <!-- The pet. It is the whole product: everything else and anything the pet has to say
-         hangs off its box. -->
+         hangs off its box.
+
+         WHAT the pet looks like is not this file's business any more: a plugin that declares
+         `body` draws it inside this box, and the <img> below is the fallback for a machine
+         with no such plugin installed. Either way the box, its crop and its gestures are the
+         host's - see the mount point comment below. -->
     <div id="pet" title="拖动移动 · 单击打开对话 · 悬停出现对话按钮">
+      <!-- The plugin that draws the PET ITSELF (manifest `body`).
+
+           It is the pet's own rectangle - nothing else - and that is why it lives inside
+           #pet rather than in the slot beside it: while no bubble and no surface is up, the
+           window is cropped to exactly this box (AGENTS.md §3.2), so a pet drawn anywhere
+           else would be sliced by the native region.
+
+           What stays the host's: the rectangle, the crop, the drag, the right-click menu,
+           the hover button, and the two lines a plugin may paint ON the pet (the countdown
+           above the head and the corner badge). The frame is pointer-events: none precisely
+           so all of those keep working - the plugin owns the picture, the host owns every
+           gesture that happens on it.
+
+           Built by src/plugin-host.js (mountPetBody), not by the markup: an iframe is a
+           document, and a document that is re-created by a template diff loses its
+           state. -->
+      <div id="pet-body" class="pet-body hidden"></div>
       <img id="pet-image" alt="桌宠" draggable="false" />
       <!-- The one line a plugin may draw on the pet itself (the pomodoro's countdown).
            It sits INSIDE #pet's box, centred above the head, for the same reason the

@@ -122,9 +122,17 @@ func (m *Market) ResetPetImage() (store.Config, error) {
 
 // --- 对话提醒 ---------------------------------------------------------------------
 
-// The reminder loop reads its config on every tick (30s), so every field below takes effect
-// without a restart. Turning reminders on is therefore just a preference - there is no loop
-// to start.
+// These switches write the todo PLUGIN's reminder preferences, not a host loop's.
+//
+// The host's own 30-second reminder scheduler retired with the host timer
+// (app_reminder.go keeps only the manual "立刻提醒"), and the schedule lives in the todo
+// plugin's resident frame now - which reads the SAME settings.json file. So every setter below
+// is still "save a preference": there is no loop here to start, stop or restart, and the
+// plugin picks the new value up on its next turn.
+//
+// What that means for the page's wording: 「这些改动是即时的」 stays true, but the reason is the
+// plugin's frame, not a host tick. Saying otherwise was the stale sentence this comment used to
+// repeat.
 
 func (m *Market) SetReminderEnabled(on bool) (store.Config, error) {
 	return store.SaveSettings(m.dataDir, func(c *store.Config) { c.ReminderEnabled = on })

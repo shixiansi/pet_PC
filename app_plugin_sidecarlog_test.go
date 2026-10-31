@@ -77,6 +77,59 @@ func TestSidecarStderrReachesTheLog(t *testing.T) {
 	}
 }
 
+// TestSidecarScriptEncodingNamesTheTrap covers the sentence that turns "脚本一启动就 ParserError"
+// into something the user can act on.
+//
+// The bug it exists for is a byte-level one, so the cases are bytes rather than scripts: a
+// BOM-less UTF-8 file with Chinese is the broken shape, and the FIX (add a BOM) has to be
+// recognised as healthy - otherwise the warning would fire on every correct plugin too, which
+// is how a warning becomes noise nobody reads.
+func TestSidecarScriptEncodingNamesTheTrap(t *testing.T) {
+	bom := []byte{0xEF, 0xBB, 0xBF}
+	cases := []struct {
+		name string
+		path string
+		body []byte
+		want bool
+	}{
+		{
+			name: "ASCII only, no BOM: Windows PowerShell reads it fine",
+			path: "helper.ps1",
+			body: []byte("while ($true) { Start-Sleep -Seconds 1 }\n"),
+		},
+		{
+			name: "UTF-8 with BOM: the fix",
+			path: "helper.ps1",
+			body: append(append([]byte{}, bom...), []byte("# 中文注释\nwhile ($true) { }\n")...),
+		},
+		{
+			name: "BOM-less UTF-8 with Chinese: mis-parsed as the ANSI code page",
+			path: "helper.ps1",
+			body: []byte("# 采样失败不退出\nwhile ($true) { }\n"),
+			want: true,
+		},
+		{
+			name: "an .exe sidecar is a binary, not a text question",
+			path: "helper.exe",
+			body: []byte{0x4D, 0x5A, 0x90, 0x00, 0xC3, 0xE4},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			why := sidecarScriptEncoding(c.path, c.body)
+			if c.want && why == "" {
+				t.Fatal("a script that cannot be parsed was not flagged")
+			}
+			if !c.want && why != "" {
+				t.Fatalf("a healthy script was flagged: %s", why)
+			}
+			if c.want && (!strings.Contains(why, "BOM") || !strings.Contains(why, "PowerShell")) {
+				t.Fatalf("the warning does not name the cause and the fix: %s", why)
+			}
+		})
+	}
+}
+
 func readLogFile(t *testing.T, dir string) string {
 	t.Helper()
 	path := dir + string(os.PathSeparator) + "logs" + string(os.PathSeparator) + "sidecarprobe.log"

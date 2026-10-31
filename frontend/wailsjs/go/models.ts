@@ -258,6 +258,7 @@ export namespace main {
 	    panelSlot?: string;
 	    surface: boolean;
 	    background: boolean;
+	    body: boolean;
 	    entry?: string;
 	    dir: string;
 	    error?: string;
@@ -282,6 +283,7 @@ export namespace main {
 	        this.panelSlot = source["panelSlot"];
 	        this.surface = source["surface"];
 	        this.background = source["background"];
+	        this.body = source["body"];
 	        this.entry = source["entry"];
 	        this.dir = source["dir"];
 	        this.error = source["error"];

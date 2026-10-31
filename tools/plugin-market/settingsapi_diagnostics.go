@@ -7,27 +7,21 @@ import (
 	"strings"
 	"time"
 
-	"PetPC/internal/desktop"
 	"PetPC/internal/logging"
 	"PetPC/internal/plugins"
 )
 
-// hostKeyFile is the file the PET keeps its LLM API key in, DPAPI-encrypted
-// (app_llm.go's llmKeyFile). This program never reads it, never writes it and never
-// decrypts it - it only says whether the file is there, because "密钥没配" and "密钥配了
-// 但插件还是没人回答" are two very different bug reports and the user cannot tell them
-// apart from the outside.
-const hostKeyFile = "llm-key.bin"
-
 // dataFiles is what the 高级 page reports on: every file the two programs put in the shared
-// data directory, minus the ones whose CONTENT is the user's business (todos, settings).
-// Sizes and timestamps answer "is the pet actually writing anything" without copying
-// someone's todo list into a bug report.
+// data directory, minus the ones whose CONTENT is the user's business (settings, plugin data).
+// Sizes and timestamps answer "is the pet actually writing anything" without copying someone's
+// todo list into a bug report.
 //
-// No pomodoro*.json: those two were the pet's timer state and its archive, and both moved into
-// the pomodoro plugin's private directory (plugin-data/com.shixiansi.plugin-pomodoro/) when the
-// host timer retired. A file this page reports on has to be a file one of these two programs
-// still writes.
+// NO pomodoro*.json, NO todos.json, NO llm-key.bin. The first two moved into their plugins'
+// private directories when the host timer and the host todo store retired, and the third is the
+// pet's OLD model key: the one-time migration re-encrypts it into the conversation plugin's
+// private directory and renames it to `.bak` on the way out (internal/plugins/migrate.go).
+// Reporting them would be reporting on files nothing writes any more - and a table that says
+// "todos.json 不存在" sends its reader looking for a file whose absence is the intended state.
 //
 // The two log files are listed here (rather than only in the 日志 section below) so the file
 // table answers "has anything ever been logged at all" without parsing a line: a pet.log that
@@ -37,8 +31,6 @@ var dataFiles = []string{
 	"config.json",
 	"plugins.json",
 	"plugin-market.json",
-	"todos.json",
-	hostKeyFile,
 	"logs/pet.log",
 	"logs/market.log",
 }
@@ -46,24 +38,6 @@ var dataFiles = []string{
 // logTailLines bounds the log tail a report may contain. A report that has to be scrolled is
 // a report nobody reads, and the full log is one click away in the 日志 page.
 const logTailLines = 40
-
-// HostKey is what this program may honestly say about the pet's LLM key.
-//
-// A struct rather than a bare bool: the page has to be able to say WHICH file it looked at,
-// and "没有密钥" said about the wrong path is worse than saying nothing.
-type HostKey struct {
-	Path string
-	// Present is "a non-empty encrypted file exists". It is NOT "the key works": only the
-	// pet can judge that, because only the pet decrypts it.
-	Present bool
-}
-
-// HostKey reports the pet's encrypted key file, without opening it.
-func (m *Market) HostKey() HostKey {
-	path := desktop.NewSecretStore(m.dataDir, hostKeyFile).Path()
-	info, err := os.Stat(path)
-	return HostKey{Path: path, Present: err == nil && info.Size() > 0}
-}
 
 // Diagnostics returns a plain-text report, for a bug report or for the user's own "是什么在
 // 占地方" question.
@@ -126,13 +100,6 @@ func (m *Market) Diagnostics() (string, error) {
 		for _, w := range warnings {
 			b.WriteString(w + "\n")
 		}
-	}
-
-	b.WriteString("\n== 密钥 ==\n")
-	if key := m.HostKey(); key.Present {
-		fmt.Fprintf(&b, "%s 存在（DPAPI 密文，本程序不解密）\n", filepath.Base(key.Path))
-	} else {
-		fmt.Fprintf(&b, "%s 不存在（宿主里还没有配置大模型密钥）\n", filepath.Base(key.Path))
 	}
 
 	b.WriteString("\n== 日志 ==\n")
@@ -204,8 +171,9 @@ func writeLogSection(b *strings.Builder, dir string) {
 
 // writeFileLine prints one line per file: size and mtime, or why it is not there.
 //
-// Missing files are listed rather than skipped. "todos.json 不存在" is information - it says
-// the pet has never written one - whereas a list that silently omits it says nothing at all.
+// Missing files are listed rather than skipped. "config.json 不存在" is information - it says
+// the pet has never run against this data directory - whereas a list that silently omits it
+// says nothing at all.
 func writeFileLine(b *strings.Builder, dir, name string) {
 	info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(name)))
 	if err != nil {

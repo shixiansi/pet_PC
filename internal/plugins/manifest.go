@@ -62,6 +62,32 @@ type Manifest struct {
 	// be extended by. Coordinates are CSS pixels relative to the pet's
 	// top-left corner.
 	Surface []Rect `json:"surface,omitempty"`
+	// Body says "the ENTRY document is the pet itself": the host mounts it into the pet's own
+	// box instead of the bundled picture.
+	//
+	// # WHY THIS FIELD EXISTS
+	//
+	// Everything the pet IS had already moved out except its own picture: the timer, the list
+	// and the conversation are plugins, and the host had kept exactly one thing of its own -
+	// the <img> it paints into the pet's rectangle. That is the last piece of "the host knows
+	// what a pet looks like", and it is what a plugin cannot change without shipping a fork of
+	// the host. With `body`, the pet's appearance (and anything it does - blinking, evolving,
+	// reacting) belongs to whoever claims it, and the host keeps only what is genuinely the
+	// window's: the rectangle, the crop, the drag, the region and the badges drawn ON the pet.
+	//
+	// # WHY IT NEEDS pet.surface
+	//
+	// The body is drawn by the same mechanism as a floating surface - a sandboxed document at a
+	// rectangle the host owns - and the user has to be asked about it: "this plugin paints on
+	// your pet" is the `pet.surface` row in the install dialog. Reusing the word rather than
+	// minting `pet.body` is deliberate: a new permission must have at least one METHOD behind
+	// it (see TestCapabilityTableIsComplete), and the body is a manifest DECLARATION gated on an
+	// existing permission - exactly the shape `background` already has.
+	//
+	// Two plugins may declare it; the host mounts the first eligible one in install order and
+	// says so in its log. There is one pet, so there is one body - a "which half of my pet is
+	// whose" state is not something a user could be asked to resolve.
+	Body bool `json:"body,omitempty"`
 	// Config is what the plugin wants to configure. The host validates it, the
 	// market program draws an editor for it, and the values live in the plugin's
 	// private directory - so a plugin's settings are inside the directory that
@@ -414,6 +440,9 @@ func (m Manifest) Validate() error {
 	if err := m.validateBackground(); err != nil {
 		return err
 	}
+	if err := m.validateBody(); err != nil {
+		return err
+	}
 	if err := m.validateShareLLM(); err != nil {
 		return err
 	}
@@ -576,6 +605,29 @@ func (m Manifest) validateBackground() error {
 		!m.HasPermission(PermNetFetch) && !m.HasPermission(PermPluginCall) {
 		return fmt.Errorf("%s 声明了 background 却既未申请 events、net.ws、net.fetch，也未申请 plugin.call 权限：后台帧的用途就是无人看着时收发消息",
 			ManifestName)
+	}
+	return nil
+}
+
+// validateBody pairs "I draw the pet" with the permission that makes it a question the
+// user was asked.
+//
+// The body is the one place a plugin's document is mounted where the HOST used to paint
+// something of its own (the pet's picture), and it is always on - not opened by a click.
+// That is why it cannot be a free-standing flag: `pet.surface` is the install dialog's row
+// ("在桌宠身上或旁边显示你自己的界面"), and a plugin that paints the pet without the user
+// having seen that sentence is a plugin the user authorised for the wrong thing.
+//
+// There is no "body needs surface rectangles" rule: the body's rectangle is the PET's, which
+// the host owns and the user sizes with 桌宠大小. A body plugin declaring `surface` blocks as
+// well is fine (it may also want a card beside the pet) and needs nothing extra.
+func (m Manifest) validateBody() error {
+	if !m.Body {
+		return nil
+	}
+	if !m.HasPermission(PermPetSurface) {
+		return fmt.Errorf("%s 声明了 body（画桌宠本体）却未申请 %s 权限：装它的人要在授权列表里看到这一句",
+			ManifestName, PermPetSurface)
 	}
 	return nil
 }
@@ -1073,12 +1125,14 @@ func (m Manifest) validateNetHosts() error {
 // or a ".." segment would let a plugin point the host at files outside its own
 // directory.
 //
-// "Somewhere to appear" is one of THREE things, not two. `panel` and `surface` are
+// "Somewhere to appear" is one of FOUR things, not two. `panel` and `surface` are
 // the pet's own mount points; `background` is a plugin whose interface is hosted by
 // another program (the plugin market) while it keeps a headless frame in the pet so
-// it can still receive events. All three mean "some host program will load this
-// file and run it", which is the property the rule exists to guarantee - a manifest
-// that declares none of them names an entry nothing would ever load.
+// it can still receive events; `body` is the pet's own rectangle, which used to be
+// the host's picture and is the plugin's document now. All four mean "some host
+// program will load this file and run it", which is the property the rule exists to
+// guarantee - a manifest that declares none of them names an entry nothing would
+// ever load.
 func (m Manifest) validateEntry() error {
 	if m.Entry == "" {
 		return fmt.Errorf("%s 缺少必填字段 entry", ManifestName)
@@ -1095,8 +1149,8 @@ func (m Manifest) validateEntry() error {
 	if !strings.HasSuffix(m.Entry, ".html") {
 		return fmt.Errorf("%s 字段 entry 必须以 .html 结尾：%q", ManifestName, m.Entry)
 	}
-	if !m.Panel && len(m.Surface) == 0 && !m.Background {
-		return fmt.Errorf("%s 必须声明 panel、surface 或 background（插件至少要有一个界面落点）", ManifestName)
+	if !m.Panel && len(m.Surface) == 0 && !m.Background && !m.Body {
+		return fmt.Errorf("%s 必须声明 panel、surface、background 或 body（插件至少要有一个界面落点）", ManifestName)
 	}
 	return nil
 }

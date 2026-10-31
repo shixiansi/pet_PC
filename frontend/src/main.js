@@ -38,6 +38,9 @@ const $ = (id) => document.getElementById(id);
 const els = {
   pet: $('pet'),
   petImage: $('pet-image'),
+  // The mount point for a plugin that draws the pet itself (manifest `body`). Empty unless
+  // such a plugin is installed, enabled and granted - see petBodyPlugin below.
+  petBody: $('pet-body'),
   // The hover-only conversation button inside the pet's box. Its visibility is
   // the stylesheet's business (#pet:hover); the page only decides what a click
   // on it does.
@@ -49,15 +52,17 @@ const els = {
   clock: $('pet-clock'),
   toast: $('toast'),
 
-  // TWO mount points and nothing else: the floating surface's, and the headless frame's.
-  // Both are fill-only containers - what goes inside them is built by plugin-host.js - and
-  // they are independent of each other.
+  // THREE mount points: the floating surface's, the headless frame's, and the pet's own
+  // body. All three are fill-only containers - what goes inside them is built by
+  // plugin-host.js - and they are independent of each other.
   //
-  // THE THIRD ONE WENT WITH THE PANEL: #chat-slot was the 对话 tab's body, and the chat
+  // THE PANEL'S WENT WITH THE PANEL: #chat-slot was the 对话 tab's body, and the chat
   // plugin renders itself as a floating surface now. A host mount point for a panel that
   // no longer exists would be a `div` nothing ever fills.
   pluginSurface: $('plugin-surface'),
   pluginBackground: $('plugin-background'),
+  // The body mount point travels to plugin-host.js with the other two, because the body IS a
+  // sandboxed plugin document like them: the host only decides where it goes and who owns it.
 
   // Bubble (reminder / menu). The picker, the summary prompt and the plan prompt
   // were the other three kinds, and all three were questions about the host's
@@ -265,18 +270,29 @@ function applyLayout(layout) {
   // here derives a position or a size of its own.
   const surface = layout.pluginSurface || null;
   if (surface) {
-    // The surface needs the plugin's METADATA (its entry file and its grants), and
-    // that comes from the installed list, which is read on demand rather than at
-    // startup. Opening a surface can therefore arrive before the list has ever been
-    // read, and passing an empty view in that case gave the iframe a default entry and
-    // no grants - the plugin rendered as unauthorised (or asked for an asset path that
-    // does not exist). Reading the list here is what makes the surface independent of
-    // which path the user happened to take first.
+    // The surface needs the plugin's METADATA (its entry file and its grants), and that comes
+    // from the installed list, which is read on demand rather than at startup. Opening a
+    // surface can therefore arrive before the list has ever been read, and passing an empty
+    // view in that case gave the iframe a default entry and no grants - the plugin rendered as
+    // unauthorised (or asked for an asset path that does not exist). Reading the list here is
+    // what makes the surface independent of which path the user happened to take first.
     if (!pluginViewFor(surface.pluginId)) {
       refreshInstalledThenApply(pluginViewFor);
     }
   }
   pluginHost?.applyGeometry(surface, pluginViewFor(surface?.pluginId));
+
+  // The pet's own body: a plugin may draw it (manifest `body`), and this is where the frame
+  // is placed. What the host still owns is the BOX - which is why the numbers passed on are
+  // the pet's own, not a rectangle the plugin declared: the pet's size is the user's setting,
+  // and a body that measured itself would draw off its own feet at any scale but 1.0.
+  syncPetBody(layout);
+
+  // Nothing here knew whether the box above belongs to a plugin, because the installed list
+  // has not been read yet. This is the same "read it on demand" rule the surface follows, and
+  // it is what makes the first paint independent of the order things happen in: the 1.5 s poll
+  // is a long time to show the wrong pet.
+  if (!installedPlugins) refreshInstalledThenApply();
 }
 
 /**
@@ -328,6 +344,53 @@ function pluginViewFor(pluginId) {
     permissions: found.permissions,
     granted: found.granted,
   };
+}
+
+/**
+ * The installed plugin that draws the pet, or null.
+ *
+ * Three gates, and they are the same three the headless frame needs: installed (it is in the
+ * list), enabled (switching a plugin off must stop it doing anything - a disabled plugin still
+ * painting the pet would be the loudest possible version of "disable does not work"), and
+ * holding the permission the install dialog words. Go refuses a manifest that declares `body`
+ * without `pet.surface`, so that last gate can only fail for a plugin whose grants were
+ * narrowed after the fact - which is exactly when the pet must go back to its own picture.
+ *
+ * The FIRST eligible row wins, in install order. There is one pet: two plugins drawing halves
+ * of it is not a state the user could resolve, so the page decides deterministically and says
+ * so once, in the console, where a surprising result is diagnosable.
+ */
+function petBodyPlugin() {
+  const claimed = (installedPlugins || []).filter(
+    (p) => p && p.body === true && p.enabled === true && (p.granted || []).includes('pet.surface'),
+  );
+  if (claimed.length > 1) {
+    console.warn(
+      `pet body: ${claimed.map((p) => p.id).join('、')} 都声明了 body，只有 ${claimed[0].id} 会画桌宠`,
+    );
+  }
+  return claimed[0] || null;
+}
+
+/**
+ * Mounts (or removes) the frame that draws the pet, and keeps its size in step.
+ *
+ * Both halves matter: the row decides WHOSE document it is, the rectangle decides how big the
+ * pet currently is (桌宠大小), and both arrive through `applyLayout` - which runs on every
+ * state push, including every frame of a drag. `syncBody` therefore has to be cheap and
+ * idempotent, and it is: an unchanged (id, version, grants) keeps the document, and an
+ * unchanged rectangle sends nothing.
+ */
+function syncPetBody(layout) {
+  if (!pluginHost) return;
+  const row = petBodyPlugin();
+  const rect = layout && layout.petW > 0
+    ? { x: 0, y: 0, w: layout.petW, h: layout.petH }
+    : null;
+  pluginHost.syncBody(row, rect);
+  // The bundled picture steps aside while a plugin draws the pet: two pets at once is the one
+  // outcome that is unambiguously wrong, and a half-transparent plugin drawing would show both.
+  els.pet.classList.toggle('body-from-plugin', !!row);
 }
 
 /**
@@ -884,6 +947,10 @@ async function refreshInstalled() {
     // installed right now", so splitting them across two reads would let the frames describe
     // a list that has already been replaced - which was a real defect while the panel existed.
     renderBackgroundPlugins();
+    // ...and so is the pet's body: installing, disabling or ungranting the plugin that draws
+    // the pet has to change what is on the pet without a restart, which is the whole reason
+    // this list is re-read on a timer.
+    syncPetBody(lastLayout);
     return installedPlugins;
   } finally {
     installedRefreshInFlight = false;
@@ -943,6 +1010,7 @@ function wire() {
     {
       pluginSurface: els.pluginSurface,
       pluginBackground: els.pluginBackground,
+      petBody: els.petBody,
     },
     { fail, debug },
   );

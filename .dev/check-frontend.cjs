@@ -768,6 +768,65 @@ check(
   'a plugin frame can reach the host origin',
 );
 
+// --- 6c. The pet's body is a mount point of its own --------------------------
+//
+// The pet's own picture used to be the host's last piece of "what a pet looks like". It is a
+// plugin's document now (manifest `body`), mounted into the pet's rectangle, and four things
+// have to hold or the split is worse than what it replaced:
+//
+//   1. the mount point is INSIDE #pet, because that box is the whole of what the window is
+//      cropped to while nothing else is up (AGENTS.md §3.2);
+//   2. the frame is transparent and INERT - the drag, the right-click menu and the hover
+//      button all happen ON the pet, and an iframe that took the pointer would leave a pet
+//      that cannot be moved, right-clicked or hidden;
+//   3. the host mounts it only for a plugin that DECLARED it, is ENABLED and still HOLDS
+//      pet.surface - a plugin painting the pet behind the user's back is the one thing that
+//      would make "disable does not work" literal;
+//   4. the bundled picture stays as the fallback, and Go refuses the declaration without the
+//      permission, so the install dialog can say what the plugin does.
+const goManifest = fs.readFileSync(path.join(root, 'internal/plugins/manifest.go'), 'utf8');
+const bodyAt = html.indexOf('id="pet-body"');
+check(
+  'the pet body mount point lives inside the pet box',
+  bodyAt > html.indexOf('id="pet"') && bodyAt < html.indexOf('id="pet-chat"'),
+  'the body frame is outside #pet, where the window region does not reach',
+);
+check(
+  'the body frame paints nothing and takes no gesture',
+  (() => {
+    const start = css.indexOf('#pet-body .plugin-frame');
+    const rule = start < 0 ? '' : css.slice(start, css.indexOf('}', start));
+    return /background:\s*transparent/.test(rule) && /pointer-events:\s*none/.test(rule);
+  })(),
+  'the pet body frame draws a plate or swallows the pointer, so the pet stops being draggable',
+);
+check(
+  'the host mounts the pet body only for an eligible plugin',
+  /function petBodyPlugin\(\)/.test(mainJs) &&
+    /p\.body === true/.test(mainJs) &&
+    /p\.enabled === true/.test(mainJs) &&
+    /\(p\.granted \|\| \[\]\)\.includes\('pet\.surface'\)/.test(mainJs) &&
+    /pluginHost\.syncBody\(row, rect\)/.test(mainJs) &&
+    /syncPetBody\(layout\)/.test(mainJs),
+  'an eligibility gate or the mount call is gone, so any plugin could paint the pet',
+);
+check(
+  'the body frame is its own kind, and something takes it away again',
+  /kind: 'body'/.test(pluginHostJs) && /slot: 'body'/.test(pluginHostJs) &&
+    /syncBody\(plugin, rect\)/.test(pluginHostJs) && /closeBody\(\)/.test(pluginHostJs) &&
+    /petBody: els\.petBody/.test(mainJs),
+  'a body frame is indistinguishable from a surface block, or nothing removes it',
+);
+check(
+  'the bundled picture is the fallback, and Go pairs body with pet.surface',
+  /#pet\.body-from-plugin #pet-image/.test(css) &&
+    /Body bool `json:"body,omitempty"`/.test(goManifest) &&
+    /func \(m Manifest\) validateBody\(\)/.test(goManifest) &&
+    /!m\.HasPermission\(PermPetSurface\)/.test(goManifest) &&
+    /v\.Body = r\.Manifest\.Body/.test(goAppPlugins),
+  'the fallback picture, the manifest field or the permission pairing is missing',
+);
+
 // --- 7. The key input is never written back into the DOM --------------------
 // The key field moved to the market program with the rest of the AI
 // configuration, so the assertion reads THAT frontend now. The rule is unchanged

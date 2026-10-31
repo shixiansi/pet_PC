@@ -126,10 +126,11 @@ export function grantedKey(list) {
 /**
  * One plugin's sandboxed interface.
  *
- * `kind` is 'panel' or 'surface'. A panel view fills its slot; a surface view is
- * placed at a rectangle. The two differ only in where the iframe goes and what
- * the handshake says about it - the transport, the sandbox and the permission
- * check are identical, which is why they share this class.
+ * `kind` is 'panel', 'surface' or 'body'. A panel view fills its slot; a surface view is
+ * placed at a rectangle; a body view is placed at the PET's rectangle, which the host owns
+ * and the user sizes. They differ only in where the iframe goes and what the handshake says
+ * about it - the transport, the sandbox and the permission check are identical, which is
+ * why they share this class.
  *
  * A panel view also carries `slot`, the name of the mount point it fills. The
  * kind alone cannot say where the interface went: the panel has exactly one
@@ -142,7 +143,7 @@ class PluginFrame {
    * @param {string} opts.pluginId
    * @param {string} [opts.version] the installed version the frame was built from
    * @param {string} opts.entry   relative HTML path inside the plugin
-   * @param {'panel'|'surface'} opts.kind
+   * @param {'panel'|'surface'|'body'} opts.kind
    * @param {string} [opts.slot]  the panel slot name, for a panel view
    * @param {string[]} opts.permissions everything the manifest declares
    * @param {string[]} opts.granted     what the user allowed
@@ -212,11 +213,14 @@ class PluginFrame {
   /** The init payload: everything the plugin needs to know about its situation. */
   initMessage() {
     const surface = { kind: this.kind };
-    if (this.kind === 'panel') {
-      // Which slot the host mounted this interface into. A plugin that declares
-      // panelSlot:"chat" uses it to confirm it landed where it asked for.
-      surface.slot = this.slot;
-    } else {
+    // `slot` travels whenever the host knows one, for both kinds: a panel view fills a
+    // named slot, and a BODY frame is the one mount point whose `kind` alone does not say
+    // which rectangle it is (a surface block also has kind 'surface', and a body frame must
+    // be able to tell "I am the pet" from "I am a card beside it").
+    if (this.slot) surface.slot = this.slot;
+    // A panel view fills a named slot and has no rectangle of its own; every other kind is
+    // placed at one, and these are the numbers the window region was cropped to.
+    if (this.kind !== 'panel') {
       surface.rectIndex = this.rectIndex;
       surface.rectCount = this.rectCount;
       surface.rect = this.rect;
@@ -338,11 +342,11 @@ class PluginFrame {
 /**
  * PluginHost owns every plugin iframe on the page.
  *
- * It keeps three KINDS: the floating surface's frames (one per declared
- * rectangle), the one panel slot view, and the headless background frames (one per
- * plugin that asked). They are independent - a floating surface stays up while the
- * panel is open - which is why they are tracked separately rather than as "the
- * current view".
+ * It keeps four KINDS: the floating surface's frames (one per declared
+ * rectangle), the one panel slot view, the headless background frames (one per
+ * plugin that asked), and the one frame that draws the PET itself. They are
+ * independent - a floating surface stays up while the body frame keeps drawing -
+ * which is why they are tracked separately rather than as "the current view".
  *
  * The BACKGROUND frames are the headless ones. They exist because events are
  * delivered only to a frame the host has mounted, and some plugins must act when
@@ -412,6 +416,28 @@ export class PluginHost {
      * router delivers to.
      */
     this.backgroundFrames = new Map();
+
+    /**
+     * The frame that draws the PET ITSELF, or null.
+     *
+     * ONE, never a set: there is one pet. A manifest declares `body` and the host mounts the
+     * first eligible plugin in install order (see main.js's petBodyPlugin), so two plugins
+     * asking for the pet cannot end up drawing halves of it.
+     *
+     * It is kept apart from `surfaceFrames` because its lifetime is different: a surface comes
+     * and goes with `surface.show`/`surface.hide`, while the body is mounted for as long as
+     * the plugin is enabled, granted and installed - it is the pet, and a pet that disappeared
+     * when a card closed would be a pet that cannot be dragged.
+     */
+    this.bodyFrame = null;
+    /**
+     * Which (plugin, version, granted-set) the body frame was built from.
+     *
+     * Same rule the surface and background frames follow: an update keeps the id and replaces
+     * the files behind it, and `init` carries `granted` only once, so either change has to
+     * rebuild the document rather than leave the old one running.
+     */
+    this.bodyKey = '';
 
     /**
      * What this program serves, as `{program, methods}`, or null before the startup read.
@@ -484,9 +510,91 @@ export class PluginHost {
     for (const frame of this.allFrames()) frame.host = this.host;
   }
 
-  /** Every mounted frame, of both kinds. */
+  /** Every mounted frame, of all kinds. */
   allFrames() {
-    return [...this.surfaceFrames.values(), ...this.backgroundFrames.values()];
+    return [
+      ...this.surfaceFrames.values(),
+      ...this.backgroundFrames.values(),
+      ...(this.bodyFrame ? [this.bodyFrame] : []),
+    ];
+  }
+
+  /**
+   * Mounts, re-places or removes the frame that draws the pet.
+   *
+   * `plugin` is the installed row that declares `body`, or null when nobody does (or the
+   * claimant is disabled or ungranted) - in which case the bundled picture is what the user
+   * sees, and the mount point is hidden so nothing can occupy the pet's box.
+   *
+   * `rect` is the pet's box in CSS pixels relative to the window. It is NOT used for
+   * positioning - the mount point is inside #pet and the frame fills it (style.css) - but it
+   * is what the plugin is told, because a plugin cannot measure the host's layout and has to
+   * know how big its own body is: the pet's size is the user's setting (桌宠大小), and an
+   * animated pet that assumed 150x200 would draw off its own feet at 1.5x.
+   *
+   * Re-placed rather than rebuilt on a pure resize: `surface` carries the new rectangle to a
+   * document that already handshook, which is the same mechanism a surface block uses when the
+   * pet grows (openspec/changes/surface-follows-pet-size).
+   */
+  syncBody(plugin, rect) {
+    const mount = this.els.petBody;
+    if (!mount) return;
+    if (!plugin || !plugin.id) {
+      this.closeBody();
+      return;
+    }
+    const key = [plugin.id, plugin.version || '', grantedKey(plugin.granted)].join('\u0001');
+    if (this.bodyFrame && this.bodyKey === key) {
+      this.placeBody(rect);
+      return;
+    }
+    this.closeBody();
+    const frame = new PluginFrame({
+      pluginId: plugin.id,
+      version: plugin.version || '',
+      entry: plugin.entry || 'panel.html',
+      // 'body', not 'surface': the plugin's document has to be able to tell "I am drawing the
+      // pet" from "I am a card beside it", and the two have different sizes, different
+      // colours behind them and different lifetime.
+      kind: 'body',
+      // Same slot vocabulary the plugin learns to recognise elsewhere ('chat' / 'todos' /
+      // 'pomodoro' / 'background'), so "where am I" has one spelling in both directions.
+      slot: 'body',
+      permissions: plugin.permissions || [],
+      granted: plugin.granted || [],
+      rect: rect || null,
+      host: this.host,
+      onRequest: (m, p) => this.request(plugin.id, m, p),
+    });
+    this.bodyFrame = frame;
+    this.bodyKey = key;
+    frame.el.dataset.slot = 'body';
+    mount.append(frame.el);
+    mount.classList.remove('hidden');
+  }
+
+  /** Tells a mounted body frame its rectangle changed, and remembers it. */
+  placeBody(rect) {
+    const frame = this.bodyFrame;
+    if (!frame || !rect) return;
+    const moved = JSON.stringify(frame.rect) !== JSON.stringify(rect);
+    frame.rect = rect;
+    // Only a MOUNTED frame can hear it: before the handshake the plugin has not installed its
+    // listener, and `init` (sent on `ready`) already carries the current rectangle.
+    if (moved) frame.sendGeometry(rect);
+  }
+
+  /** Removes the body frame and puts the pet's own picture back. */
+  closeBody() {
+    const frame = this.bodyFrame;
+    this.bodyFrame = null;
+    this.bodyKey = '';
+    if (this.els.petBody) this.els.petBody.classList.add('hidden');
+    if (!frame) return;
+    frame.destroy();
+    // A caller waiting on this plugin through `plugin.call` has to hear "it is gone" now:
+    // after the timeout it would be told "no answer", which is a different diagnosis.
+    this.failCallsFor(frame, '画桌宠本体的插件已经卸下');
   }
 
   /**
@@ -624,6 +732,10 @@ export class PluginHost {
         return;
       }
     }
+    if (this.bodyFrame && this.bodyFrame.el.contentWindow === event.source) {
+      if (this.handleCallResult(this.bodyFrame, event.data)) return;
+      this.bodyFrame.handleMessage(event.data);
+    }
   }
 
   /**
@@ -716,6 +828,10 @@ export class PluginHost {
   frameForCall(targetId) {
     const bg = this.backgroundFrames.get(targetId);
     if (bg) return bg;
+    // Then the body frame: it is resident for as long as the plugin is installed and enabled,
+    // which is the same promise a headless frame makes - and a plugin that draws the pet is the
+    // most likely one to be asked something ("what are you doing right now?").
+    if (this.bodyFrame && this.bodyFrame.pluginId === targetId) return this.bodyFrame;
     for (const frame of this.surfaceFrames.values()) {
       if (frame.pluginId === targetId) return frame;
     }
@@ -790,6 +906,7 @@ export class PluginHost {
     const value = theme === 'light' ? 'light' : 'dark';
     for (const frame of this.surfaceFrames.values()) frame.sendTheme(value);
     for (const frame of this.backgroundFrames.values()) frame.sendTheme(value);
+    this.bodyFrame?.sendTheme(value);
   }
 
   /**
@@ -817,6 +934,13 @@ export class PluginHost {
     const bg = this.backgroundFrames.get(id);
     if (bg) {
       bg.sendEvent(name, ev.payload);
+      delivered++;
+    }
+    // The body frame counts too, and for the same reason: it is mounted for the whole session,
+    // so "the pet flinches when a reminder fires" is a thing a body plugin can do even though
+    // the user has no card open.
+    if (this.bodyFrame && this.bodyFrame.pluginId === id) {
+      this.bodyFrame.sendEvent(name, ev.payload);
       delivered++;
     }
     if (delivered === 0) {

@@ -5,7 +5,6 @@
   import {
     MainSettings,
     DataDir,
-    HostKey,
     Diagnostics,
     SetReminderEnabled,
     SetReminderOnStartup,
@@ -14,15 +13,21 @@
     SetReminderWindow,
     SetReminderDisplay,
   } from '../lib/bridge';
-  import type { Config, HostKeyState } from '../lib/bridge';
+  import type { Config } from '../lib/bridge';
   // Copying is the only thing this page wants from the runtime, and the generated wrapper is
   // the supported way in. Outside Wails it throws ("window.runtime is undefined") and the
   // page says so rather than pretending the clipboard worked.
   import { ClipboardSetText } from '../../../frontend/wailsjs/runtime/runtime';
 
+  // 高级：剩下的是三件"这个文件/这份报告只有这里能看"的事——提醒的偏好、诊断报告、数据目录。
+  //
+  // 它曾经还有两张卡片：**密钥**（读 llm-key.bin 报"已设置"）和**模型**（显示宿主 Config 里
+  // 那 13 个 llm* 字段）。两者都随对话变成插件而退休：密钥按插件隔离存在
+  // plugin-data/<id>/secret-*.bin，模型的每一项现在都是插件自己的配置——它们的编辑入口是
+  // 「插件」页（选中插件，右栏就是它自己声明的设置项），而那张 llm-key.bin 只留给一次性迁移
+  // 读。留着它们比删掉更糟：一行"未设置"会让人去找一个不存在的开关。
   let cfg = $state<Config | null>(null);
   let dir = $state('');
-  let key = $state<HostKeyState | null>(null);
   let report = $state('');
   let busy = $state(false);
   let notice = $state('');
@@ -32,7 +37,6 @@
     try {
       cfg = await MainSettings();
       dir = await DataDir();
-      key = await HostKey();
     } catch (e) {
       error = String(e);
     }
@@ -76,41 +80,6 @@
     }
   }
 </script>
-
-<Card title="密钥">
-  {#if !key}
-    <p class="hint">读取中…</p>
-  {:else}
-    <dl>
-      <dt>大模型密钥</dt>
-      <dd>{key.Present ? '已设置（DPAPI 密文）' : '未设置'}</dd>
-      <dt>文件</dt>
-      <dd class="mono">{key.Path}</dd>
-    </dl>
-    <p class="hint">
-      本程序只**看这个文件在不在**，不读、不解密、也不写。密钥只在宿主进程内解密——把它搬到这里，
-      就等于多了一处能泄漏它的地方。要改密钥，用桌宠那边的设置，或者用插件自己的设置页。
-    </p>
-  {/if}
-</Card>
-
-<Card title="模型">
-  {#if !cfg}
-    <p class="hint">读取中…</p>
-  {:else}
-    <dl>
-      <dt>开关</dt><dd>{cfg.llmEnabled ? '已启用' : '已关闭'}</dd>
-      <dt>服务商预设</dt><dd>{cfg.llmProvider || '（未选）'}</dd>
-      <dt>接口地址</dt><dd class="mono">{cfg.llmBaseUrl || '（未填）'}</dd>
-      <dt>模型</dt><dd class="mono">{cfg.llmModel || '（未填）'}</dd>
-      <dt>每日上限</dt><dd>{cfg.llmDailyBudget} 次</dd>
-    </dl>
-    <p class="hint">
-      模型配置目前由**对话插件**自己保存，这一页只显示；密钥不在任何 JSON 里
-      （DPAPI 加密，且只在宿主进程内解密）。
-    </p>
-  {/if}
-</Card>
 
 <Card title="对话提醒">
   {#if cfg}
@@ -190,8 +159,9 @@
     </div>
 
     <p class="hint">
-      提醒循环在桌宠里，每 30 秒读一次设置，所以这些改动都是即时的。「立刻提醒一次」是桌宠上的动作，
-      不在这里 —— 它需要桌宠此刻正在运行，而一个写着「立刻」的按钮在桌宠没开时只会骗人。
+      这些是**待办插件的**提醒参数：循环跑在它的常驻帧里，读的是同一份
+      <code>settings.json</code>，所以改完立刻按新值走，不需要重启。桌宠这边只剩「立刻提醒一次」——
+      那是你按下去的动作，任何插件都没法替你按。
     </p>
   {:else}
     <p class="hint">读取中…</p>
@@ -224,9 +194,12 @@
     <dt>数据目录</dt><dd class="mono">{dir || '读取中…'}</dd>
     <dt>设置</dt><dd class="mono">settings.json（本程序写）</dd>
     <dt>运行时状态</dt><dd class="mono">config.json（桌宠写：位置/开机启动/提醒开关）</dd>
-    <dt>数据</dt><dd class="mono">todos.json</dd>
+    <dt>插件</dt><dd class="mono">plugins\&lt;id&gt;\ 与 plugin-data\&lt;id&gt;\（插件自己写）</dd>
   </dl>
-  <p class="hint">一个文件只有一个写者 —— 这是这两个程序能同时跑而不互相覆盖的前提。</p>
+  <p class="hint">
+    一个文件只有一个写者 —— 这是这两个程序能同时跑而不互相覆盖的前提。待办列表已经不在这里了：
+    它和番茄钟的记录一样，住在自己插件的那份 <code>plugin-data</code> 里。
+  </p>
 </Card>
 
 {#if error}<p class="err">{error}</p>{/if}
