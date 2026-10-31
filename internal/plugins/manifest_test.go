@@ -1197,3 +1197,38 @@ func TestPermissionLabelsCoverTheVocabulary(t *testing.T) {
 		t.Errorf("PermPluginConfig label = %q", PermissionLabels[PermPluginConfig])
 	}
 }
+
+// TestCallTargetVersionFloorParsing pins the shape of the optional floor and that it does
+// not change WHICH pair is authorised.
+func TestCallTargetVersionFloorParsing(t *testing.T) {
+	target, method, floor, ok := SplitCallTargetVersion("com.example.todo/stats@>=1.2.3")
+	if !ok || target != "com.example.todo" || method != "stats" || floor != "1.2.3" {
+		t.Fatalf("got (%q,%q,%q,%v), want (com.example.todo, stats, 1.2.3, true)", target, method, floor, ok)
+	}
+	// No floor is still legal and reports "".
+	if _, _, floor, ok := SplitCallTargetVersion("com.example.todo/stats"); !ok || floor != "" {
+		t.Fatalf("a bare pair must parse with an empty floor (floor=%q ok=%v)", floor, ok)
+	}
+	// Malformed floors are refused rather than ignored: silently dropping one would make a
+	// declaration that reads like a promise behave like no promise at all.
+	for _, bad := range []string{
+		"com.example.todo/stats@1.2.3",
+		"com.example.todo/stats@>=1.2",
+		"com.example.todo/stats@>=v1.2.3",
+		"com.example.todo/stats@>=1.2.3.4",
+	} {
+		if _, _, _, ok := SplitCallTargetVersion(bad); ok {
+			t.Fatalf("%q parsed, want a refusal", bad)
+		}
+	}
+	// The pair is what gets authorised, with or without a floor.
+	if !DeclaredCall([]string{"com.example.todo/stats@>=1.2.3"}, "com.example.todo", "stats") {
+		t.Fatal("a floored entry must authorise its pair")
+	}
+	if floor, ok := DeclaredCallFloor([]string{"com.example.todo/stats@>=1.2.3"}, "com.example.todo", "stats"); !ok || floor != "1.2.3" {
+		t.Fatalf("DeclaredCallFloor = (%q,%v), want (1.2.3,true)", floor, ok)
+	}
+	if _, ok := DeclaredCallFloor([]string{"com.example.todo/stats"}, "com.example.todo", "other"); ok {
+		t.Fatal("a different method must not match")
+	}
+}

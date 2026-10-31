@@ -719,7 +719,8 @@ func (m Manifest) validateCalls() error {
 	for _, entry := range m.CallTargets {
 		target, method, ok := SplitCallTarget(entry)
 		if !ok {
-			return fmt.Errorf("%s 的 callTargets 项 %q 不是 \"<插件id>/<方法名>\"", ManifestName, entry)
+			return fmt.Errorf("%s 的 callTargets 项 %q 不是 \"<插件id>/<方法名>\"（版本下限写成 \"<id>/<方法名>@>=1.2.3\"）",
+				ManifestName, entry)
 		}
 		if target == m.ID {
 			return fmt.Errorf("%s 的 callTargets 不该列出自己（那是循环，不是调用）", ManifestName)
@@ -749,33 +750,90 @@ var servedMethodPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 // CallTargetKey renders the canonical "<targetId>/<method>" form.
 func CallTargetKey(target, method string) string { return target + "/" + method }
 
-// SplitCallTarget parses "<targetId>/<method>", validating BOTH halves.
-func SplitCallTarget(entry string) (target, method string, ok bool) {
-	parts := strings.Split(strings.TrimSpace(entry), "/")
+// callFloorPattern is the optional version floor a callTargets entry may carry:
+// "<id>/<method>@>=1.2.3".
+//
+// # WHY A FLOOR AND NOT A SHAPE
+//
+// 2026-10-31: the dashboard plugin called `todo/stats` for a week against a todo plugin that
+// had never declared `stats`. The host's refusal was precise ("目标插件 … 没有声明会回答
+// stats") and the caller caught it - into a log line nobody read, once every 30 seconds.
+// What the caller needed was a way to say WHICH todo plugin it can work with, and a way to
+// find out before shipping.
+//
+// A floor is the smallest honest form of that: the target's version is already in its
+// manifest, versions are already required to be x.y.z, and "this method answers the shape I
+// expect from 1.2.3 on" is a claim an author can actually keep. A declared RETURN SHAPE
+// (a JSON schema per method) was the alternative and it is a much larger promise: the host
+// would have to validate every answer, and a plugin that returned an extra field would
+// break.
+//
+// The floor is checked when the call is made, not at install: the target may not be
+// installed yet, and a plugin must be installable before its dependencies are.
+var callFloorPattern = regexp.MustCompile(`^@>=(\d+)\.(\d+)\.(\d+)$`)
+
+// SplitCallTargetVersion parses "<targetId>/<method>" with an optional "@>=x.y.z" floor.
+//
+// floor is "" when the entry carries none, which is the common case and stays allowed:
+// most callers do not care about a version, and forcing them to write one would be noise
+// that trains authors to paste a number they never checked.
+func SplitCallTargetVersion(entry string) (target, method, floor string, ok bool) {
+	raw := strings.TrimSpace(entry)
+	if at := strings.IndexByte(raw, '@'); at >= 0 {
+		m := callFloorPattern.FindStringSubmatch(raw[at:])
+		if m == nil {
+			return "", "", "", false
+		}
+		floor = m[1] + "." + m[2] + "." + m[3]
+		raw = raw[:at]
+	}
+	parts := strings.Split(raw, "/")
 	if len(parts) != 2 {
-		return "", "", false
+		return "", "", "", false
 	}
 	target = strings.TrimSpace(parts[0])
 	method = strings.TrimSpace(parts[1])
 	if !IsValidID(target) || !servedMethodPattern.MatchString(method) {
-		return "", "", false
+		return "", "", "", false
 	}
-	return target, method, true
+	return target, method, floor, true
+}
+
+// SplitCallTarget parses "<targetId>/<method>", validating BOTH halves. A version floor, if
+// present, is parsed and DROPPED - callers that only care about the pair (validation, the
+// install dialog's summary) use this one.
+func SplitCallTarget(entry string) (target, method string, ok bool) {
+	target, method, _, ok = SplitCallTargetVersion(entry)
+	return target, method, ok
 }
 
 // DeclaredCall reports whether the manifest listed target/method in callTargets.
 //
-// Exact match only, for the reason DeclaredShareRead gives: a prefix rule here is how an
-// allow-list quietly becomes "everything another plugin does".
+// Exact match on the PAIR, for the reason DeclaredShareRead gives: a prefix rule here is how
+// an allow-list quietly becomes "everything another plugin does". A version floor on the
+// entry does not change which pair it authorises.
 func DeclaredCall(declared []string, target, method string) bool {
-	want := CallTargetKey(target, method)
-	for _, entry := range declared {
-		if strings.TrimSpace(entry) == want {
-			return true
-		}
-	}
-	return false
+	_, ok := DeclaredCallFloor(declared, target, method)
+	return ok
 }
+
+// DeclaredCallFloor returns the version floor declared for target/method, "" when the entry
+// carries none, and ok=false when the pair is not declared at all.
+func DeclaredCallFloor(declared []string, target, method string) (floor string, ok bool) {
+	for _, entry := range declared {
+		t, m, f, valid := SplitCallTargetVersion(entry)
+		if !valid || t != target || m != method {
+			continue
+		}
+		return f, true
+	}
+	return "", false
+}
+
+// The comparison itself is CompareVersions in version.go: one implementation, because the
+// market program already asks the same question ("is the copy on disk behind?") and two
+// implementations of "which version is newer" is how a floor and an update check end up
+// disagreeing.
 
 // ServesMethod reports whether the manifest promised to answer method.
 func ServesMethod(serves []string, method string) bool {

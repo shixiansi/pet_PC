@@ -222,3 +222,42 @@ func TestCallPluginRejectsMalformedJSON(t *testing.T) {
 		t.Fatalf("error %q must mention JSON", err)
 	}
 }
+
+// TestCallPluginHonoursTheDeclaredVersionFloor pins the answer to the 2026-10-31 mismatch.
+//
+// The dashboard called `todo/stats` for a week against a todo plugin that had never declared
+// it. The host's refusal was precise and the caller caught it into a log line nobody read.
+// A version floor lets the CALLER say "the shape I need arrived in 1.2.2", and the refusal
+// now names both versions so the message is actionable rather than mysterious.
+func TestCallPluginHonoursTheDeclaredVersionFloor(t *testing.T) {
+	caller := callerRow("com.example.dash", "com.example.todo/stats@>=1.2.2")
+
+	// Satisfied: the call is authorised.
+	old := calleeRow("com.example.todo", "stats")
+	old.Manifest.Version = "1.2.3"
+	gate := callGate{"com.example.dash": caller, "com.example.todo": old}
+	if _, err := CallPlugin(gate, "com.example.dash", callPayload(t, "com.example.todo", "stats", "")); err != nil {
+		t.Fatalf("a satisfied floor must authorise the call: %v", err)
+	}
+
+	// Too old: refused, and the message names the versions on both sides.
+	stale := calleeRow("com.example.todo", "stats")
+	stale.Manifest.Version = "1.2.1"
+	gate = callGate{"com.example.dash": caller, "com.example.todo": stale}
+	_, err := CallPlugin(gate, "com.example.dash", callPayload(t, "com.example.todo", "stats", ""))
+	if err == nil {
+		t.Fatal("a callee below the declared floor must be refused")
+	}
+	for _, want := range []string{"1.2.1", "1.2.2", "com.example.todo/stats"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %v, want it to mention %q", err, want)
+		}
+	}
+
+	// No floor declared: an old callee is still fine (most calls do not care about versions).
+	plain := callerRow("com.example.dash", "com.example.todo/stats")
+	gate = callGate{"com.example.dash": plain, "com.example.todo": stale}
+	if _, err := CallPlugin(gate, "com.example.dash", callPayload(t, "com.example.todo", "stats", "")); err != nil {
+		t.Fatalf("an entry without a floor must not check the version: %v", err)
+	}
+}

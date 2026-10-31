@@ -3191,3 +3191,40 @@ func TestClampPluginMaxTokens(t *testing.T) {
 		}
 	}
 }
+
+// TestPluginServicesReportsVersions is the caller's side of the version floor: a plugin that
+// wants to gate on "todo >= 1.2.2" can only do that if the answer says what version is there.
+func TestPluginServicesReportsVersions(t *testing.T) {
+	a := pluginApp(t)
+	installSampleWith(t, a, map[string]any{
+		"id": "com.example.provider", "version": "1.4.2",
+		"permissions": []string{"plugin.call", "events"}, "background": true, "serves": []string{"stats"},
+	})
+	caller := installSampleWith(t, a, map[string]any{
+		"id": "com.example.caller", "permissions": []string{"plugin.call"},
+	})
+	out, err := a.PluginRequest(caller, "plugins.services", `{}`)
+	if err != nil {
+		t.Fatalf("plugins.services: %v", err)
+	}
+	var answer struct {
+		Services []struct {
+			ID      string   `json:"id"`
+			Version string   `json:"version"`
+			Serves  []string `json:"serves"`
+		} `json:"services"`
+	}
+	if err := json.Unmarshal([]byte(out), &answer); err != nil {
+		t.Fatalf("answer %q is not JSON: %v", out, err)
+	}
+	if len(answer.Services) != 1 {
+		t.Fatalf("services = %d, want the one provider", len(answer.Services))
+	}
+	got := answer.Services[0]
+	if got.ID != "com.example.provider" || got.Version != "1.4.2" {
+		t.Fatalf("service = %+v, want the provider and its version", got)
+	}
+	if len(got.Serves) != 1 || got.Serves[0] != "stats" {
+		t.Fatalf("serves = %v, want [stats]", got.Serves)
+	}
+}

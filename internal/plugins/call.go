@@ -121,6 +121,16 @@ func CallPlugin(gate Gate, id string, payload []byte) (any, error) {
 		return nil, fmt.Errorf("插件 %s 没有声明会回答 %s：它的 manifest 的 serves 里没有这一项",
 			target, method)
 	}
+	// The version floor the CALLER declared, if any. Checked here rather than at install
+	// because the target may not be installed yet when the caller is (and a plugin must be
+	// installable before its dependencies are). The refusal names both versions: "the shape
+	// I expect from 1.2.3" is only actionable if the message says what is actually there.
+	if floor, ok := DeclaredCallFloor(caller.Manifest.CallTargets, target, method); ok && floor != "" {
+		if CompareVersions(callee.Manifest.Version, floor) < 0 {
+			return nil, fmt.Errorf("plugin.call 的目标插件 %s 是 %s，低于你声明的 %s@>=%s：先升级它，或把 callTargets 里的版本下限改掉",
+				target, callee.Manifest.Version, CallTargetKey(target, method), floor)
+		}
+	}
 
 	ticket, err := newCallTicket()
 	if err != nil {

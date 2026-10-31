@@ -1748,6 +1748,10 @@ func pluginServices(a *App, id string, _ []byte) (any, error) {
 	type service struct {
 		ID          string   `json:"id"`
 		Name        string   `json:"name"`
+		// Version is what the caller compares against its own `callTargets` floor. Without it
+		// a plugin can only find out "the method exists" and not "it answers the shape I
+		// expect" - the 2026-10-31 dashboard/todo mismatch in one sentence.
+		Version     string   `json:"version"`
 		Description string   `json:"description"`
 		Serves      []string `json:"serves"`
 	}
@@ -1766,6 +1770,7 @@ func pluginServices(a *App, id string, _ []byte) (any, error) {
 		out = append(out, service{
 			ID:          row.ID,
 			Name:        name,
+			Version:     row.Manifest.Version,
 			Description: row.Manifest.Description,
 			Serves:      append([]string{}, row.Manifest.Serves...),
 		})
