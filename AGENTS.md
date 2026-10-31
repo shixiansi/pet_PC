@@ -266,6 +266,27 @@ DPAPI（[internal/desktop/crypto_windows.go](internal/desktop/crypto_windows.go)
 「the log is always on」那一条（它盯着 `PETPC_DEBUG` 的门不许回来）。
 格式与取舍见 [docs/logging.md](docs/logging.md)；用户可见的说法在 README「日志」。
 
+### 3.9 插件与宿主之间的四件地基（2026-11-01）
+
+这一轮补的都是"插件与宿主之间"的机制。四条各有守门测试，**改它们要同时改守着它的检查**：
+
+1. **子进程只能由启动者停**（`process.kill`）。授权来源是宿主自己的子进程表，不是 pid：别人的
+   进程得到一句中文拒绝。插件被停用 / 卸载 / **换版本**时，回收者（5 秒一拍）替它收掉；桌宠
+   退出时**不**收（协议端要跨重启活着），只点名。测试：`TestProcessKill*` / `TestReap*`。
+2. **辅助脚本交给宿主托管**（manifest 的 `sidecar`）。四条校验：包内相对路径、必须写进
+   `assets`、必须申请 `process`、必须声明 `background`；脚本从 `PETPC_PLUGIN_ID` /
+   `PETPC_PLUGIN_DATA` 拿上下文，宿主负责启动与回收。**别再让插件自己 `process.launch`**：
+   插件拿不到自己的安装目录，于是"自己启动"必然要求用户手填两个绝对路径——2026-10-31 的实测是
+   五个这样写的插件里四个从来没跑起来过。测试：`TestSidecar*` / `TestManifestSidecar`。
+3. **变化是推的，不是拉的**。`share.changed`（发给声明了 `<owner>/<name>` 的读者 **+ 发布者
+   自己的帧**；跨程序靠"牌盘是文件"那条路）与 `storage.changed`（自己的私有目录）。两个宿主都
+   必须发：`.dev/check-frontend.cjs` 那条「插件页挂载每个插件自己的文档」硬编码了
+   `RegisterShare(..., m.notifyShareReaders)`——服务牌盘却不通知就是回归。测试：
+   `TestShareSetNotifiesDeclaredReaders` / `TestStorageWatch*` / `TestShareRecipients`。
+4. **1 秒轮询是反模式**。为"等一个文件 / 一个共享键变化"写 `setInterval(…, 1000)`，会在日志里
+   变成几万行 DEBUG（2026-10-31 实测占 94%），而它等的东西一天变不了几次。用事件 + 15 秒兜底。
+   例外是**时钟类**定时器：番茄钟的 `tick`（计时）与视图的倒计时重绘，它们的 1 秒是功能本身。
+
 ## 4. 怎么验证
 
 **全部门禁**（12 道，需要交互桌面与 WebView2）：

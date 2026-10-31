@@ -536,8 +536,8 @@ Go 的 JSON 编码器会把非法字节替换成 U+FFFD，一个 WAV 于是"大�
 - 自检工具：[`docs/plugin-testkit/`](https://github.com/shixiansi/pet-pc-plugins/tree/main/docs/plugin-testkit)
   （本机检出：`market/docs/plugin-testkit/`）
 
-手册是**自包含**的——manifest 的每个字段与校验规则、桥接协议的每条消息、全部 13 项权限与
-35 个能力方法的 payload/返回/上限、几何与主题规则、打包与发布格式、常见故障对照，都在里面，
+手册是**自包含**的——manifest 的每个字段与校验规则、桥接协议的每条消息、全部 14 项权限与
+41 个能力方法的 payload/返回/上限、几何与主题规则、打包与发布格式、常见故障对照，都在里面，
 不要求读者拿到桌宠源码；那个 40 行的示例插件是逐字跑过的。工具是**一个文件**，拷进任何插件仓
 就能跑：manifest 的每条规则、包里的文件在不在、"没申请权限就调能力 / 用了 `localStorage` /
 样式里画到盒子外的 `box-shadow`"这些红线、以及**把文档真的跑一遍**（握手、请求 `id`、
