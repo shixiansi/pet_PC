@@ -1661,13 +1661,22 @@ func (a *App) notifyShareReaders(publisherID string, payload []byte) {
 	key := plugins.SharedKey(publisherID, in.Name)
 	at := time.Now().Format(time.RFC3339)
 	for _, row := range a.pluginManager().Plugins() {
-		if row.ID == publisherID || !row.Enabled || row.Error != "" || row.Manifest == nil {
+		if !row.Enabled || row.Error != "" || row.Manifest == nil {
 			continue
 		}
 		if !plugins.HasGranted(row.Granted, plugins.PermPluginShare) {
 			continue
 		}
-		if !plugins.DeclaredShareRead(row.Manifest.ShareRead, publisherID, in.Name) {
+		// The publisher's OWN frames are included, and that is deliberate: one installation
+		// is several documents (a view and a headless timer), and the only channel between
+		// them is this tray. `command` keys are exactly that - the view writes, the timer
+		// reads - and before this they polled once a second for a value that changes only
+		// when the user presses something. Self-notification costs one frame-internal read
+		// per publish and zero host round trips.
+		//
+		// No `shareRead` entry is needed for one's own keys, which matches `share.get`: it
+		// has always allowed reading your own values without declaring them.
+		if row.ID != publisherID && !plugins.DeclaredShareRead(row.Manifest.ShareRead, publisherID, in.Name) {
 			continue
 		}
 		a.emitPluginEvent(row.ID, "share.changed", map[string]any{

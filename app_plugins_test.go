@@ -2723,32 +2723,50 @@ func TestShareSetNotifiesDeclaredReaders(t *testing.T) {
 		t.Fatalf("share.set: %v", err)
 	}
 
+	// TWO recipients: the declared reader, and the publisher's own frames (one installation
+	// is several documents, and the `command` channel between a view and a headless timer is
+	// exactly that - see notifyShareReaders). The bystander gets nothing.
 	got := events("share.changed")
-	if len(got) != 1 {
-		t.Fatalf("share.changed events = %d, want 1 (only the declared reader)", len(got))
+	if len(got) != 2 {
+		t.Fatalf("share.changed events = %d, want 2 (reader + publisher's own frames)", len(got))
 	}
-	if got[0].PluginID != reader {
-		t.Fatalf("event went to %q, want the declared reader %q", got[0].PluginID, reader)
+	var toReader, toPublisher int
+	for _, ev := range got {
+		payload, ok := ev.Payload.(map[string]any)
+		if !ok {
+			t.Fatalf("payload = %#v, want an object", ev.Payload)
+		}
+		if payload["key"] != "com.example.publisher/now-playing" {
+			t.Fatalf("payload.key = %v, want the <owner>/<name> pair", payload["key"])
+		}
+		if payload["name"] != "now-playing" || payload["owner"] != publisher {
+			t.Fatalf("payload = %#v, want name/owner of the published key", payload)
+		}
+		switch ev.PluginID {
+		case reader:
+			toReader++
+		case publisher:
+			toPublisher++
+		default:
+			t.Fatalf("event went to %q: neither the reader nor the publisher", ev.PluginID)
+		}
 	}
-	payload, ok := got[0].Payload.(map[string]any)
-	if !ok {
-		t.Fatalf("payload = %#v, want an object", got[0].Payload)
-	}
-	if payload["key"] != "com.example.publisher/now-playing" {
-		t.Fatalf("payload.key = %v, want the <owner>/<name> pair", payload["key"])
-	}
-	if payload["name"] != "now-playing" || payload["owner"] != publisher {
-		t.Fatalf("payload = %#v, want name/owner of the published key", payload)
+	if toReader != 1 || toPublisher != 1 {
+		t.Fatalf("reader=%d publisher=%d, want one each", toReader, toPublisher)
 	}
 
-	// A key nobody declared wakes nobody: the loop is driven by shareRead, not by
-	// "everyone who can read anything".
+	// A key nobody declared wakes nobody but the publisher: the loop is driven by shareRead
+	// plus "your own frames", not by "everyone who can read anything".
 	if _, err := a.PluginRequest(publisher, "share.set",
 		`{"name":"nobody-wants-this","value":"x"}`); err != nil {
 		t.Fatalf("share.set: %v", err)
 	}
-	if again := events("share.changed"); len(again) != 1 {
-		t.Fatalf("share.changed events = %d after publishing an undeclared key, want still 1", len(again))
+	again := events("share.changed")
+	if len(again) != 3 {
+		t.Fatalf("share.changed events = %d after publishing an undeclared key, want 3 (one more, to the publisher only)", len(again))
+	}
+	if last := again[len(again)-1]; last.PluginID != publisher {
+		t.Fatalf("the extra event went to %q, want the publisher", last.PluginID)
 	}
 }
 
