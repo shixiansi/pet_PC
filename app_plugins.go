@@ -1617,7 +1617,66 @@ func pluginConfigSet(a *App, id string, payload []byte) (any, error) {
 // The pet still owns the DECISION to serve them: `pluginMethods` is this program's table,
 // and the market's table is its own (see pluginhost.go).
 func pluginShareSet(a *App, id string, payload []byte) (any, error) {
-	return plugins.ShareSet(a.pluginManager(), id, payload)
+	out, err := plugins.ShareSet(a.pluginManager(), id, payload)
+	if err != nil {
+		return nil, err
+	}
+	// Told AFTER the write lands: a reader that reacts by calling share.get must find
+	// the new value, not the old one.
+	a.notifyShareReaders(id, payload)
+	return out, nil
+}
+
+// notifyShareReaders tells the plugins that DECLARED this key in `shareRead` that it just
+// changed.
+//
+// # WHY THIS EXISTS
+//
+// `plugin.share` is a tray, not a bus: a reader polls. On 2026-10-31 that showed up as the
+// pet's log being 94% DEBUG - media-sync every second, pet-sense every second,
+// privacy-guard every two - all of it `share.get` answering with the same value. A reader
+// that already declared "<owner>/<name>" in its manifest has already been authorised to
+// read that value; telling it "it changed" spends the same authorisation more cheaply.
+//
+// # WHAT AUTHORISES IT
+//
+// The SAME pair that authorises `share.get`: `shareRead` contains "<publisher>/<name>" and
+// the reader holds `plugin.share`. It deliberately does NOT also require
+// `events.subscribe`: the user approved reading that key at install time, and asking them
+// to approve it again under a different name would be a switch with no new meaning.
+//
+// # WHAT IT IS NOT
+//
+// Not a delivery guarantee. The event reaches MOUNTED frames only (the frontend drops an
+// event for a plugin with no interface on screen, and a plugin that is not running has
+// nothing to notify), so a reader must still poll as a fallback. This makes the common
+// case instant; it does not replace the read.
+func (a *App) notifyShareReaders(publisherID string, payload []byte) {
+	var in struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(payload, &in); err != nil || in.Name == "" {
+		return
+	}
+	key := plugins.SharedKey(publisherID, in.Name)
+	at := time.Now().Format(time.RFC3339)
+	for _, row := range a.pluginManager().Plugins() {
+		if row.ID == publisherID || !row.Enabled || row.Error != "" || row.Manifest == nil {
+			continue
+		}
+		if !plugins.HasGranted(row.Granted, plugins.PermPluginShare) {
+			continue
+		}
+		if !plugins.DeclaredShareRead(row.Manifest.ShareRead, publisherID, in.Name) {
+			continue
+		}
+		a.emitPluginEvent(row.ID, "share.changed", map[string]any{
+			"key":   key,
+			"owner": publisherID,
+			"name":  in.Name,
+			"at":    at,
+		})
+	}
 }
 
 func pluginShareGet(a *App, id string, payload []byte) (any, error) {

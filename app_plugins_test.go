@@ -2623,6 +2623,63 @@ func TestReapLeavesChildrenOfHealthyPlugins(t *testing.T) {
 	}
 }
 
+// --- share.changed（发布 → 声明过它的读者） ---------------------------------
+
+// TestShareSetNotifiesDeclaredReaders pins the new down-link: publishing a key wakes the
+// plugins that named it in `shareRead`, and nobody else.
+//
+// The "nobody else" half is the authorisation: a third plugin that holds `plugin.share`
+// but did not declare the pair must NOT be told. That is the same rule `share.get`
+// enforces, spent one delivery earlier.
+func TestShareSetNotifiesDeclaredReaders(t *testing.T) {
+	a := pluginApp(t)
+	events := collectPluginEvents(a)
+
+	publisher := installSampleWith(t, a, map[string]any{
+		"id": "com.example.publisher", "permissions": []string{"plugin.share"},
+	})
+	reader := installSampleWith(t, a, map[string]any{
+		"id": "com.example.reader", "permissions": []string{"plugin.share"},
+		"shareRead": []string{"com.example.publisher/now-playing"},
+	})
+	installSampleWith(t, a, map[string]any{
+		"id": "com.example.bystander", "permissions": []string{"plugin.share"},
+	})
+
+	if _, err := a.PluginRequest(publisher, "share.set",
+		`{"name":"now-playing","value":"{\"title\":\"晴天\"}"}`); err != nil {
+		t.Fatalf("share.set: %v", err)
+	}
+
+	got := events("share.changed")
+	if len(got) != 1 {
+		t.Fatalf("share.changed events = %d, want 1 (only the declared reader)", len(got))
+	}
+	if got[0].PluginID != reader {
+		t.Fatalf("event went to %q, want the declared reader %q", got[0].PluginID, reader)
+	}
+	payload, ok := got[0].Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("payload = %#v, want an object", got[0].Payload)
+	}
+	if payload["key"] != "com.example.publisher/now-playing" {
+		t.Fatalf("payload.key = %v, want the <owner>/<name> pair", payload["key"])
+	}
+	if payload["name"] != "now-playing" || payload["owner"] != publisher {
+		t.Fatalf("payload = %#v, want name/owner of the published key", payload)
+	}
+
+	// A key nobody declared wakes nobody: the loop is driven by shareRead, not by
+	// "everyone who can read anything".
+	if _, err := a.PluginRequest(publisher, "share.set",
+		`{"name":"nobody-wants-this","value":"x"}`); err != nil {
+		t.Fatalf("share.set: %v", err)
+	}
+	if again := events("share.changed"); len(again) != 1 {
+		t.Fatalf("share.changed events = %d after publishing an undeclared key, want still 1", len(again))
+	}
+}
+
 // --- sidecar（manifest 声明的辅助脚本） -------------------------------------
 
 // installSidecarPlugin installs a package whose zip ALSO carries the helper script, so
