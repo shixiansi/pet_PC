@@ -31,7 +31,11 @@ func DataMethod(method string) bool {
 		"storage.dir", "storage.list", "storage.move",
 		"share.get", "share.set", "share.remove",
 		"config.get", "config.set",
-		"memory.read", "memory.append":
+		"memory.read", "memory.append",
+		// The plugin's own line is logged at the level IT asked for; the CALL itself is
+		// plumbing, and a plugin that logs inside a poll loop would otherwise turn the call
+		// log into a mirror of its own noise.
+		"plugin.log":
 		return true
 	case "pet.badge":
 		// Not data plumbing, but the same kind of noise: a countdown pushes this once per second

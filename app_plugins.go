@@ -408,6 +408,12 @@ var pluginMethods = map[string]pluginMethod{
 	// between two rows that both read "save data in your private directory".
 	"memory.read":   {perm: plugins.PermStorage, run: pluginMemoryRead},
 	"memory.append": {perm: plugins.PermStorage, run: pluginMemoryAppend},
+	// One line from the plugin into the host's log. Borrows `storage` on purpose: this is the
+	// plugin handing over a sentence of its OWN data, the same authority as writing a file in
+	// its own directory - and asking the user to approve "let it write logs" would be a
+	// consent with nothing at stake (the precedent is pet.badge borrowing pet.surface).
+	// See pluginLog for the bounds and why the line is always attributed.
+	"plugin.log":    {perm: plugins.PermStorage, run: pluginLog},
 	"share.set":     {perm: plugins.PermPluginShare, run: pluginShareSet},
 	"share.get":     {perm: plugins.PermPluginShare, run: pluginShareGet},
 	"share.remove":  {perm: plugins.PermPluginShare, run: pluginShareRemove},
@@ -1712,6 +1718,67 @@ func pluginShareGet(a *App, id string, payload []byte) (any, error) {
 
 func pluginShareRemove(a *App, id string, payload []byte) (any, error) {
 	return plugins.ShareRemove(a.pluginManager(), id, payload)
+}
+
+// pluginLog writes one line from the plugin into the host's log.
+//
+// # WHY A METHOD AND NOT console.error
+//
+// A plugin's `console.error` goes to the devtools of a frame the user cannot open, so it never
+// reaches `pet.log`. The whole 2026-10-31 investigation was done by reading that log and
+// grepping plugin sources, because nothing a plugin said was in it: a helper that failed to
+// start, a model answer that did not parse, a permission the user unticked - all invisible.
+//
+// # THE BOUNDS, AND WHY EACH ONE EXISTS
+//
+//   - ONE line. Newlines become spaces: the log's parser splits on lines and the prefix is
+//     free text, so a message containing "\n2026-01-01T00:00:00 INFO ..." could forge a line
+//     that looks like the host's own. That is the one thing a plugin must not be able to do.
+//   - ≤500 characters, truncated with a note (the log is not a data channel).
+//   - level is debug / info / warn, defaulting to info. There is no "error": the log has
+//     three levels by design (internal/logging).
+//   - the line is ALWAYS attributed with the plugin id (`Pluginf`), so a reader cannot mistake
+//     it for a host line either.
+//   - repeats are folded by the same 5-second throttle the call log uses, because a plugin
+//     that logs inside its own poll loop would otherwise own the file.
+//
+// # WHAT THE PLUGIN MUST NOT PUT IN IT
+//
+// Secrets, and the user's own text. INFO and above reach a pasted diagnostics report
+// (`Market.Diagnostics` stops at INFO), so a line written here is a line the user may hand to
+// somebody else. That rule is in the manual (§6.13) because the host cannot enforce it.
+func pluginLog(a *App, id string, payload []byte) (any, error) {
+	var in struct {
+		Level   string `json:"level"`
+		Message string `json:"message"`
+	}
+	if err := decodePayload(payload, &in); err != nil {
+		return nil, err
+	}
+	msg := strings.TrimSpace(in.Message)
+	if msg == "" {
+		return nil, errors.New("plugin.log 需要 message")
+	}
+	lv := logging.LevelInfo
+	switch strings.ToLower(strings.TrimSpace(in.Level)) {
+	case "", "info":
+	case "debug":
+		lv = logging.LevelDebug
+	case "warn", "warning":
+		lv = logging.LevelWarn
+	default:
+		return nil, fmt.Errorf("plugin.log 的 level 只支持 debug / info / warn：%q", in.Level)
+	}
+	msg = strings.NewReplacer("\r", " ", "\n", " ").Replace(msg)
+	const maxLogChars = 500
+	if runes := []rune(msg); len(runes) > maxLogChars {
+		msg = string(runes[:maxLogChars]) + "…（截断）"
+	}
+	allowed, swallowed := a.pluginCallLog().Allow("log|" + id + "|" + lv.String())
+	if allowed {
+		a.log.Pluginf(lv, "plugin", id, "%s", msg)
+	}
+	return map[string]any{"ok": true, "swallowed": swallowed}, nil
 }
 
 // pluginPluginCall authorises one plugin-to-plugin call.

@@ -143,6 +143,11 @@ func (m *Market) marketRegistry() *plugins.Registry {
 	// DPAPI-encrypted keys, with no model call and no pet window involved. Same shared
 	// implementation the pet uses (internal/plugins/llmchannels.go).
 	plugins.RegisterChannels(r, gateAdapter{m.manager}, m.keeper)
+	// The plugin's own log line. Served here too: the 插件 page mounts the bundled plugins'
+	// documents, and a plugin that reports "the helper did not start" while the user is looking
+	// at it should reach market.log, not the devtools of a frame nobody opens. Same handler as
+	// the pet's (it only needs the app's logger and the plugin id).
+	r.Register("plugin.log", plugins.Method{Perm: plugins.PermStorage, Run: marketPluginLog})
 
 	// Talking to a synthesis engine the user is running.
 	r.Register("net.fetch", plugins.Method{Perm: plugins.PermNetFetch, Run: marketNetFetch})
@@ -528,4 +533,39 @@ func shareRecipients(rows []plugins.Installed, publisherID, name string) []strin
 		out = append(out, row.ID)
 	}
 	return out
+}
+
+// marketPluginLog is the control center's copy of the pet's plugin.log: one attributed line,
+// bounded, level-mapped. The bounds live in the pet's handler (app_plugins.go); this one is
+// deliberately the same shape so a plugin's log looks identical in either file.
+func marketPluginLog(host any, call plugins.Call, payload []byte) (any, error) {
+	m := host.(*Market)
+	id := call.PluginID
+	var in struct {
+		Level   string `json:"level"`
+		Message string `json:"message"`
+	}
+	if err := plugins.DecodePayload(payload, &in); err != nil {
+		return nil, err
+	}
+	msg := strings.TrimSpace(in.Message)
+	if msg == "" {
+		return nil, errors.New("plugin.log 需要 message")
+	}
+	lv := logging.LevelInfo
+	switch strings.ToLower(strings.TrimSpace(in.Level)) {
+	case "", "info":
+	case "debug":
+		lv = logging.LevelDebug
+	case "warn", "warning":
+		lv = logging.LevelWarn
+	default:
+		return nil, fmt.Errorf("plugin.log 的 level 只支持 debug / info / warn：%q", in.Level)
+	}
+	msg = strings.NewReplacer("\r", " ", "\n", " ").Replace(msg)
+	if runes := []rune(msg); len(runes) > 500 {
+		msg = string(runes[:500]) + "…（截断）"
+	}
+	m.log.Pluginf(lv, "plugin", id, "%s", msg)
+	return map[string]any{"ok": true}, nil
 }

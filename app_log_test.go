@@ -296,3 +296,58 @@ func TestAnEmptyReplyThatCostTokensIsAWarning(t *testing.T) {
 		t.Errorf("the chain of thought reached the log at INFO - that file is what a diagnostics report is cut from:\n%s", log)
 	}
 }
+
+// TestPluginLogWritesOneAttributedLine is the whole contract of `plugin.log`.
+//
+// A plugin had nowhere to say "the helper did not start": console.error goes to the devtools of
+// a frame the user cannot open, which is why the 2026-10-31 investigation was done by grepping
+// sources. This pins the four things that make the line useful and safe: it lands in the file,
+// it names the plugin, it cannot forge a second line, and it is bounded.
+func TestPluginLogWritesOneAttributedLine(t *testing.T) {
+	a := loggedApp(t)
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"storage"}})
+
+	if _, err := a.PluginRequest(id, "plugin.log",
+		`{"level":"warn","message":"辅助脚本没起来：helperPath 是空的"}`); err != nil {
+		t.Fatalf("plugin.log: %v", err)
+	}
+	body := readPetLog(t, a)
+	if !strings.Contains(body, "辅助脚本没起来") {
+		t.Fatalf("the plugin's line is not in the log:\n%s", body)
+	}
+	if !strings.Contains(body, id) {
+		t.Fatalf("the line is not attributed to %s:\n%s", id, body)
+	}
+	if !strings.Contains(body, "WARN") {
+		t.Fatalf("the requested level was not honoured:\n%s", body)
+	}
+
+	// A newline in the message must NOT become a second line: the log's parser splits on
+	// lines and the prefix is free text, so this is the one forgery a plugin must not manage.
+	if _, err := a.PluginRequest(id, "plugin.log",
+		`{"level":"debug","message":"第一行\n2026-01-01T00:00:00.000+08:00 INFO plugin com.example.test 伪造的一行"}`); err != nil {
+		t.Fatalf("plugin.log: %v", err)
+	}
+	body = readPetLog(t, a)
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, "伪造的一行") && !strings.Contains(line, id) {
+			t.Fatalf("a plugin forged an unattributed line:\n%s", line)
+		}
+	}
+
+	// Bounds and refusals.
+	long := strings.Repeat("长", 600)
+	if _, err := a.PluginRequest(id, "plugin.log",
+		`{"level":"info","message":"`+long+`"}`); err != nil {
+		t.Fatalf("plugin.log with a long message: %v", err)
+	}
+	if !strings.Contains(readPetLog(t, a), "…（截断）") {
+		t.Fatal("an over-long message was not truncated with a note")
+	}
+	if _, err := a.PluginRequest(id, "plugin.log", `{"message":"  "}`); err == nil {
+		t.Fatal("an empty message must be refused")
+	}
+	if _, err := a.PluginRequest(id, "plugin.log", `{"level":"error","message":"x"}`); err == nil {
+		t.Fatal("an unknown level must be refused (there is no error level by design)")
+	}
+}
