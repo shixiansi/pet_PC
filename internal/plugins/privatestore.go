@@ -424,7 +424,15 @@ func StorageList(dir string, payload []byte) (any, error) {
 			// caller is looking for leftovers, and a race is not worth an error.
 			continue
 		}
-		files = append(files, map[string]any{"name": entry.Name(), "bytes": info.Size()})
+		// `modified` is what makes a budget enforceable: without a timestamp a plugin can only
+		// evict by name or by a bookkeeping index it has to maintain itself, and `media/` in the
+		// qq plugin grew to 497 MiB exactly because nothing knew which sticker was old. Adding a
+		// field is additive - an older plugin ignores it (2026-10-31).
+		files = append(files, map[string]any{
+			"name":     entry.Name(),
+			"bytes":    info.Size(),
+			"modified": info.ModTime().UnixMilli(),
+		})
 	}
 	return map[string]any{"dir": base, "files": files, "dirs": dirs}, nil
 }

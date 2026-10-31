@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // storeCall runs one storage method against dir and decodes its JSON result.
@@ -459,5 +460,57 @@ func TestStorageUsageReportsTheBudget(t *testing.T) {
 	}
 	if used := empty.(map[string]any)["used"]; used != int64(0) {
 		t.Fatalf("used(empty) = %v, want 0", used)
+	}
+}
+
+// TestStorageListReportsModTime pins the field a cache budget needs to exist.
+//
+// The qq plugin's media/ folder reached 497 MiB because nothing in the system knew which file was
+// old: `storage.list` returned name and size only, so a plugin could evict by name (meaningless)
+// or maintain its own index (which the 497 MiB proves nobody does). One timestamp, and "delete the
+// oldest until it fits" becomes possible.
+func TestStorageListReportsModTime(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "media"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	old := filepath.Join(dir, "media", "old")
+	newer := filepath.Join(dir, "media", "newer")
+	for _, f := range []string{old, newer} {
+		if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+			t.Fatalf("seed %s: %v", f, err)
+		}
+	}
+	oldAt := time.Now().Add(-48 * time.Hour)
+	newAt := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(old, oldAt, oldAt); err != nil {
+		t.Fatalf("chtimes old: %v", err)
+	}
+	if err := os.Chtimes(newer, newAt, newAt); err != nil {
+		t.Fatalf("chtimes new: %v", err)
+	}
+
+	out, err := StorageList(dir, []byte(`{"sub":"media"}`))
+	if err != nil {
+		t.Fatalf("StorageList: %v", err)
+	}
+	files, _ := out.(map[string]any)["files"].([]map[string]any)
+	if len(files) != 2 {
+		t.Fatalf("files = %d, want 2", len(files))
+	}
+	byName := map[string]int64{}
+	for _, f := range files {
+		name, _ := f["name"].(string)
+		mod, ok := f["modified"].(int64)
+		if !ok {
+			t.Fatalf("%s: modified = %#v, want an int64 of milliseconds", name, f["modified"])
+		}
+		byName[name] = mod
+	}
+	if byName["old"] >= byName["newer"] {
+		t.Fatalf("modified does not order the files: old=%d newer=%d", byName["old"], byName["newer"])
+	}
+	if got := byName["old"]; got < oldAt.Add(-time.Minute).UnixMilli() || got > oldAt.Add(time.Minute).UnixMilli() {
+		t.Fatalf("modified(old) = %d, want about %d", got, oldAt.UnixMilli())
 	}
 }
