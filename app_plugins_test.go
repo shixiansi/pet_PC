@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"os/exec"
 	"time"
 
 	"PetPC/internal/plugins"
@@ -3278,5 +3279,58 @@ func TestStoragePressureFiresOncePerCrossing(t *testing.T) {
 	}
 	if got := len(events("storage.pressure")); got != 2 {
 		t.Fatalf("events = %d, want 2", got)
+	}
+}
+
+// TestStopSidecarsOnExitKeepsPluginLaunches is the shutdown rule, as two real processes.
+//
+// The two kinds of child disagree about what quitting means, and getting it wrong in either
+// direction is expensive: leaving sidecars alive means one extra copy per restart (eight
+// `vision-helper.ps1` were alive at once on 2026-10-31), while killing a plugin's own program logs
+// a chat bot out on every quit.
+func TestStopSidecarsOnExitKeepsPluginLaunches(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("child bookkeeping here is exercised with Windows commands")
+	}
+	a := pluginApp(t)
+
+	start := func() *exec.Cmd {
+		// `ping -n 30` sleeps ~30 seconds without needing a console; `timeout` refuses to run
+		// without one.
+		cmd := exec.Command("ping", "-n", "30", "127.0.0.1")
+		cmd.SysProcAttr = pluginLaunchAttr()
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("start probe process: %v", err)
+		}
+		return cmd
+	}
+	sidecar := start()
+	launch := start()
+	defer func() {
+		for _, cmd := range []*exec.Cmd{sidecar, launch} {
+			_ = cmd.Process.Kill()
+		}
+	}()
+
+	a.pluginHost.trackChild("com.example.side", "1.0.0", sidecar.Process.Pid, sidecar.Process, true)
+	a.pluginHost.trackChild("com.example.own", "1.0.0", launch.Process.Pid, launch.Process, false)
+
+	a.stopSidecarsOnExit()
+
+	// The sidecar is gone: Wait returns instead of blocking for 30 seconds.
+	done := make(chan error, 1)
+	go func() { done <- sidecar.Wait() }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("the sidecar exited cleanly; it was supposed to be killed")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sidecar is still running: quitting the pet left it behind")
+	}
+
+	// The plugin's own program is untouched.
+	if launch.ProcessState != nil {
+		t.Fatalf("a plugin's own process was stopped at shutdown: %v", launch.ProcessState)
 	}
 }

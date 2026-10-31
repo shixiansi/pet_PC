@@ -257,7 +257,10 @@ func (a *App) shutdown() {
 		// well, so a disable-and-quit leaves nothing behind. The ones that survive are
 		// NAMED rather than killed: process.launch releases a child on purpose so a
 		// protocol side outlives the pet (see reapPluginChildren).
-		a.reapPluginChildren()
+		// Two different rules, one line apart: sidecars are OURS and stop with us; a plugin's own
+	// `process.launch` survives (see stopSidecarsOnExit for why those disagree).
+	a.stopSidecarsOnExit()
+	a.reapPluginChildren()
 		a.logSurvivingChildren()
 	})
 }

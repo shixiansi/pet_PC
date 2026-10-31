@@ -3323,7 +3323,7 @@ func pluginProcessLaunch(a *App, id string, payload []byte) (any, error) {
 	// The VERSION travels with the child so the reaper can tell an update from a still-
 	// installed plugin (see reapPluginChildren). The handle travels with it so
 	// process.kill can stop this exact process without going through the pid.
-	a.pluginHost.trackChild(id, a.pluginVersionOf(id), pid, cmd.Process)
+	a.pluginHost.trackChild(id, a.pluginVersionOf(id), pid, cmd.Process, false)
 	go func() {
 		a.pluginHost.finishChild(pid, cmd.Wait())
 	}()
@@ -3349,6 +3349,11 @@ type pluginChildProc struct {
 	// remounted, so this child is nobody's) from "the plugin is still the one that
 	// started it".
 	version string
+	// sidecar marks the children the HOST started (manifest's `sidecar`), as opposed to the
+	// ones a plugin launched itself. The difference is the shutdown rule: a sidecar dies with
+	// the pet (the next launch starts a fresh one), while a plugin's own program may be
+	// something that must survive a restart (Yogurt and its peers).
+	sidecar bool
 	// handle is the OS process handle, kept ONLY so process.kill can stop it. It is
 	// dropped once the child exits: killing through a handle to a finished process is
 	// harmless (ErrProcessDone), but holding it afterwards would make a recycled pid
@@ -3360,7 +3365,7 @@ type pluginChildProc struct {
 // use case, and forgetting the oldest entry keeps a stuck one from growing this forever.
 const maxTrackedChildren = 32
 
-func (h *pluginHost) trackChild(pluginID, version string, pid int, handle *os.Process) *childProc {
+func (h *pluginHost) trackChild(pluginID, version string, pid int, handle *os.Process, sidecar bool) *childProc {
 	h.childMu.Lock()
 	defer h.childMu.Unlock()
 	if h.children == nil {
@@ -3378,7 +3383,7 @@ func (h *pluginHost) trackChild(pluginID, version string, pid int, handle *os.Pr
 		delete(h.children, oldest)
 	}
 	proc := &childProc{startedAt: time.Now(), exitCode: -1}
-	h.children[pid] = &pluginChildProc{proc: proc, pluginID: pluginID, version: version, handle: handle}
+	h.children[pid] = &pluginChildProc{proc: proc, pluginID: pluginID, version: version, handle: handle, sidecar: sidecar}
 	return proc
 }
 
@@ -3620,13 +3625,26 @@ func (a *App) startPluginSidecar(row plugins.Installed) {
 		"PETPC_PLUGIN_ID="+row.ID,
 		"PETPC_PLUGIN_DATA="+dataDir,
 	)
+	// A sidecar's output goes into the log - unlike `process.launch`, which keeps its
+	// /dev/null. Why the difference: this program is one the HOST started, and on 2026-10-31
+	// eight of ten sidecars died within seconds while the log said nothing but "已启动".
+	// stderr is where a script's exception lands, so it goes in at WARN; stdout is chatter.
+	errOut := newSidecarLogWriter(a.log, logging.LevelWarn, row.ID, "stderr")
+	outOut := newSidecarLogWriter(a.log, logging.LevelDebug, row.ID, "stdout")
+	cmd.Stderr = errOut
+	cmd.Stdout = outOut
 	if err := cmd.Start(); err != nil {
 		a.log.Pluginf(logging.LevelWarn, "plugin", row.ID, "辅助脚本启动失败：%v", err)
 		return
 	}
-	a.pluginHost.trackChild(row.ID, version, cmd.Process.Pid, cmd.Process)
+	a.pluginHost.trackChild(row.ID, version, cmd.Process.Pid, cmd.Process, true)
 	go func() {
-		a.pluginHost.finishChild(cmd.Process.Pid, cmd.Wait())
+		err := cmd.Wait()
+		// Flush BEFORE recording the exit: the last line a dying helper printed has no
+		// trailing newline, and it is usually the reason.
+		errOut.Flush()
+		outOut.Flush()
+		a.pluginHost.finishChild(cmd.Process.Pid, err)
 	}()
 	a.log.Pluginf(logging.LevelInfo, "plugin", row.ID,
 		"已启动辅助脚本 %s（pid=%d，数据目录 %s）", spec.Script, cmd.Process.Pid, dataDir)
@@ -3695,6 +3713,47 @@ func (a *App) reapPluginChildren() {
 	}
 }
 
+// stopSidecarsOnExit stops the helpers the HOST started, and only those.
+//
+// # WHY THIS IS NOT THE SAME RULE AS logSurvivingChildren
+//
+// `process.launch` releases the child on purpose: a protocol side (Yogurt and its peers) has to
+// keep running across a pet restart, and killing it would log the user's chat bot out every time
+// they quit. A SIDECAR is the opposite kind of program - the host started it from the manifest,
+// with the host's environment, and the next launch starts a fresh one. Leaving it running means
+// one extra copy per restart: on 2026-10-31 `vision-helper.ps1` had EIGHT copies alive at once,
+// all polling the same sources and writing the same outbox, which is also why "the outbox is
+// empty" was so hard to read.
+//
+// Best effort by design: a helper that ignores a Kill is not worth blocking the exit for, and the
+// next launch replaces it anyway.
+func (a *App) stopSidecarsOnExit() {
+	type victim struct {
+		pid    int
+		id     string
+		handle *os.Process
+	}
+	var victims []victim
+	a.pluginHost.childMu.Lock()
+	for pid, child := range a.pluginHost.children {
+		if !child.sidecar || child.handle == nil || child.proc.done {
+			continue
+		}
+		victims = append(victims, victim{pid, child.pluginID, child.handle})
+	}
+	a.pluginHost.childMu.Unlock()
+
+	for _, v := range victims {
+		if err := v.handle.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			a.log.Pluginf(logging.LevelWarn, "plugin", v.id,
+				"停掉托管的辅助脚本 pid=%d 失败：%v", v.pid, err)
+			continue
+		}
+		a.log.Pluginf(logging.LevelInfo, "plugin", v.id,
+			"桌宠退出，停掉它托管的辅助脚本 pid=%d（下次启动会重新拉起）", v.pid)
+	}
+}
+
 // logSurvivingChildren names the programs that will outlive the pet.
 //
 // See reapPluginChildren for why they are not stopped. The line exists so that the next
@@ -3709,6 +3768,11 @@ func (a *App) logSurvivingChildren() {
 	var alive []survivor
 	for pid, child := range a.pluginHost.children {
 		if child.proc.done || child.handle == nil {
+			continue
+		}
+		// Sidecars are stopped by stopSidecarsOnExit before this runs; naming one here would
+		// claim it survives when it is on its way down.
+		if child.sidecar {
 			continue
 		}
 		alive = append(alive, survivor{pid, child.pluginID})
