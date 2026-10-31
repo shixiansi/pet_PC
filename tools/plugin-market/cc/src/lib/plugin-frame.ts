@@ -39,6 +39,10 @@
  * adapter that decides WHEN.
  */
 import { PluginHostInfo, PluginRequest } from './bridge';
+// The host's down-link (`pet:plugin-event`). Imported here rather than through bridge.ts because
+// this module owns the frames: a subscription that outlived its frame would post into a torn-down
+// window, so mount and destroy are the only two places it may be created and dropped.
+import { EventsOn } from '../../../frontend/wailsjs/runtime/runtime';
 
 /** The protocol version, matching internal/plugins.BridgeJS. */
 const V = 1;
@@ -261,6 +265,24 @@ export function mountPlugin(mount: HTMLElement, req: MountRequest, theme: FrameT
   window.addEventListener('message', onMessage);
   mount.replaceChildren(frame);
 
+  // The host's down-link: `share.changed` (and, one day, whatever else the host emits) reaches
+  // the plugin as the same `event` message the pet sends.
+  //
+  // WHY THIS WINDOW NEEDS IT: three bundled plugins write and read their OWN `command` key from
+  // inside this page (ast-coder / voice-call / live-danmaku). Until this listener existed they
+  // polled once a second, because the program that emits the event was the pet - and the pet has
+  // no frame to deliver to when the document is mounted here. See docs/plugin-dev.md §7.1.
+  //
+  // The id check is not decoration: `EventsOn` is a broadcast, and a frame must never receive
+  // another plugin's traffic.
+  const stopEvents = EventsOn('pet:plugin-event', (ev: unknown) => {
+    const msg = ev as { pluginId?: unknown; name?: unknown; payload?: unknown } | null;
+    if (!msg || msg.pluginId !== pluginId || typeof msg.name !== 'string') return;
+    // Copied field by field: `ev` came through the Wails binding and may be a proxy, and a
+    // proxy cannot cross `postMessage` (see the DataCloneError note above).
+    post({ type: 'event', name: msg.name, payload: msg.payload ?? {} });
+  });
+
   return {
     pluginId,
     setTheme(next: FrameTheme) {
@@ -274,6 +296,9 @@ export function mountPlugin(mount: HTMLElement, req: MountRequest, theme: FrameT
       if (!alive) return;
       alive = false;
       window.removeEventListener('message', onMessage);
+      // The host subscription goes with the frame: a listener left behind would keep posting
+      // into a torn-down window, and a second mount would then deliver every event twice.
+      stopEvents();
       frame.remove();
       mount.replaceChildren();
     },

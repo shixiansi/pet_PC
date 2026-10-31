@@ -64,6 +64,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+
 	"PetPC/internal/desktop"
 	"PetPC/internal/logging"
 	"PetPC/internal/plugins"
@@ -133,7 +135,7 @@ func (m *Market) marketRegistry() *plugins.Registry {
 	// page mounts the bundled plugins' own documents, and three of them publish or read a
 	// key from inside their page - so without this the page shows a plugin's interface
 	// with a host error in the middle of it (see this file's header).
-	plugins.RegisterShare(r, gateAdapter{m.manager})
+	plugins.RegisterShare(r, gateAdapter{m.manager}, m.notifyShareReaders)
 	r.Register("config.get", plugins.Method{Perm: plugins.PermPluginConfig, Run: marketConfigGet})
 	r.Register("config.set", plugins.Method{Perm: plugins.PermPluginConfig, Run: marketConfigSet})
 	// The channel plugin's editor lives on this program's 插件 page, so the table's two
@@ -478,4 +480,52 @@ func marketConfigSet(host any, call plugins.Call, payload []byte) (any, error) {
 		return nil, err
 	}
 	return map[string]any{"ok": true}, nil
+}
+
+// --- share.changed ----------------------------------------------------------
+
+// notifyShareReaders tells the plugins that declared this key - and the publisher's own frames -
+// that it just changed.
+//
+// The rule is the pet's (app_plugins.go): a reader needs `plugin.share` plus the exact
+// "<owner>/<name>" pair in `shareRead`, and the publisher always hears about its own key, because
+// one installation is several documents and the `command` keys are exactly that channel.
+//
+// Why this program needs it at all: the 插件 page mounts the bundled plugins' own documents, and
+// three of them poll their OWN command key from inside that page (ast-coder / voice-call /
+// live-danmaku). The pet cannot answer for them - the frames live here - so without this the poll
+// stays a poll. See docs/plugin-dev.md §7.1 in the plugin repository.
+func (m *Market) notifyShareReaders(publisherID, name string) {
+	if m.ctx == nil {
+		return
+	}
+	at := time.Now().Format(time.RFC3339)
+	key := plugins.SharedKey(publisherID, name)
+	for _, id := range shareRecipients(m.manager.Plugins(), publisherID, name) {
+		runtime.EventsEmit(m.ctx, "pet:plugin-event", map[string]any{
+			"pluginId": id,
+			"name":     "share.changed",
+			"at":       at,
+			"payload":  map[string]any{"key": key, "owner": publisherID, "name": name, "at": at},
+		})
+	}
+}
+
+// shareRecipients is the selection rule on its own: pure, so a test can pin it without a Wails
+// context, and identical in shape to the pet's loop.
+func shareRecipients(rows []plugins.Installed, publisherID, name string) []string {
+	var out []string
+	for _, row := range rows {
+		if !row.Enabled || row.Error != "" || row.Manifest == nil {
+			continue
+		}
+		if !plugins.HasGranted(row.Granted, plugins.PermPluginShare) {
+			continue
+		}
+		if row.ID != publisherID && !plugins.DeclaredShareRead(row.Manifest.ShareRead, publisherID, name) {
+			continue
+		}
+		out = append(out, row.ID)
+	}
+	return out
 }

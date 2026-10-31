@@ -22,6 +22,7 @@ package plugins
 // functions.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -202,10 +203,36 @@ func ShareRemove(gate Gate, id string, payload []byte) (any, error) {
 //
 // The pet builds its table by hand (it needs the `also` field and the tool catalog), so it
 // calls the three functions directly instead.
-func RegisterShare(r *Registry, gate Gate) {
+// onSet is called AFTER a publish lands, with the publisher's id and the key's name. It is how a
+// program tells the interested plugins that the value changed (see `share.changed` in
+// docs/plugin-dev.md §7.1); nil means "this program mounts no plugin documents", which is the only
+// honest reason to pass nothing.
+//
+// The callback exists because the two programs emit through different runtimes (the pet's
+// emitPluginEvent, the market's runtime.EventsEmit) while the RULE - who may be told - must stay
+// one implementation. Duplicating the rule in the market program is the drift this package exists
+// to prevent.
+func RegisterShare(r *Registry, gate Gate, onSet func(pluginID, name string)) {
 	r.Register("share.set", Method{
 		Perm: PermPluginShare,
-		Run:  func(_ any, call Call, payload []byte) (any, error) { return ShareSet(gate, call.PluginID, payload) },
+		Run: func(_ any, call Call, payload []byte) (any, error) {
+			out, err := ShareSet(gate, call.PluginID, payload)
+			if err != nil {
+				return nil, err
+			}
+			if onSet != nil {
+				var in struct {
+					Name string `json:"name"`
+				}
+				// The payload was already validated by ShareSet; this parse only recovers the
+				// name for the notification, so a failure here is "no notification", not an error
+				// for the publisher.
+				if json.Unmarshal(payload, &in) == nil && in.Name != "" {
+					onSet(call.PluginID, in.Name)
+				}
+			}
+			return out, nil
+		},
 	})
 	r.Register("share.get", Method{
 		Perm: PermPluginShare,

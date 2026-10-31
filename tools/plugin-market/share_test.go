@@ -145,3 +145,37 @@ func TestShareRemoveOnlyTouchesTheCallersOwnValues(t *testing.T) {
 		t.Errorf("another plugin removed the publisher's value: %s", got)
 	}
 }
+
+// TestShareRecipients pins WHO hears about a publish in this program.
+//
+// Same rule as the pet's (app_plugins.go): the declared readers, plus the publisher's own frames.
+// The "own frames" half is what makes the 插件 page's command channel a push instead of a poll -
+// ast-coder / voice-call / live-danmaku write and read their own `command` key from inside this
+// window, and the pet cannot answer for frames that live here.
+func TestShareRecipients(t *testing.T) {
+	rows := []plugins.Installed{
+		{ID: "com.example.pub", Enabled: true, Granted: []string{plugins.PermPluginShare},
+			Manifest: &plugins.Manifest{ID: "com.example.pub"}},
+		{ID: "com.example.reader", Enabled: true, Granted: []string{plugins.PermPluginShare},
+			Manifest: &plugins.Manifest{ID: "com.example.reader", ShareRead: []string{"com.example.pub/command"}}},
+		{ID: "com.example.bystander", Enabled: true, Granted: []string{plugins.PermPluginShare},
+			Manifest: &plugins.Manifest{ID: "com.example.bystander"}},
+		// Every one of these is excluded for exactly one reason, so a regression names itself.
+		{ID: "com.example.disabled", Enabled: false, Granted: []string{plugins.PermPluginShare},
+			Manifest: &plugins.Manifest{ID: "com.example.disabled", ShareRead: []string{"com.example.pub/command"}}},
+		{ID: "com.example.ungranted", Enabled: true,
+			Manifest: &plugins.Manifest{ID: "com.example.ungranted", ShareRead: []string{"com.example.pub/command"}}},
+		{ID: "com.example.broken", Enabled: true, Granted: []string{plugins.PermPluginShare}, Error: "manifest 坏了"},
+		{ID: "com.example.nomanifest", Enabled: true, Granted: []string{plugins.PermPluginShare}},
+	}
+	got := shareRecipients(rows, "com.example.pub", "command")
+	want := []string{"com.example.pub", "com.example.reader"}
+	if len(got) != len(want) {
+		t.Fatalf("recipients = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("recipients = %v, want %v", got, want)
+		}
+	}
+}
