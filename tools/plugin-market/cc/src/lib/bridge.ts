@@ -199,7 +199,7 @@ function asHostSends<T>(row: T): T {
 // screen never reads these - it reads App.PermissionLabels().
 const LABELS: Array<[id: string, label: string]> = [
   ['pet.bubble', '让桌宠弹出一句话的气泡'],
-  ['events', '订阅待办与番茄钟的变化事件（关闭界面后也会送达）'],
+  ['events', '订阅宿主的状态变化事件（提醒触发、计时阶段结束、配置变更）'],
   ['net.fetch', '访问网络（仅限插件声明的域名）'],
   ['net.credentials', '以你保存的网站登录凭据发请求（凭据本身不会显示给插件）'],
   ['storage', '在自己的私有目录里保存数据'],
@@ -211,6 +211,7 @@ const LABELS: Array<[id: string, label: string]> = [
   ['llm.borrow', '使用其它插件已配置的大模型与密钥（密钥不会显示给你）'],
   ['process', '启动本机程序'],
   ['plugin.share', '与其它插件交换消息（只能读清单里点名的键，只能写自己名下的键）'],
+  ['plugin.call', '与其它插件互相调用（只能调用清单里点名的目标，也只能回答清单里声明的方法）'],
 ];
 
 const FAKE_LABELS: PermissionLabel[] = LABELS.map(([ID, Label]) => main.LabelPair.createFrom({ ID, Label }));

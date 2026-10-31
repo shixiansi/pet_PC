@@ -72,6 +72,41 @@ const TYPE_INIT = 'init';
 const TYPE_REQUEST = 'request';
 const TYPE_RESPONSE = 'response';
 const TYPE_EVENT = 'event';
+/**
+ * The host telling a MOUNTED frame that its rectangle changed.
+ *
+ * `init` is sent once, and a surface frame outlives many geometry passes: the pet is resized (the
+ * user's 桌宠大小), the answer box is asked to grow, the window's side flips. A plugin that keeps
+ * using the rectangle from `init` ends up drawing a tail at the pet's old centre, and it cannot
+ * know how much room it has above the pet - which is what decides whether its own blocks still fit.
+ *
+ * So this message carries the new rectangle (including `room`) to every frame whose rect changed.
+ */
+const TYPE_SURFACE = 'surface';
+/**
+ * One plugin asking another a question, and the answer coming back.
+ *
+ * This is the second half of `plugin.call`, and it lives HERE because only this file holds
+ * the frames: Wails lets Go emit an event into a page, but there is no way for Go to ask a
+ * document something and wait for the reply. So Go authorises (it answers `plugin.call`
+ * with an envelope - see internal/plugins/call.go) and this file delivers, waits, settles.
+ *
+ * The three numbers below are limits Go cannot enforce, because Go never sees the chain:
+ *
+ *  - CALL_TIMEOUT_MS: the callee may itself be waiting on an `llm.chat`, so this is much
+ *    longer than a capability call. A timeout is NOT a permission refusal - nothing was
+ *    declined, the answer simply did not arrive - which is why the page may decide it.
+ *  - CALL_MAX_DEPTH: A asks B asks C asks D and stops. Without a cap, two plugins asking
+ *    each other is an endless loop whose only symptom is that both stop answering.
+ *  - CALL_MAX_RESULT: an answer is copied through two documents. REFUSED rather than
+ *    truncated, because half a JSON document is a parse error at the far end that says
+ *    nothing about the size limit.
+ */
+const TYPE_CALL = 'call';
+const TYPE_CALL_RESULT = 'call-result';
+const CALL_TIMEOUT_MS = 30_000;
+const CALL_MAX_DEPTH = 3;
+const CALL_MAX_RESULT = 64 << 10;
 
 /**
  * A granted set as one comparable string.
@@ -87,17 +122,6 @@ const TYPE_EVENT = 'event';
 export function grantedKey(list) {
   return (Array.isArray(list) ? [...list] : []).slice().sort().join(',');
 }
-/**
- * The host telling a MOUNTED frame that its rectangle changed.
- *
- * `init` is sent once, and a surface frame outlives many geometry passes: the pet is resized (the
- * user's 桌宠大小), the answer box is asked to grow, the window's side flips. A plugin that keeps
- * using the rectangle from `init` ends up drawing a tail at the pet's old centre, and it cannot
- * know how much room it has above the pet - which is what decides whether its own blocks still fit.
- *
- * So this message carries the new rectangle (including `room`) to every frame whose rect changed.
- */
-const TYPE_SURFACE = 'surface';
 
 /**
  * One plugin's sandboxed interface.
@@ -154,9 +178,6 @@ class PluginFrame {
 
     /** True once this frame has been answered with its one init. */
     this.initialised = false;
-    /** Pending requests, so a response can find its caller. */
-    this.pending = new Map();
-    this.nextId = 1;
     this.el = this.createElement();
   }
 
@@ -253,10 +274,10 @@ class PluginFrame {
    *
    * The method and the id must both be non-empty strings; anything else is
    * dropped WITHOUT a reply, because replying to a malformed message would be a
-   * way for a plugin to probe the host. A well-formed request is forwarded to
-   * App.PluginRequest, which is where the plugin's permission is checked and
-   * where a refusal is turned into an error - this file never decides what is
-   * allowed.
+   * way for a plugin to probe the host. A well-formed request goes to `onRequest`,
+   * which is `PluginHost.request` - the one place that talks to `App.PluginRequest`,
+   * and the only place that can deliver a `plugin.call` (it needs the other frames,
+   * which a single frame does not have).
    */
   dispatch(data) {
     const { id, method } = data;
@@ -264,17 +285,8 @@ class PluginFrame {
     if (typeof method !== 'string' || method === '') return;
 
     const payload = data.payload === undefined ? {} : data.payload;
-    App.PluginRequest(this.pluginId, method, JSON.stringify(payload))
-      .then((result) => {
-        // The binding answers with the method's JSON-encoded value.
-        let value = result;
-        if (typeof result === 'string' && result !== '') {
-          try {
-            value = JSON.parse(result);
-          } catch {
-            value = result;
-          }
-        }
+    this.onRequest(method, payload)
+      .then((value) => {
         this.post({ v: V, type: TYPE_RESPONSE, id, ok: true, result: value });
       })
       .catch((err) => {
@@ -409,6 +421,29 @@ export class PluginHost {
      */
     this.host = null;
 
+    /**
+     * In-flight `plugin.call`s, keyed by the ticket Go minted.
+     *
+     * Each entry remembers WHICH frame was asked, because an answer is only accepted from
+     * that frame's `contentWindow` - otherwise one plugin could settle another's call by
+     * guessing a ticket. The entry is removed the moment it is settled (answered, timed
+     * out, or its frame destroyed), so a replayed ticket finds nothing to settle.
+     */
+    this.pendingCalls = new Map();
+    /**
+     * How deep the call chain is for each plugin CURRENTLY SERVING one.
+     *
+     * A call from a plugin that is itself answering a call is one hop deeper. Go cannot
+     * count this (it never sees the chain), and a plugin cannot be trusted to say - so the
+     * count lives here, where both ends of every hop pass through.
+     *
+     * It is conservative rather than exact: two calls being served by the same plugin at
+     * once share one counter, so the depth reads higher than any single chain. That errs
+     * towards refusing a call that would have been legal, which is the right direction for
+     * a limit whose purpose is stopping a loop.
+     */
+    this.callDepth = new Map();
+
     this.onMessage = this.onMessage.bind(this);
     window.addEventListener('message', this.onMessage);
     // The host tells the plugins about state changes. The event name is emitted
@@ -522,7 +557,7 @@ export class PluginHost {
       permissions: plugin.permissions || [],
       granted: plugin.granted || [],
       host: this.host,
-      onRequest: (m, p) => App.PluginRequest(plugin.id, m, JSON.stringify(p)),
+      onRequest: (m, p) => this.request(plugin.id, m, p),
     });
     frame.grantedKey = granted;
     this.backgroundFrames.set(plugin.id, frame);
@@ -543,6 +578,10 @@ export class PluginHost {
     if (!frame) return;
     this.backgroundFrames.delete(pluginID);
     frame.destroy();
+    // Anyone waiting on an answer from this frame must hear "it went away" now rather than
+    // after CALL_TIMEOUT_MS: the frame is gone, and 30 seconds of silence is a worse
+    // description of what happened than the truth.
+    this.failCallsFor(frame, `目标插件 ${pluginID} 的常驻帧已关闭`);
     if (this.backgroundFrames.size === 0 && this.els.pluginBackground) {
       this.els.pluginBackground.classList.add('hidden');
     }
@@ -573,16 +612,171 @@ export class PluginHost {
     // the window is the check that matters.
     for (const frame of this.surfaceFrames.values()) {
       if (frame.el.contentWindow === event.source) {
+        if (this.handleCallResult(frame, event.data)) return;
         frame.handleMessage(event.data);
         return;
       }
     }
     for (const frame of this.backgroundFrames.values()) {
       if (frame.el.contentWindow === event.source) {
+        if (this.handleCallResult(frame, event.data)) return;
         frame.handleMessage(event.data);
         return;
       }
     }
+  }
+
+  /**
+   * Runs one capability call for a plugin.
+   *
+   * This is the ONLY caller of `App.PluginRequest` on the pet's page, and that is what
+   * makes `plugin.call` possible at all: the method is authorised by Go like any other,
+   * but its answer has to come from another plugin's frame - and the frames live here.
+   *
+   * @param {string} pluginId the calling plugin
+   * @param {string} method
+   * @param {any} payload
+   * @returns {Promise<any>} the method's value, parsed
+   */
+  request(pluginId, method, payload) {
+    return App.PluginRequest(pluginId, method, JSON.stringify(payload)).then((result) => {
+      // The binding answers with the method's JSON-encoded value.
+      let value = result;
+      if (typeof result === 'string' && result !== '') {
+        try {
+          value = JSON.parse(result);
+        } catch {
+          value = result;
+        }
+      }
+      if (method !== 'plugin.call') return value;
+      return this.deliverCall(pluginId, value);
+    });
+  }
+
+  /**
+   * Delivers one AUTHORISED call and settles it with the callee's answer.
+   *
+   * By the time this runs, Go has already decided that this caller may ask this question
+   * of that plugin (see internal/plugins/call.go). Everything that can still go wrong here
+   * is a delivery problem - no frame, too deep, no answer - and none of it is a permission
+   * decision, which is why this file is allowed to make it.
+   *
+   * @param {string} callerId
+   * @param {object} envelope {ticket, target, method, payload} from Go
+   */
+  deliverCall(callerId, envelope) {
+    const ticket = typeof envelope?.ticket === 'string' ? envelope.ticket : '';
+    const target = typeof envelope?.target === 'string' ? envelope.target : '';
+    const method = typeof envelope?.method === 'string' ? envelope.method : '';
+    if (!ticket || !target || !method) {
+      return Promise.reject(new Error('plugin.call 的授权信封不完整（缺少 ticket / target / method）'));
+    }
+    const frame = this.frameForCall(target);
+    if (!frame) {
+      return Promise.reject(new Error(
+        `plugin.call 问不到 ${target}：它此刻没有常驻帧，也没有浮层面在显示（目标是 background 插件吗？）`));
+    }
+    // Depth: this hop is one more than the depth of the plugin doing the asking.
+    const depth = (this.callDepth.get(callerId) || 0) + 1;
+    if (depth > CALL_MAX_DEPTH) {
+      return Promise.reject(new Error(
+        `plugin.call 的调用链已到 ${CALL_MAX_DEPTH} 层（${callerId} → ${target}/${method}）：两个插件互相提问会在这里停下`));
+    }
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingCalls.delete(ticket);
+        this.releaseDepth(target, 1);
+        reject(new Error(
+          `plugin.call 等 ${target}/${method} 的回答超时（${CALL_TIMEOUT_MS / 1000} 秒）`));
+      }, CALL_TIMEOUT_MS);
+      this.pendingCalls.set(ticket, { frame, target, method, depth, timer, resolve, reject });
+      this.callDepth.set(target, (this.callDepth.get(target) || 0) + 1);
+      frame.post({
+        v: V,
+        type: TYPE_CALL,
+        ticket,
+        from: callerId,
+        method,
+        payload: envelope.payload === undefined ? {} : envelope.payload,
+      });
+    });
+  }
+
+  /**
+   * The frame that answers for `targetId`, or null.
+   *
+   * Background frames come first because a plugin that answers questions is expected to be
+   * resident - the whole point of asking another plugin is that it is there when the user
+   * has no interface open. Only then the floating surface, and if that plugin declared
+   * several blocks (several documents) the first one answers: there is no "which block"
+   * question in the protocol, and picking one deterministically is better than asking a
+   * plugin that cannot know.
+   */
+  frameForCall(targetId) {
+    const bg = this.backgroundFrames.get(targetId);
+    if (bg) return bg;
+    for (const frame of this.surfaceFrames.values()) {
+      if (frame.pluginId === targetId) return frame;
+    }
+    return null;
+  }
+
+  /**
+   * Settles one pending call from a callee's answer.
+   *
+   * Accepted only from the frame that was asked: the ticket is a correlation id, and without
+   * the window check any plugin could settle any call by replaying one it saw... except that
+   * it never sees one - but the check costs nothing and this is the boundary where a plugin's
+   * bytes become another plugin's return value.
+   *
+   * @returns {boolean} true when the message was a call result (so it must not also be
+   *   offered to the frame's own handler)
+   */
+  handleCallResult(frame, data) {
+    if (!data || typeof data !== 'object' || data.v !== V || data.type !== TYPE_CALL_RESULT) {
+      return false;
+    }
+    const ticket = typeof data.ticket === 'string' ? data.ticket : '';
+    const entry = this.pendingCalls.get(ticket);
+    if (!entry) return true;      // unknown or already settled: nothing to settle
+    if (entry.frame !== frame) return true; // only the plugin that was asked may answer
+    this.pendingCalls.delete(ticket);
+    clearTimeout(entry.timer);
+    this.releaseDepth(entry.target, 1);
+    if (data.ok === true) {
+      const encoded = JSON.stringify(data.result === undefined ? null : data.result);
+      if (encoded && encoded.length > CALL_MAX_RESULT) {
+        entry.reject(new Error(
+          `plugin.call 的回答有 ${encoded.length} 字节，超过 ${CALL_MAX_RESULT} 上限（${entry.target}/${entry.method}）`));
+        return true;
+      }
+      entry.resolve(data.result === undefined ? null : data.result);
+      return true;
+    }
+    const reason = typeof data.error === 'string' && data.error !== ''
+      ? data.error
+      : `${entry.target}/${entry.method} 没有说为什么拒绝`;
+    entry.reject(new Error(reason));
+    return true;
+  }
+
+  /** Fails every pending call whose target frame is going away. */
+  failCallsFor(frame, why) {
+    for (const [ticket, entry] of [...this.pendingCalls]) {
+      if (entry.frame !== frame) continue;
+      this.pendingCalls.delete(ticket);
+      clearTimeout(entry.timer);
+      this.releaseDepth(entry.target, 1);
+      entry.reject(new Error(`${why}：${entry.target}/${entry.method} 没有回答`));
+    }
+  }
+
+  /** Lowers a serving-depth counter, deleting the entry rather than storing 0. */
+  releaseDepth(pluginId, by) {
+    const now = (this.callDepth.get(pluginId) || 0) - by;
+    if (now > 0) this.callDepth.set(pluginId, now);
+    else this.callDepth.delete(pluginId);
   }
 
   /**
@@ -714,7 +908,7 @@ export class PluginHost {
           rectCount: rects.length,
           rect,
           host: this.host,
-          onRequest: (m, p) => App.PluginRequest(surface.pluginId, m, JSON.stringify(p)),
+          onRequest: (m, p) => this.request(surface.pluginId, m, p),
         });
         this.surfaceFrames.set(index, frame);
         mount.append(frame.el);
@@ -764,7 +958,12 @@ export class PluginHost {
 
   /** Hides and removes every surface frame. */
   clearSurface() {
-    for (const frame of this.surfaceFrames.values()) frame.destroy();
+    for (const frame of this.surfaceFrames.values()) {
+      frame.destroy();
+      // Same reason as closeBackground: a caller waiting on this frame must be told the
+      // frame is gone, not left to sit through the timeout.
+      this.failCallsFor(frame, '目标插件的浮层面已关闭');
+    }
     this.surfaceFrames = new Map();
     this.surfacePluginId = '';
     this.surfaceVersion = '';

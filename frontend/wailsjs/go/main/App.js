@@ -134,8 +134,8 @@ export function SetCardTheme(arg1) {
   return window['go']['main']['App']['SetCardTheme'](arg1);
 }
 
-export function SetPluginSurfaceBlocks(arg1, arg2, arg3) {
-  return window['go']['main']['App']['SetPluginSurfaceBlocks'](arg1, arg2, arg3);
+export function SetPluginSurfaceBlocks(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SetPluginSurfaceBlocks'](arg1, arg2, arg3, arg4);
 }
 
 export function SetReminderEnabled(arg1) {

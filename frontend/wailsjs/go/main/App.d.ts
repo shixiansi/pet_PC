@@ -69,7 +69,7 @@ export function SetBubbleHover(arg1:boolean):Promise<void>;
 
 export function SetCardTheme(arg1:string):Promise<main.State>;
 
-export function SetPluginSurfaceBlocks(arg1:string,arg2:Array<number>,arg3:Record<number, number>):Promise<main.Layout>;
+export function SetPluginSurfaceBlocks(arg1:string,arg2:Array<number>,arg3:boolean,arg4:Record<number, number>):Promise<main.Layout>;
 
 export function SetReminderEnabled(arg1:boolean):Promise<main.State>;
 

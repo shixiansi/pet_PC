@@ -75,10 +75,11 @@ type Manifest struct {
 	// A voice plugin is the motivating case: the pomodoro ends whether or not the
 	// panel is showing, and the plugin has to hear about it to speak.
 	//
-	// It is deliberately NOT a free-standing flag: ParseManifest requires the
-	// plugin to also declare the background PERMISSION, so a plugin cannot run
-	// invisibly in the background without the user having seen and agreed to it -
-	// the same rule every other capability follows.
+	// It is deliberately NOT a free-standing flag: ParseManifest requires the plugin to
+	// also declare one of the permissions that can actually DELIVER something to a frame
+	// (`events` / `net.ws` / `net.fetch` / `plugin.call`, see validateBackground). There is no
+	// `background` permission - a permission with no method behind it is the switch this
+	// vocabulary refuses to contain.
 	Background bool `json:"background,omitempty"`
 	// ShareLLM lets OTHER plugins use this plugin's model settings and credential
 	// through `llm.borrow`, instead of each of them asking the user to paste the
@@ -101,6 +102,24 @@ type Manifest struct {
 	//
 	// Reading one's OWN values is implicit and needs no entry.
 	ShareRead []string `json:"shareRead,omitempty"`
+	// Serves lists the METHOD NAMES this plugin answers when another plugin asks it
+	// something through `plugin.call` (openspec/changes/plugin-call).
+	//
+	// It is the publishing half of the call primitive, and it is deliberately a list of
+	// bare names rather than "<id>/<method>" pairs: the id is the manifest's own, so a
+	// pair here would be a declaration that could disagree with itself.
+	//
+	// Declaring it requires the plugin.call permission. Without that rule a manifest could
+	// promise to answer calls it was never given the means to answer, and the install
+	// dialog's promise would be enforced by nothing.
+	Serves []string `json:"serves,omitempty"`
+	// CallTargets lists the other plugins' served methods this plugin may call, as
+	// "<targetId>/<method>" pairs.
+	//
+	// Same authorisation shape as ShareRead, for the same reason: the pair list is what
+	// the install dialog can READ OUT LOUD ("它会调用 QQ 插件的 chat"), and an exact pair
+	// cannot quietly become a wildcard. Exact pairs, never a bare id, never a prefix.
+	CallTargets []string `json:"callTargets,omitempty"`
 	// Assets are extra files the package carries beyond the manifest, the entry
 	// and the three fixed front-end resources. A plugin that ships audio needs
 	// them: the built-in clips are part of what makes the feature work offline,
@@ -131,8 +150,11 @@ type ConfigItem struct {
 	// Secret means the value never leaves the plugin: it is encrypted at rest and
 	// never returned to any UI in plaintext.
 	Secret bool `json:"secret,omitempty"`
-	// HostWhitelist marks the item whose CURRENT VALUE supplies additional
-	// net.fetch hostnames. At most one item may carry it.
+	// HostWhitelist marks an item whose CURRENT VALUE supplies additional net.fetch
+	// hostnames. Up to maxHostWhitelists items may carry it, and they are MERGED: a
+	// plugin that reaches one set of hosts for its API and another for media needs two
+	// fields, and one combined text box would be a field the user cannot fill correctly
+	// (a URL in a host list, or a host in a URL field).
 	HostWhitelist bool `json:"hostWhitelist,omitempty"`
 	// Options are the choices of a `select` item.
 	//
@@ -258,6 +280,10 @@ const (
 	// user's own group bot needs to tune (how much it remembers, how chatty it is,
 	// how many sticker candidates the model sees, whether it collects pictures).
 	maxConfigItems = 40
+	// maxHostWhitelists caps how many items may widen the net.fetch allow-list. See the
+	// HostWhitelist field comment: the runtime merges them, so this is a shape limit, not a
+	// security one.
+	maxHostWhitelists = 4
 	maxConfigLabel = 64
 	// maxAssets bounds the extra files a package may carry. The voice plugin is
 	// the motivating case: five built-in clips. 32 leaves room for a plugin that
@@ -354,6 +380,9 @@ func (m Manifest) Validate() error {
 	if err := m.validateShareRead(); err != nil {
 		return err
 	}
+	if err := m.validateCalls(); err != nil {
+		return err
+	}
 	if err := m.validateEntry(); err != nil {
 		return err
 	}
@@ -386,8 +415,8 @@ func (m Manifest) Validate() error {
 // that did not mention background operation at all - the user would be
 // authorising something they were never shown.
 //
-// There are three acceptable permissions because there are three ways to be
-// useful with nobody watching, and they are different in kind:
+// There are FOUR acceptable permissions because there are four ways to be useful
+// with nobody watching, and they are different in kind:
 //
 //   - `events` - the host tells the plugin about the pomodoro, the todos and the
 //     reminders. That is what the voice plugin needs.
@@ -402,6 +431,13 @@ func (m Manifest) Validate() error {
 //     `net.ws` would be a lie about the transport. What such a plugin needs from
 //     the host is not a channel, it is the permission to make a request at a time
 //     of its own choosing, which is exactly what net.fetch already is.
+//   - `plugin.call` - a plugin that is ASKED (openspec/changes/plugin-call): its
+//     inbound traffic is another plugin's `call`, and it must be resident or the
+//     caller finds no frame and fails. This is the case the list did not have
+//     until the memory core existed: a persona-and-memory plugin has no host
+//     events to hear, no socket of its own and no polling schedule, so any of the
+//     other three would have been a switch the user is asked about and the plugin
+//     never uses - which is the thing this whole vocabulary refuses.
 //
 // Adding the third one does NOT loosen the rule: a headless frame still requires
 // a permission the user granted in the install dialog, and disabling or
@@ -418,8 +454,9 @@ func (m Manifest) validateBackground() error {
 	if !m.Background {
 		return nil
 	}
-	if !m.HasPermission(PermEvents) && !m.HasPermission(PermNetWS) && !m.HasPermission(PermNetFetch) {
-		return fmt.Errorf("%s 声明了 background 却既未申请 events、net.ws，也未申请 net.fetch 权限：后台帧的用途就是无人看着时收发消息",
+	if !m.HasPermission(PermEvents) && !m.HasPermission(PermNetWS) &&
+		!m.HasPermission(PermNetFetch) && !m.HasPermission(PermPluginCall) {
+		return fmt.Errorf("%s 声明了 background 却既未申请 events、net.ws、net.fetch，也未申请 plugin.call 权限：后台帧的用途就是无人看着时收发消息",
 			ManifestName)
 	}
 	return nil
@@ -515,6 +552,121 @@ func SplitSharedKey(entry string) (owner, name string, ok bool) {
 		return "", "", false
 	}
 	return owner, name, true
+}
+
+// validateCalls checks both halves of the plugin-to-plugin call declarations.
+//
+// The rules mirror validateShareRead's, because they guard the same kind of thing: a
+// promise made in a manifest that the host must be able to hold the plugin to.
+//
+//  1. either list requires plugin.call, or it is a promise nothing backs;
+//  2. every callTargets entry is a "<targetId>/<method>" pair whose halves pass the same
+//     validators ids and method names already pass - a separator or a ".." here would be
+//     a name that means something else;
+//  3. neither list may name the plugin ITSELF. A self-call is not a call, it is a loop
+//     with a hop in it;
+//  4. no duplicates, and no list longer than an install dialog can read out.
+//
+// What is deliberately NOT checked here: whether the target plugin is installed, and
+// whether it really serves that method. Neither is knowable at packaging time - the
+// target may be installed later, or removed - so both are answered at CALL time, where
+// "目标没有声明会回答 X" names the real situation instead of an install-time guess.
+func (m Manifest) validateCalls() error {
+	if len(m.Serves) == 0 && len(m.CallTargets) == 0 {
+		return nil
+	}
+	if !m.HasPermission(PermPluginCall) {
+		return fmt.Errorf("%s 声明了 serves / callTargets 却未申请 %s 权限：插件间调用要有这把开关",
+			ManifestName, PermPluginCall)
+	}
+	if len(m.Serves) > maxCallList {
+		return fmt.Errorf("%s 的 serves 最多 %d 项，收到 %d", ManifestName, maxCallList, len(m.Serves))
+	}
+	served := make(map[string]bool, len(m.Serves))
+	for _, name := range m.Serves {
+		method := strings.TrimSpace(name)
+		if !servedMethodPattern.MatchString(method) {
+			return fmt.Errorf("%s 的 serves 项 %q 不是合法的方法名（%s）",
+				ManifestName, name, servedMethodPattern.String())
+		}
+		if served[method] {
+			return fmt.Errorf("%s 的 serves 有重复项 %q", ManifestName, method)
+		}
+		served[method] = true
+	}
+	if len(m.CallTargets) > maxCallList {
+		return fmt.Errorf("%s 的 callTargets 最多 %d 项，收到 %d", ManifestName, maxCallList, len(m.CallTargets))
+	}
+	seen := make(map[string]bool, len(m.CallTargets))
+	for _, entry := range m.CallTargets {
+		target, method, ok := SplitCallTarget(entry)
+		if !ok {
+			return fmt.Errorf("%s 的 callTargets 项 %q 不是 \"<插件id>/<方法名>\"", ManifestName, entry)
+		}
+		if target == m.ID {
+			return fmt.Errorf("%s 的 callTargets 不该列出自己（那是循环，不是调用）", ManifestName)
+		}
+		key := CallTargetKey(target, method)
+		if seen[key] {
+			return fmt.Errorf("%s 的 callTargets 有重复项 %q", ManifestName, key)
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
+// maxCallList bounds each half of the call declarations. Same reasoning as maxShareRead:
+// eight still reads like a list of questions a plugin asks, and a longer one is a policy
+// the dialog cannot honestly summarise.
+const maxCallList = 8
+
+// servedMethodPattern is the shape of one name in `serves`.
+//
+// Dots are allowed (unlike configKeyPattern) because a served method is a NAME the plugin
+// author invents for its own protocol - "chat", "memory.get" - and forbidding the dot
+// would push authors towards underscores for no benefit. It is not a path: the name never
+// reaches the filesystem.
+var servedMethodPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
+
+// CallTargetKey renders the canonical "<targetId>/<method>" form.
+func CallTargetKey(target, method string) string { return target + "/" + method }
+
+// SplitCallTarget parses "<targetId>/<method>", validating BOTH halves.
+func SplitCallTarget(entry string) (target, method string, ok bool) {
+	parts := strings.Split(strings.TrimSpace(entry), "/")
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	target = strings.TrimSpace(parts[0])
+	method = strings.TrimSpace(parts[1])
+	if !IsValidID(target) || !servedMethodPattern.MatchString(method) {
+		return "", "", false
+	}
+	return target, method, true
+}
+
+// DeclaredCall reports whether the manifest listed target/method in callTargets.
+//
+// Exact match only, for the reason DeclaredShareRead gives: a prefix rule here is how an
+// allow-list quietly becomes "everything another plugin does".
+func DeclaredCall(declared []string, target, method string) bool {
+	want := CallTargetKey(target, method)
+	for _, entry := range declared {
+		if strings.TrimSpace(entry) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// ServesMethod reports whether the manifest promised to answer method.
+func ServesMethod(serves []string, method string) bool {
+	for _, name := range serves {
+		if strings.TrimSpace(name) == method {
+			return true
+		}
+	}
+	return false
 }
 
 // validateShareLLM keeps the lending flag attached to a capability that can
@@ -632,8 +784,10 @@ func (m Manifest) validateConfig() error {
 			whitelists++
 		}
 	}
-	if whitelists > 1 {
-		return fmt.Errorf("%s 字段 config 至多允许一个 hostWhitelist 项，收到 %d 个", ManifestName, whitelists)
+	// 多于一个是可以的：ConfigHosts 会把每个带这个标记的项的值都并进白名单，而"接口域名"
+	// 与"图片域名"本来就该是两个字段（一个填 URL、一个填域名），挤在一个框里只能填错。
+	if whitelists > maxHostWhitelists {
+		return fmt.Errorf("%s 字段 config 最多允许 %d 个 hostWhitelist 项，收到 %d 个", ManifestName, maxHostWhitelists, whitelists)
 	}
 	return nil
 }

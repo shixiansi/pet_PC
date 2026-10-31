@@ -1028,11 +1028,11 @@ check(
   'the plugin has no way to store or play the audio it renders',
 );
 check(
-  'the permission vocabulary is the expected thirteen, and by `net.ws` + `llm.borrow` + `process` + `net.credentials` + `plugin.share`',
+  'the permission vocabulary is the expected fourteen, and by `net.ws` + `llm.borrow` + `process` + `net.credentials` + `plugin.share` + `plugin.call`',
   // The count is asserted so that adding a permission is a VISIBLE two-place edit here,
   // and so that the "no background permission" decision cannot be quietly undone.
   //
-  // Thirteen, not fourteen: a headless frame is a manifest FIELD gated on an existing
+  // Fourteen, not fifteen: a headless frame is a manifest FIELD gated on an existing
   // permission (`events` for host events, `net.ws` for a socket a plugin holds open,
   // `net.fetch` for a polling plugin) rather than a permission of its own. A permission
   // with no method behind it would be a switch the user is asked about that does
@@ -1040,19 +1040,22 @@ check(
   // enforces. The negative assertions below are the same decision stated from the other
   // side.
   //
-  // The five additions each have a METHOD behind them: `net.ws` gates ws.open/send/close/
+  // The six additions each have a METHOD behind them: `net.ws` gates ws.open/send/close/
   // state, `llm.borrow` gates llm.profile (which is what tells a plugin's own UI where
   // its model settings come from), `process` gates process.launch (which starts one
   // .exe the user typed the path of, and does not wait for it), `net.credentials` is
   // the SECOND gate of net.fetch (recorded in that entry's `also`, which the pet's
-  // completeness test counts), and `plugin.share` gates share.set/get/remove - the tray
-  // two plugins use to hand each other a job without either one calling the other.
+  // completeness test counts), `plugin.share` gates share.set/get/remove - the tray
+  // two plugins use to hand each other a job without either one calling the other - and
+  // `plugin.call` gates plugin.call, the primitive that lets one plugin ASK another and
+  // get its answer back (the tray has no push and no answer, so it could never serve a
+  // conversation turn).
   //
   // Fifteen rather than seventeen because `timer.read` and `timer.control` retired with
   // timer.state/start/pause/resume/stop: the pomodoro plugin keeps its own state machine
   // and records now, so the host has no plugin-facing timer left to watch or to drive.
   //
-  // Thirteen rather than fifteen because `todos.read` / `todos.write` retired with the
+  // Fourteen rather than fifteen because `todos.read` / `todos.write` retired with the
   // five `todos.*` methods: the list is the todo plugin's own storage, the pomodoro reads
   // the snapshot published through `plugin.share`, and the chat plugin's three todo tools
   // were deleted rather than re-pointed. The four retired words are asserted ABSENT - the
@@ -1060,14 +1063,15 @@ check(
   (() => {
     const list = capsGo.slice(capsGo.indexOf('var AllowedPermissions'), capsGo.indexOf('func IsAllowedPermission'));
     const entries = [...list.matchAll(/Perm[A-Za-z]+,/g)];
-    return entries.length === 13 && /PermAudio,/.test(list) && /PermNetWS,/.test(list) &&
+    return entries.length === 14 && /PermAudio,/.test(list) && /PermNetWS,/.test(list) &&
       /PermLLMBorrow,/.test(list) && /PermProcess,/.test(list) &&
       /PermNetCredentials,/.test(list) && /PermPluginShare,/.test(list) &&
+      /PermPluginCall,/.test(list) &&
       !/PermTimer(Read|Control)/.test(capsGo) &&
       !/PermTodos(Read|Write)/.test(capsGo) &&
       !/PermBackground/.test(capsGo);
   })(),
-  'the permission vocabulary is not the expected thirteen entries (net.ws + llm.borrow + process + net.credentials + plugin.share appended, timer.read/timer.control and todos.read/todos.write retired, background deliberately not)',
+  'the permission vocabulary is not the expected fourteen entries (net.ws + llm.borrow + process + net.credentials + plugin.share + plugin.call appended, timer.read/timer.control and todos.read/todos.write retired, background deliberately not)',
 );
 check(
   'net.credentials is only ever declared together with net.fetch',
@@ -1213,10 +1217,17 @@ check(
   // plugins that need one act exactly when no interface IS open (the voice plugin hears
   // the pomodoro end; the chat bridge keeps a socket's frames flowing). The permission
   // pairing is what keeps the user shown what they are authorising.
+  //
+  // The four permissions are asserted ON BOTH LISTS, because they are two copies of one
+  // rule and the second one was forgotten once: the Go validator learned `plugin.call`
+  // (a plugin that is ASKED needs a frame to answer from) while the page kept the old
+  // three, so the memory core never got a frame and every call reported "它此刻没有常驻帧".
   /openBackground/.test(goPluginHostJs) &&
     /backgroundFrame/.test(goPluginHostJs) &&
     /background/.test(fs.readFileSync(path.join(root, 'internal/plugins/manifest.go'), 'utf8')) &&
-    /PermEvents/.test(goAppPlugins) && /PermNetWS/.test(goAppPlugins),
+    /PermEvents/.test(goAppPlugins) && /PermNetWS/.test(goAppPlugins) &&
+    /plugin\.call/.test(mainJs) &&
+    /granted\.includes\('plugin\.call'\)/.test(mainJs),
   'a plugin cannot receive events while no interface is open',
 );
 check(

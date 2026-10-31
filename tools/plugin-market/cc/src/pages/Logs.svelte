@@ -192,7 +192,6 @@
   .field { display: flex; flex-direction: column; gap: var(--space-1); }
   .field > span { color: var(--text-dim); font-size: 12px; }
   .field.grow { flex: 1 1 220px; }
-  select,
   input[type='search'] {
     background: var(--bg-sunken);
     border: 1px solid var(--line);
@@ -200,6 +199,27 @@
     color: var(--text);
     font: inherit;
     padding: var(--space-1) var(--space-2);
+  }
+
+  /* select 与搜索框分开写：箭头只属于下拉框，搜索框带一个 V 会很怪。
+     原生箭头被 appearance:none 拿掉了，得自己画（跟着 --text-dim 变色）。 */
+  select {
+    appearance: none;
+    background: var(--bg-sunken);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font: inherit;
+    padding: var(--space-1) var(--space-5) var(--space-1) var(--space-2);
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+      linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+    background-position:
+      calc(100% - 14px) calc(50% + 1px),
+      calc(100% - 10px) calc(50% + 1px);
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    cursor: pointer;
   }
   .switch {
     display: flex;

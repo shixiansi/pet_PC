@@ -1208,6 +1208,22 @@
     padding: var(--space-1) var(--space-2);
     min-width: 0;
   }
+
+  /* 原生箭头被 appearance:none 拿掉了，得自己画——否则它是一个没有箭头的方框。
+     两条 45° 渐变拼成 V，跟着 --text-dim 变色，深浅主题不用两份。
+     必须写在 background 简写之后：简写会把 background-image 重置掉。 */
+  .field select {
+    padding-right: var(--space-5);
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+      linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+    background-position:
+      calc(100% - 14px) calc(50% + 1px),
+      calc(100% - 10px) calc(50% + 1px);
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    cursor: pointer;
+  }
   .field input[type='checkbox'] { align-self: flex-start; }
   .field-note { color: var(--text-dim); font-size: 11px; line-height: 1.5; }
   .checks { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); }

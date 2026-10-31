@@ -825,6 +825,14 @@ function renderBackgroundPlugins() {
  * thing under test: a duplicated predicate is a predicate that can drift, and the
  * drift would show up as a frame that mounts for a plugin the panel says is not
  * eligible.
+ *
+ * THE LIST MUST MATCH internal/plugins/manifest.go's validateBackground, and it did not:
+ * `plugin.call` was added there (a plugin that is ASKED by another plugin has no host
+ * events, no socket of its own and no polling schedule), and this copy kept the old
+ * three. The symptom on a real machine: `plugin.call ok` in the log — the gate said yes —
+ * and then "问不到 … 它此刻没有常驻帧", because no frame had ever been mounted for the
+ * memory core. Two lists, one truth: change both, and the check in
+ * .dev/check-frontend.cjs asserts this one names all four.
  */
 function backgroundPlugins() {
   return (installedPlugins || []).filter((p) => {
@@ -832,7 +840,8 @@ function backgroundPlugins() {
     if (!Array.isArray(p.granted)) return false;
     return p.granted.includes('events') ||
       p.granted.includes('net.ws') ||
-      p.granted.includes('net.fetch');
+      p.granted.includes('net.fetch') ||
+      p.granted.includes('plugin.call');
   });
 }
 

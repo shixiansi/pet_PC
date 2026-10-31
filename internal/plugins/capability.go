@@ -5,15 +5,16 @@ import (
 	"strings"
 )
 
-// The fifteen permissions, fixed. A plugin can ask for nothing else, and the
+// The fourteen permissions, fixed. A plugin can ask for nothing else, and the
 // dispatcher refuses any call whose permission the user has not granted.
 //
 // The count is deliberately NOT asserted by this comment alone: manifest_test.go's
-// TestAllowedPermissionsIsTheThirteen pins the exact list, and app_plugins_test.go's
+// TestAllowedPermissionsIsTheFourteen pins the exact list, and app_plugins_test.go's
 // TestCapabilityTableIsComplete requires every permission here to be used by at
 // least one method. A permission with no method behind it would be a switch the user
 // is asked about that does nothing - which is why there is no separate `background`
-// permission (a headless frame is gated on `events`; see validateBackground).
+// permission (a headless frame is gated on `events` / `net.ws` / `net.fetch` / `plugin.call`; see
+// validateBackground).
 const (
 	// PermBubble lets a plugin make the pet say a line in a bubble.
 	PermBubble = "pet.bubble"
@@ -86,6 +87,14 @@ const (
 	// consuming a credential the user entered for a different plugin: that is a
 	// cross-plugin read, and the install dialog has to be able to say so. The
 	// key itself never reaches the borrower - only the host uses it.
+	//
+	// It gates TWO methods, which answer two different questions: `llm.profile` says
+	// "which settings would I use right now" (one), `llm.providers` says "which channels
+	// exist, and which is the default" (a list - still without endpoints or keys). It is
+	// also what authorises `llm.chat`'s `provider` field, which NAMES one of those
+	// channels: choosing which of the user's configured endpoints to spend is a routing
+	// decision INSIDE this consent, not a wider one, so it needs no permission of its own
+	// (openspec/changes/llm-channels).
 	PermLLMBorrow = "llm.borrow"
 	// PermProcess lets a plugin START A PROGRAM ON THIS MACHINE: `process.launch`
 	// takes an absolute path to an .exe and an optional argument list, starts it and
@@ -141,6 +150,29 @@ const (
 	// Values are bounded (64 KiB, 32 keys) and carry their write time, so a consumer can
 	// ignore stale work instead of acting on a job from three days ago.
 	PermPluginShare = "plugin.share"
+	// PermPluginCall lets a plugin ASK ANOTHER PLUGIN A QUESTION and get its answer
+	// back, through one `plugin.call` (openspec/changes/plugin-call).
+	//
+	// It is the answer to a shape the tray cannot serve. `plugin.share` has no push and
+	// no subscription: a consumer polls, so "one plugin asks another and waits" costs two
+	// polls per exchange, carries a mailbox of exactly one key, and has no acknowledgement
+	// to distinguish "still thinking" from "never arrived". The one bridge the repo
+	// already has (the QQ plugin draining bilibili's results on a 2s timer) is the proof:
+	// it works for jobs, and it is the wrong thing for a conversation turn.
+	//
+	// BOTH SIDES HOLD THIS PERMISSION, and that is the design rather than an oversight:
+	// the caller must list the exact "<targetId>/<method>" pairs it may call
+	// (`callTargets`), and the callee must list the method names it answers (`serves`),
+	// so one switch means "takes part in plugin-to-plugin calls" and the two manifest
+	// lists - both shown in the install dialog - say which. A second permission for the
+	// serving half would be a switch with no method behind it, which is exactly what the
+	// permission list below refuses to contain.
+	//
+	// A CALL TRANSFERS NO PERMISSIONS. The callee runs with its OWN granted set, so a
+	// caller cannot make it do what it may not do, and the caller receives only what the
+	// callee chose to return. That is why this needs no per-capability allow-list beyond
+	// the two manifest lists.
+	PermPluginCall = "plugin.call"
 )
 
 // AllowedPermissions is the complete permission vocabulary, in the order the
@@ -174,6 +206,7 @@ var AllowedPermissions = []string{
 	PermLLMBorrow,
 	PermProcess,
 	PermPluginShare,
+	PermPluginCall,
 }
 
 // IsAllowedPermission reports whether name is one of the permitted set.
@@ -191,7 +224,7 @@ func IsAllowedPermission(name string) bool {
 // "todos.read".
 var PermissionLabels = map[string]string{
 	PermBubble:         "让桌宠弹出一句话的气泡",
-	PermEvents:         "订阅待办与番茄钟的变化事件（关闭界面后也会送达）",
+	PermEvents:         "订阅宿主的状态变化事件（提醒触发、计时阶段结束、配置变更）",
 	PermNetFetch:       "访问网络（仅限插件声明的域名）",
 	PermNetCredentials: "以你保存的网站登录凭据发请求（凭据本身不会显示给插件）",
 	PermStorage:        "在自己的私有目录里保存数据",
@@ -203,6 +236,7 @@ var PermissionLabels = map[string]string{
 	PermLLMBorrow:      "使用其它插件已配置的大模型与密钥（密钥不会显示给你）",
 	PermProcess:        "启动本机程序",
 	PermPluginShare:    "与其它插件交换消息（只能读清单里点名的键，只能写自己名下的键）",
+	PermPluginCall:     "与其它插件互相调用（只能调用清单里点名的目标，也只能回答清单里声明的方法）",
 }
 
 // sortedPermissions returns a copy of names sorted, for stable comparisons and

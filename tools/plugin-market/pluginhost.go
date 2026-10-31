@@ -136,6 +136,11 @@ func (m *Market) marketRegistry() *plugins.Registry {
 	plugins.RegisterShare(r, gateAdapter{m.manager})
 	r.Register("config.get", plugins.Method{Perm: plugins.PermPluginConfig, Run: marketConfigGet})
 	r.Register("config.set", plugins.Method{Perm: plugins.PermPluginConfig, Run: marketConfigSet})
+	// The channel plugin's editor lives on this program's 插件 page, so the table's two
+	// methods have to be served here as well - they are the plugin's OWN settings file plus
+	// DPAPI-encrypted keys, with no model call and no pet window involved. Same shared
+	// implementation the pet uses (internal/plugins/llmchannels.go).
+	plugins.RegisterChannels(r, gateAdapter{m.manager}, m.keeper)
 
 	// Talking to a synthesis engine the user is running.
 	r.Register("net.fetch", plugins.Method{Perm: plugins.PermNetFetch, Run: marketNetFetch})

@@ -68,7 +68,7 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 这就是「你拒绝了这项权限」能成立的原因，而不是一句事后打印的话。
 
 - 权限词表：[internal/plugins/capability.go](internal/plugins/capability.go) 的
-  `AllowedPermissions`，**现在 13 项**，顺序就是安装对话框的绘制顺序。
+  `AllowedPermissions`，**现在 14 项**，顺序就是安装对话框的绘制顺序。
 - **加一项权限要同步七处**（`timer.control` 那次实测就是七处，漏一处就红）：
   1. `capability.go` 的常量——注释里写清它 gates 什么、**不** gates 什么
   2. `AllowedPermissions`（顺序就是安装对话框的绘制顺序）
@@ -84,9 +84,9 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 
   外加 README 的权限表和标题里的数字。第 6、7 处是这一路最容易漏的：它们不在
   `internal/plugins` 里，改完 Go 侧全绿，静态接线检查才红。
-  故意没有 `background` 权限——常驻帧由 `events` / `net.ws` / `net.fetch` 门控。
+  故意没有 `background` 权限——常驻帧由 `events` / `net.ws` / `net.fetch` / `plugin.call` 门控。
 - 没有方法支撑的权限是一个"用户被问了一个什么也不做的开关"，
-  `TestCapabilityTableIsComplete` 和 `TestAllowedPermissionsIsTheThirteen` 就是拦它的。
+  `TestCapabilityTableIsComplete` 和 `TestAllowedPermissionsIsTheFourteen` 就是拦它的。
 - **退休一项权限走的是同一张清单的镜像**：删常量、删 `AllowedPermissions`、
   删 `PermissionLabels`、删或改注册它的方法（否则 `TestCapabilityTableIsComplete` 红）、
   改 `manifest_test.go` 的 `want` 与测试名、改 `.dev/check-frontend.cjs` 的期望词表、
@@ -168,7 +168,7 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 复现不出来**：Wails 的绑定返回**纯 JSON**（会被代理），而 dev 桩里的行是 `createFrom`
 建的**类实例**（Svelte 不代理类实例）——桩必须摊平成纯数据，否则它和真宿主不是同一个世界。
 
-**两个宿主各服务哪些方法，以及文档靠什么知道自己在哪。** 桌宠服务全部 13 项权限；控制中心
+**两个宿主各服务哪些方法，以及文档靠什么知道自己在哪。** 桌宠服务全部 14 项权限；控制中心
 服务 `storage.*` / `config.*` / `audio.*` / `net.fetch` / **`plugin.share.*`**，不服务
 `bubble.say` / `surface.*` / `llm.chat` / `events.subscribe` / `todos.*` / `timer.*`——那些要的
 是宠物窗口、宠物的计时器、宠物的模型预算。**别再把"挂不了"当成解法**：这三个插件的界面
@@ -192,7 +192,7 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 | 文件 | 是什么 |
 | --- | --- |
 | `plugin-check.mjs` | 四组静态/协议检查（jsdom）。CI 与作者都用它 |
-| `fake-host.mjs` | **假宿主**：协议、13 项权限表、35 个方法表、结果表。上面那个与下面的预览页共用这一份——两套假宿主必然分叉，而分叉的假宿主比没有更坏 |
+| `fake-host.mjs` | **假宿主**：协议、14 项权限表、41 个方法表、结果表。上面那个与下面的预览页共用这一份——两套假宿主必然分叉，而分叉的假宿主比没有更坏 |
 | `preview.mjs` / `preview.html` | **排版预览器**：把 entry 装进声明的矩形，用系统 Edge/Chrome 无头跑，`--check` 越界就 FAIL、`--shot` 出图、`--state gate` 直达「等你回答」那一屏、`--click "#ask-ok"` 点一下再截。清单声明 `background` 时**连隐藏的常驻帧一起挂**——插件的行为有一半住在那儿，只挂一个帧会让"点了没反应"变成工具看不见的事 |
 
 **预览器的定位是开发工具，不是门禁**：它需要一台装着 Edge/Chrome 的机器，而且它服务的对象是
@@ -205,7 +205,7 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 根目录的 `docs/plugin-dev.md` 只是一句指针，谁想"顺手复制一份过来"就是又开了一个腐坏源。
 
 手册是写给别人（以及别人的模型）看的自包含说明：manifest 字段与校验、桥的每条消息、
-13 项权限与 35 个方法的 payload/返回/上限、几何与主题、打包与发布。所以：**改动 manifest 的
+14 项权限与 41 个方法的 payload/返回/上限、几何与主题、打包与发布。所以：**改动 manifest 的
 字段或规则、桥的消息、任何能力方法的签名或上限、退休一个接口，都要同时改插件仓里那份手册和
 工具里那张方法表**。退休一个接口时**从文档里删干净**，不要留一张"已退休接口"的表：那份文档的
 读者是没看过旧资料的人（以及模型），死名字只会被当成真 API 记住——这条是用户当场指出来的，

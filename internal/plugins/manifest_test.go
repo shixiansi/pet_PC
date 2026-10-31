@@ -153,7 +153,7 @@ func TestManifestVersionFormat(t *testing.T) {
 	}
 }
 
-// TestAllowedPermissionsIsTheSeventeen pins the vocabulary itself. The dispatcher's
+// TestAllowedPermissionsIsTheFourteen pins the vocabulary itself. The dispatcher's
 // completeness check compares against this list, so a permission added or lost
 // here would silently change what users are asked about.
 //
@@ -184,11 +184,18 @@ func TestManifestVersionFormat(t *testing.T) {
 // `plugin.share`, and the chat plugin's three todo tools were deleted rather than
 // re-pointed (the model chats; the list is edited where it lives). A permission with no
 // method behind it is the "switch that does nothing" this list exists to forbid.
-func TestAllowedPermissionsIsTheThirteen(t *testing.T) {
+//
+// Back up to FOURTEEN with `plugin.call`: the tray publishes a job, but it has no push and
+// no answer, so "one plugin asks another and waits for the reply" had no primitive at all.
+// The method behind it is `plugin.call` itself, and BOTH ends hold the switch - the caller
+// names the exact "<targetId>/<method>" pairs it may call, the callee names the methods it
+// answers (openspec/changes/plugin-call).
+func TestAllowedPermissionsIsTheFourteen(t *testing.T) {
 	want := []string{
 		"pet.bubble",
 		"events", "net.fetch", "net.credentials", "storage", "pet.surface", "llm.chat",
 		"plugin.config", "audio", "net.ws", "llm.borrow", "process", "plugin.share",
+		"plugin.call",
 	}
 	if len(AllowedPermissions) != len(want) {
 		t.Fatalf("AllowedPermissions has %d entries, want %d", len(AllowedPermissions), len(want))
@@ -460,6 +467,23 @@ func TestManifestBackground(t *testing.T) {
 		t.Fatal("background was not preserved for a polling plugin")
 	}
 
+	// The fourth honest declaration: a plugin that is ASKED. Its inbound traffic is
+	// another plugin's `call`, so being resident is what makes it answerable at all -
+	// and it has no host events, no socket of its own and no polling schedule, which is
+	// why the other three would each be a switch the user grants and the plugin never
+	// reads. This is the case the plugin.call primitive created (the memory core).
+	asked, err := ParseManifest(manifestJSON(t, map[string]any{
+		"permissions": []string{"plugin.call"},
+		"serves":      []string{"chat"},
+		"background":  true,
+	}))
+	if err != nil {
+		t.Fatalf("background with plugin.call must parse: %v", err)
+	}
+	if !asked.Background {
+		t.Fatal("background was not preserved for a plugin that is called")
+	}
+
 	// Absent by default, so every existing manifest is unaffected.
 	plain, err := ParseManifest(manifestJSON(t, map[string]any{
 		"permissions": []string{"events"},
@@ -478,12 +502,12 @@ func TestManifestBackground(t *testing.T) {
 		"background":  true,
 	}))
 	if err == nil {
-		t.Fatal("background without events, net.ws or net.fetch must be rejected")
+		t.Fatal("background without events, net.ws, net.fetch or plugin.call must be rejected")
 	}
 	if !strings.Contains(err.Error(), "background") ||
 		!strings.Contains(err.Error(), "events") || !strings.Contains(err.Error(), "net.ws") ||
-		!strings.Contains(err.Error(), "net.fetch") {
-		t.Fatalf("error %q must name background, events, net.ws and net.fetch", err)
+		!strings.Contains(err.Error(), "net.fetch") || !strings.Contains(err.Error(), "plugin.call") {
+		t.Fatalf("error %q must name background, events, net.ws, net.fetch and plugin.call", err)
 	}
 
 	// A background-only plugin is LEGAL, and that matters: its interface is hosted
@@ -581,6 +605,83 @@ func TestManifestShareRead(t *testing.T) {
 		"shareRead":   []string{"com.example.plugin/jobs"},
 	})); err == nil {
 		t.Fatal("a manifest must not list itself in shareRead")
+	}
+}
+
+// TestManifestCallDeclarations covers both halves of plugin.call: what a plugin promises to
+// answer (`serves`) and what it may ask (`callTargets`).
+//
+// Every rule here is the same rule shareRead has, for the same reason - a manifest is what
+// the install dialog reads out loud, so a half-written declaration is a promise nobody can
+// hold the plugin to. The extra case that is NOT like shareRead is the self-call: a plugin
+// that lists itself is a loop with a hop in it, not a question.
+func TestManifestCallDeclarations(t *testing.T) {
+	// Both halves declared with the permission: legal.
+	if _, err := ParseManifest(manifestJSON(t, map[string]any{
+		"permissions": []string{"plugin.call"},
+		"serves":      []string{"chat", "memory.get"},
+		"callTargets": []string{"com.example.core/chat"},
+	})); err != nil {
+		t.Fatalf("serves + callTargets with plugin.call must parse: %v", err)
+	}
+	// Either half without the permission is a promise nothing enforces.
+	for _, field := range []string{"serves", "callTargets"} {
+		decl := map[string]any{"permissions": []string{"storage"}}
+		if field == "serves" {
+			decl["serves"] = []string{"chat"}
+		} else {
+			decl["callTargets"] = []string{"com.example.core/chat"}
+		}
+		_, err := ParseManifest(manifestJSON(t, decl))
+		if err == nil {
+			t.Fatalf("%s without plugin.call must be refused", field)
+		}
+		if !strings.Contains(err.Error(), "plugin.call") {
+			t.Fatalf("%s error %q must name the permission", field, err)
+		}
+	}
+	// A served name is a name, not a path and not a pair.
+	for _, bad := range []string{"", "chat/1", "../etc", "a b", "chat:1"} {
+		if _, err := ParseManifest(manifestJSON(t, map[string]any{
+			"permissions": []string{"plugin.call"},
+			"serves":      []string{bad},
+		})); err == nil {
+			t.Fatalf("serves entry %q must be refused", bad)
+		}
+	}
+	// A target is "<id>/<method>", exactly two halves, both valid.
+	for _, bad := range []string{"com.example.core", "com.example.core/", "/chat", "a/b/c", "../etc/passwd"} {
+		if _, err := ParseManifest(manifestJSON(t, map[string]any{
+			"permissions": []string{"plugin.call"},
+			"callTargets": []string{bad},
+		})); err == nil {
+			t.Fatalf("callTargets entry %q must be refused", bad)
+		}
+	}
+	// Calling yourself is a loop, not a call.
+	if _, err := ParseManifest(manifestJSON(t, map[string]any{
+		"permissions": []string{"plugin.call"},
+		"callTargets": []string{"com.example.plugin/chat"},
+	})); err == nil {
+		t.Fatal("a manifest must not list itself in callTargets")
+	}
+	// Duplicates are refused on both sides.
+	if _, err := ParseManifest(manifestJSON(t, map[string]any{
+		"permissions": []string{"plugin.call"},
+		"serves":      []string{"chat", "chat"},
+	})); err == nil {
+		t.Fatal("duplicate serves entries must be refused")
+	}
+	// Both lists are bounded so the dialog still reads like a list.
+	long := make([]string, 0, maxCallList+1)
+	for i := 0; i <= maxCallList; i++ {
+		long = append(long, fmt.Sprintf("m%d", i))
+	}
+	if _, err := ParseManifest(manifestJSON(t, map[string]any{
+		"permissions": []string{"plugin.call"},
+		"serves":      long,
+	})); err == nil {
+		t.Fatalf("more than %d serves entries must be refused", maxCallList)
 	}
 }
 
@@ -916,8 +1017,9 @@ func TestManifestConfigDuplicatesAndLimit(t *testing.T) {
 	}
 }
 
-// TestManifestConfigHostWhitelist covers T29: at most one hostWhitelist item,
-// and it does NOT require the plugin to declare net.fetch.
+// TestManifestConfigHostWhitelist covers T29: a few hostWhitelist items are accepted
+// and MERGED, more than the cap is rejected, and it does NOT require the plugin to
+// declare net.fetch.
 func TestManifestConfigHostWhitelist(t *testing.T) {
 	// One hostWhitelist item with no net.fetch at all is accepted: whether the
 	// list is consulted is a property of the calling path, not of the manifest.
@@ -933,17 +1035,48 @@ func TestManifestConfigHostWhitelist(t *testing.T) {
 		t.Fatalf("hostWhitelist not preserved: %+v", m.Config)
 	}
 
-	_, err = ParseManifest(manifestJSON(t, map[string]any{
+	// Two are allowed: "the API's host" and "where my images live" are different fields,
+	// and one box cannot hold a URL and a bare host at the same time.
+	two, err := ParseManifest(manifestJSON(t, map[string]any{
 		"config": configItems(
-			map[string]any{"key": "a", "label": "标签", "type": "text", "hostWhitelist": true},
-			map[string]any{"key": "b", "label": "标签", "type": "text", "hostWhitelist": true},
+			map[string]any{"key": "llmBaseUrl", "label": "接口地址", "type": "text", "hostWhitelist": true},
+			map[string]any{"key": "llmImageHosts", "label": "图片域名", "type": "text", "hostWhitelist": true},
 		),
 	}))
-	if err == nil {
-		t.Fatal("two hostWhitelist items must be rejected")
+	if err != nil {
+		t.Fatalf("two hostWhitelist items must be accepted: %v", err)
 	}
-	if !strings.Contains(err.Error(), "hostWhitelist") || !strings.Contains(err.Error(), "至多") {
-		t.Fatalf("error %q must name hostWhitelist and 至多", err)
+	// And both are consulted: ConfigHosts merges every flagged item.
+	values := map[string]string{
+		"llmBaseUrl":    "https://api.example.com/v1",
+		"llmImageHosts": "cdn.example.net, img.example.org",
+	}
+	hosts := ConfigHosts(two, values)
+	for _, want := range []string{"api.example.com", "cdn.example.net", "img.example.org"} {
+		found := false
+		for _, host := range hosts {
+			if host == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("ConfigHosts dropped %q from %v", want, hosts)
+		}
+	}
+
+	// More than the cap is still refused, with a message that names the flag.
+	tooMany := make([]map[string]any, 0, maxHostWhitelists+1)
+	for i := 0; i <= maxHostWhitelists; i++ {
+		tooMany = append(tooMany, map[string]any{
+			"key": "h" + string(rune('a'+i)), "label": "标签", "type": "text", "hostWhitelist": true,
+		})
+	}
+	_, err = ParseManifest(manifestJSON(t, map[string]any{"config": configItems(tooMany...)}))
+	if err == nil {
+		t.Fatalf("%d hostWhitelist items must be rejected", len(tooMany))
+	}
+	if !strings.Contains(err.Error(), "hostWhitelist") || !strings.Contains(err.Error(), "最多") {
+		t.Fatalf("error %q must name hostWhitelist and 最多", err)
 	}
 }
 
