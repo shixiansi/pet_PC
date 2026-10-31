@@ -230,12 +230,20 @@ DPAPI（[internal/desktop/crypto_windows.go](internal/desktop/crypto_windows.go)
 插件只拿到 `{set, mask}`；`llm.borrow` 借的是"用别人的配置发请求"，密钥本身
 也不会交给借入方。
 
-### 3.7 内置 sample 包的字节必须和市场一致
+### 3.7 内置 sample 包的字节必须和市场一致（而它是市场的**子集**，不是副本）
 
-`internal/plugins/sample/*.zip` 是离线兜底源，`.gitattributes` 把这些 zip 标成
-`binary` 就是为了保住摘要（`core.autocrlf` 会改写文本型 zip 的字节）。
-**不要用文本工具编辑它们**；两处字节不同时，`TestBuiltinSampleAgreesWithTheMarketCatalogue`
-会红——它是真失败，不是噪音。
+`internal/plugins/sample/*.zip` 是离线兜底源，`.gitattributes` 把这些 zip 标成 `binary` 就是为了
+保住摘要（`core.autocrlf` 会改写文本型 zip 的字节）。**不要用文本工具编辑它们。**
+
+两条规矩，各有守门的测试：
+
+1. **同一版本的字节必须一致**：sample 里的 `<id>-<ver>.zip` 与 `market/dist/` 里的同名文件逐字节
+   相同——`TestBuiltinSampleMatchesIndex` 对**每一条**都查（它曾经只看第一条，于是九个包悄悄漂了；
+   漂了就用 `market/dist` 那份覆盖，并同步 `sample/index.json` 的 `sha256`）。
+2. **sample 是市场的子集**：`market/index.json` 每个插件只留最新一条，而 sample 是"上次打包留下的
+   那一份"，**故意更旧**。所以 `TestBuiltinSampleAgreesWithTheMarketCatalogue` 只要求"sample 里的
+   每个插件市场还认"，不比条数也不比版本（2026-11-01 之前它要求两边条数相等，于是市场长到 36 个
+   之后天天红，红得没人看）。
 
 ### 3.8 日志：一直在写、有等级、没有正文
 

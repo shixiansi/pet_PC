@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -350,106 +349,95 @@ func TestBuiltinSampleMatchesIndex(t *testing.T) {
 				entry.ID, got, entry.SHA256)
 		}
 	}
-	entry := doc.Plugins[0]
-
-	// The download is a path relative to the market root ("dist/<name>.zip");
-	// the embedded copy is flat, so the archive is named by its last segment.
-	zipName := filepath.Base(strings.ReplaceAll(entry.Download, "\\", "/"))
-	zipBytes, err := readSample(zipName)
-	if err != nil {
-		t.Fatalf("read the embedded package %s: %v", zipName, err)
-	}
-	sum := sha256.Sum256(zipBytes)
-	got := hex.EncodeToString(sum[:])
-	if got != entry.SHA256 {
-		t.Fatalf("the embedded package does not match the catalogue:\n  computed %s\n  indexed  %s", got, entry.SHA256)
-	}
-
-	// When the market repository's working copy is present, the two copies must
-	// be the same bytes. It is absent in a plain checkout of this repo alone
-	// (market/ is a separate repository), so that half is SKIPPED rather than
-	// failed - the assertion above is the always-verifiable one.
-	marketZip := filepath.Join("..", "..", "market", "dist", zipName)
-	if _, err := os.Stat(marketZip); err != nil {
-		t.Logf("SKIP: %s is not present (the market repo is a separate checkout)", marketZip)
-		return
-	}
-	marketBytes, err := os.ReadFile(marketZip)
-	if err != nil {
-		t.Fatalf("read %s: %v", marketZip, err)
-	}
-	marketSum := sha256.Sum256(marketBytes)
-	if hex.EncodeToString(marketSum[:]) != got {
-		t.Fatalf("the market copy and the embedded copy differ:\n  market   %s\n  embedded %s",
-			hex.EncodeToString(marketSum[:]), got)
+	// The market comparison covers EVERY entry, not just the first.
+	//
+	// It used to compare doc.Plugins[0] alone, which is how nine of the ten sample packages
+	// drifted from the market's copies without this test saying anything: the one it looked at
+	// happened to match, or the failure named a plugin nobody suspected. One loop, every entry.
+	//
+	// When the market repository's working copy is present, the two copies must be the same
+	// bytes (AGENTS.md §3.7: the offline fallback and the market artefact cannot diverge). It is
+	// absent in a plain checkout of this repo alone (market/ is a separate repository), so that
+	// half is SKIPPED rather than failed - the digest check above is the always-verifiable one.
+	for _, entry := range doc.Plugins {
+		zipName := filepath.Base(strings.ReplaceAll(entry.Download, "\\", "/"))
+		marketZip := filepath.Join("..", "..", "market", "dist", zipName)
+		marketBytes, err := os.ReadFile(marketZip)
+		if err != nil {
+			t.Logf("SKIP %s: %v", zipName, err)
+			continue
+		}
+		marketSum := sha256.Sum256(marketBytes)
+		if hex.EncodeToString(marketSum[:]) != entry.SHA256 {
+			t.Fatalf("%s: the market copy and the embedded copy differ:\n  market   %s\n  embedded %s",
+				entry.ID, hex.EncodeToString(marketSum[:]), entry.SHA256)
+		}
 	}
 }
 
-// TestBuiltinSampleAgreesWithTheMarketCatalogue covers T71: the two catalogues
-// describe the same package, field by field.
+// TestBuiltinSampleAgreesWithTheMarketCatalogue covers T71: the sample is a SUBSET of the
+// market, and it says so.
 //
-// The digest check above proves the BYTES agree; this one proves the two files
-// that name them agree, which is the half that can drift silently. A version bump
-// that repackaged the zip but left the market's index.json pointing at the old
-// name would ship a catalogue whose download 404s - and the embedded copy would
-// still be self-consistent, so nothing else would notice.
+// # WHY THIS IS NOT "THE TWO CATALOGUES ARE EQUAL"
 //
-// Like the digest comparison, the market repository is a separate checkout and
-// may be absent; when it is, the assertion is SKIPPED rather than failed.
+// That is what it used to assert, and it was right when the market had ten plugins. It is 36
+// now: `market/index.json` carries ONE entry per plugin (the latest), while the sample is a
+// pinned offline fallback that ships whatever the last packaging run produced - deliberately
+// older, because bumping the fallback on every release would mean re-embedding megabytes in
+// the binary each time. Demanding equal lengths made this test fail on a fact about the
+// product rather than about a bug (36 against 10), which is the kind of red that teaches
+// people to ignore red.
+//
+// What must hold instead:
+//
+//  1. every plugin the sample ships is still one the market lists - the fallback must not
+//     resurrect something that was removed;
+//  2. the package it ships is byte-identical to the market's copy of that SAME version (that
+//     is TestBuiltinSampleMatchesIndex's job, asserted for every entry);
+//  3. every sample entry names a package its own index carries (also that test).
+//
+// Like the digest comparison, the market repository is a separate checkout and may be absent;
+// when it is, the assertion is SKIPPED rather than failed.
 func TestBuiltinSampleAgreesWithTheMarketCatalogue(t *testing.T) {
-	type entry struct {
-		ID       string `json:"id"`
-		Version  string `json:"version"`
-		Download string `json:"download"`
-		SHA256   string `json:"sha256"`
+	marketIdx := filepath.Join("..", "..", "market", "index.json")
+	raw, err := os.ReadFile(marketIdx)
+	if err != nil {
+		t.Skipf("cannot read %s (the market repo is a separate checkout): %v", marketIdx, err)
 	}
-	read := func(path string) []entry {
-		t.Helper()
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Skipf("cannot read %s: %v", path, err)
-		}
-		var doc struct {
-			Plugins []entry `json:"plugins"`
-		}
-		if err := json.Unmarshal(raw, &doc); err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
-		return doc.Plugins
+	var marketDoc struct {
+		Plugins []struct {
+			ID string `json:"id"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(raw, &marketDoc); err != nil {
+		t.Fatalf("parse %s: %v", marketIdx, err)
+	}
+	listed := make(map[string]bool, len(marketDoc.Plugins))
+	for _, e := range marketDoc.Plugins {
+		listed[e.ID] = true
 	}
 
-	market := read(filepath.Join("..", "..", "market", "index.json"))
 	sampleRaw, err := SampleIndexBytes()
 	if err != nil {
 		t.Fatalf("read the built-in catalogue: %v", err)
 	}
-	var doc struct {
-		Plugins []entry `json:"plugins"`
+	var sampleDoc struct {
+		Plugins []struct {
+			ID      string `json:"id"`
+			Version string `json:"version"`
+		} `json:"plugins"`
 	}
-	if err := json.Unmarshal(sampleRaw, &doc); err != nil {
+	if err := json.Unmarshal(sampleRaw, &sampleDoc); err != nil {
 		t.Fatalf("parse the built-in catalogue: %v", err)
 	}
-
-	if len(market) != len(doc.Plugins) {
-		t.Fatalf("the catalogues list %d and %d plugins", len(market), len(doc.Plugins))
+	if len(sampleDoc.Plugins) == 0 {
+		t.Fatal("the built-in catalogue is empty: the offline fallback would have nothing to offer")
 	}
-	for i := range market {
-		m, s := market[i], doc.Plugins[i]
-		if m.ID != s.ID {
-			t.Errorf("entry %d: market id %q, built-in id %q", i, m.ID, s.ID)
-			continue
-		}
-		if m.Version != s.Version {
-			t.Errorf("%s: market version %q, built-in version %q", m.ID, m.Version, s.Version)
-		}
-		// The download differs by directory - "dist/x.zip" against the flat
-		// embedded name - so the comparison is on the base name, which is what
-		// actually has to match.
-		if mb, sb := path.Base(m.Download), path.Base(s.Download); mb != sb {
-			t.Errorf("%s: market package %q, built-in package %q", m.ID, mb, sb)
-		}
-		if m.SHA256 != s.SHA256 {
-			t.Errorf("%s: market sha256 %s, built-in sha256 %s", m.ID, m.SHA256, s.SHA256)
+	for _, e := range sampleDoc.Plugins {
+		if !listed[e.ID] {
+			t.Errorf("the sample ships %s v%s, which the market no longer lists: an offline "+
+				"fallback for a plugin the catalogue dropped is a package nobody can update",
+				e.ID, e.Version)
 		}
 	}
 }
