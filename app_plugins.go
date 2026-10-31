@@ -134,6 +134,9 @@ type pluginHost struct {
 	// be the same noise as the polling this project spent a day removing.
 	pressureMu sync.Mutex
 	pressured  map[string]bool
+	// overCap latches the "你已经超过上限" warning: the write is ALLOWED (see checkStorageBudget)
+	// but the user should hear it once, not on every state save.
+	overCap    map[string]bool
 	manager *plugins.Manager
 	// subs maps a plugin id to the set of events it subscribed to.
 	subs map[string]map[string]bool
@@ -1066,10 +1069,41 @@ func pluginPrivateStoreWithPressure(run func(dir string, payload []byte) (any, e
 			return nil, err
 		}
 		if dir, dirErr := a.pluginManager().PrivateDir(id); dirErr == nil {
-			a.noteStoragePressure(id, plugins.PluginDataBytes(dir), plugins.MaxPluginDataBytes)
+			used := plugins.PluginDataBytes(dir)
+			a.noteStoragePressure(id, used, plugins.MaxPluginDataBytes)
+			a.noteOverBudget(id, used, plugins.MaxPluginDataBytes)
 		}
 		return out, nil
 	}
+}
+
+// noteOverBudget says ONCE that a plugin is living beyond the ceiling - and then keeps letting it
+// write.
+//
+// The alternative was refusing, and it took exactly one day of real data to show why that is
+// wrong: the qq plugin's directory held 497 MiB before the cap existed, so refusing meant the bot
+// could not save a 129-byte ledger. A host that cannot delete the data has no business making the
+// plugin unusable; what it CAN do is say the number out loud, once, and keep naming it in the
+// diagnostics report (settingsapi_diagnostics.go's pluginProblems).
+func (a *App) noteOverBudget(id string, used, limit int64) {
+	a.pluginHost.pressureMu.Lock()
+	if used <= limit {
+		delete(a.pluginHost.overCap, id)
+		a.pluginHost.pressureMu.Unlock()
+		return
+	}
+	if a.pluginHost.overCap == nil {
+		a.pluginHost.overCap = map[string]bool{}
+	}
+	already := a.pluginHost.overCap[id]
+	a.pluginHost.overCap[id] = true
+	a.pluginHost.pressureMu.Unlock()
+	if already {
+		return
+	}
+	a.log.Pluginf(logging.LevelWarn, "plugin", id,
+		"私有目录已经用了 %d 字节，超过上限 %d：宿主照常允许写入（拒绝只会让插件连状态都存不下），但也不会替你删——用 storage.list / storage.remove 清理，或看控制中心诊断报告里的占用",
+		used, limit)
 }
 
 // pluginSurfaceShow opens the plugin's floating surface.

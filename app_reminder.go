@@ -34,6 +34,12 @@ import (
 func (a *App) RemindNow() (State, error) {
 	a.log.Info("reminder", "手动提醒一次")
 	if !a.showReminderBubble(true) {
+		// A manual ask with nothing to say is a normal outcome, not a failure: the bubble is
+		// empty because the list is (and RemindWhenEmpty is off), so nothing appears. It is logged
+		// at INFO for the same reason - the page used to surface this rejection through
+		// console.error, which put "没有需要提醒的待办" in pet.log as an ERROR every time the user
+		// pressed 立刻提醒 on an empty list (2026-10-31: seven of them in four seconds).
+		a.log.Info("reminder", "手动提醒：没有需要提醒的待办（空列表，且没开「空列表也提醒」）")
 		st, _ := a.GetState()
 		return st, fmt.Errorf("没有需要提醒的待办")
 	}

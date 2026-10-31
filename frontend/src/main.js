@@ -705,7 +705,10 @@ const PET_MENU_ACTIONS = {
   // 提醒: one reminder now. It REPLACES the card with the reminder bubble (Go
   // re-crops to it), so there is nothing to dismiss here - and when there is
   // nothing worth reminding, the call fails and the menu stays up to pick from.
-  remind: () => App.RemindNow().then(applyState),
+  // 空列表上的「立刻提醒」是正常结果，不是失败（宿主在 INFO 里记了原因）。这里必须显式接住那个
+  // 拒绝：不接就是未处理的 promise rejection，页面会把它当 ERROR 报给日志——2026-10-31 四秒里
+  // 就攒了 7 条，把 ERROR 这一档教成了噪音。
+  remind: () => App.RemindNow().then(applyState).catch(() => {}),
 
   plugins: () => launchControlCenter(),
 

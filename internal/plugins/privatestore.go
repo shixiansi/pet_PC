@@ -208,6 +208,22 @@ func checkStorageBudget(dir string, incoming, replacing int64) error {
 	if used < 0 {
 		used = 0
 	}
+	// The cap stops a plugin from BECOMING oversized. It does NOT evict, and it must not brick
+	// a plugin that is already over - which is what the first version did.
+	//
+	// 2026-10-31, the day it shipped: the qq plugin's directory was already 497 MiB (391 cached
+	// stickers, none of them written by the version of the code that had a cap). Every
+	// `storage.set` was refused, so the bot could not even save its ledger - a much worse failure
+	// than being over budget, and one the user cannot fix from the plugin that refuses to work.
+	// The host cannot choose what to delete either, so "refuse everything" was never a policy;
+	// it was a deadlock.
+	//
+	// What is enforced instead: a plugin UNDER the cap may not cross it, and one value may never
+	// exceed MaxStorageValue. A plugin already over the cap keeps working, is named in the
+	// diagnostics report (with its size), and gets told once per session (see noteOverBudget).
+	if used > MaxPluginDataBytes {
+		return nil
+	}
 	if used+incoming > MaxPluginDataBytes {
 		return fmt.Errorf("插件的私有目录已经用了 %d 字节，再写 %d 字节会超过上限 %d（先删掉不用的键，或把大文件放到别处）",
 			used, incoming, MaxPluginDataBytes)
@@ -235,9 +251,11 @@ func PluginDataBytes(dir string) int64 { return privateDirBytes(dir) }
 
 // privateDirBytes sums the files under one plugin's private directory.
 //
-// It stops walking once the total is past twice the ceiling: the caller only needs to know
-// "over or not", and a plugin that has already blown the budget should not make every later
-// write pay for a full walk of its own mess.
+// It walks the whole tree. The first version stopped once the total passed twice the ceiling, on
+// the theory that the caller only needs "over or not" - and that made the number WRONG exactly
+// when it mattered: the refusal message said "已经用了 134320868 字节" about a directory that held
+// 497 MiB, and `storage.usage` would have handed a plugin the same lie. A walk of a few hundred
+// files costs microseconds; a budget that reports a floor instead of the truth costs trust.
 func privateDirBytes(dir string) int64 {
 	var total int64
 	_ = filepath.WalkDir(dir, func(_ string, entry os.DirEntry, err error) error {
@@ -246,9 +264,6 @@ func privateDirBytes(dir string) int64 {
 		}
 		if info, infoErr := entry.Info(); infoErr == nil {
 			total += info.Size()
-		}
-		if total > MaxPluginDataBytes*2 {
-			return filepath.SkipAll
 		}
 		return nil
 	})
