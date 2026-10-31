@@ -441,3 +441,42 @@ func TestBuiltinSampleAgreesWithTheMarketCatalogue(t *testing.T) {
 		}
 	}
 }
+// TestEveryPublishedManifestParses is the "we never publish a manifest we refuse" guard.
+//
+// The failure it exists for, hit for real on 2026-11-01: the market shipped web-dashboard with
+// `callTargets: ["com.shixiansi.plugin-todo/stats@>=1.2.2"]` while the HOST the user was running
+// predated the version-floor syntax. The update failed with "callTargets 项 … 不是
+// <插件id>/<方法名>" - correct, and completely confusing, because nothing in the message says
+// "your host is older than this manifest".
+//
+// A schema change and the parser that accepts it have to reach the user together; this test
+// catches the half that CAN be checked in one place - our own current rules against everything we
+// publish. The other half (an old binary reading a new catalogue) can only be fixed by shipping
+// the host first, which is the ordering rule in docs/plugin-dev.md §4.
+//
+// SKIPped when market/ is not checked out; the CI `contract` job checks it out, so it does run
+// there.
+func TestEveryPublishedManifestParses(t *testing.T) {
+	dirs, err := filepath.Glob(filepath.Join("..", "..", "market", "plugins", "*", "manifest.json"))
+	if err != nil || len(dirs) == 0 {
+		t.Skipf("no catalogued manifests to check (the market repo is a separate checkout): %v", err)
+	}
+	for _, path := range dirs {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		m, err := ParseManifest(raw)
+		if err != nil {
+			// The path, not the id: a manifest that fails to parse may not have a usable id.
+			t.Errorf("%s: the host refuses a manifest we published: %v", path, err)
+			continue
+		}
+		// And the parts the version floors touch have to survive their own parser.
+		for _, entry := range m.CallTargets {
+			if _, _, _, ok := SplitCallTargetVersion(entry); !ok {
+				t.Errorf("%s: callTargets entry %q does not parse", m.ID, entry)
+			}
+		}
+	}
+}
