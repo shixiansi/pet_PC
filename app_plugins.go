@@ -1401,6 +1401,16 @@ func pluginAudioImport(a *App, id string, payload []byte) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The per-plugin ceiling covers audio too: `maxAudioBytes` bounds one file, and without
+	// this a plugin could take the disk one acceptable clip at a time.
+	replacing := int64(0)
+	if info, statErr := os.Stat(filepath.Join(dir, in.Name+".wav")); statErr == nil {
+		replacing = info.Size()
+	}
+	if used := plugins.PluginDataBytes(filepath.Dir(dir)) - replacing; used+int64(len(raw)) > plugins.MaxPluginDataBytes {
+		return nil, fmt.Errorf("插件的私有目录已经用了 %d 字节，这段音频 %d 字节会超过上限 %d（先删掉不用的素材）",
+			used, len(raw), plugins.MaxPluginDataBytes)
+	}
 	path := filepath.Join(dir, in.Name+".wav")
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
@@ -1452,6 +1462,16 @@ func pluginAudioSave(a *App, id string, payload []byte) (any, error) {
 	dir, err := a.pluginAudioDir(id)
 	if err != nil {
 		return nil, err
+	}
+	// The per-plugin ceiling covers audio too: `maxAudioBytes` bounds one file, and without
+	// this a plugin could take the disk one acceptable clip at a time.
+	replacing := int64(0)
+	if info, statErr := os.Stat(filepath.Join(dir, in.Name+".wav")); statErr == nil {
+		replacing = info.Size()
+	}
+	if used := plugins.PluginDataBytes(filepath.Dir(dir)) - replacing; used+int64(len(raw)) > plugins.MaxPluginDataBytes {
+		return nil, fmt.Errorf("插件的私有目录已经用了 %d 字节，这段音频 %d 字节会超过上限 %d（先删掉不用的素材）",
+			used, len(raw), plugins.MaxPluginDataBytes)
 	}
 	path := filepath.Join(dir, in.Name+".wav")
 	// Written via a temporary file and renamed, so a crash mid-write cannot leave

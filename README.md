@@ -488,6 +488,8 @@ Go 的 JSON 编码器会把非法字节替换成 U+FFFD，一个 WAV 于是"大�
 | `%AppData%\PetPC\plugin-data\<id>\share\<name>` | 跨插件托盘里**它发布的**那份值（宿主写，别人只能读） |
 | `%AppData%\PetPC\plugin-market.json` | **插件市场程序自己**的偏好（地址、上次选中的插件、窗口尺寸、深/浅主题） |
 
+**一个插件能占多少磁盘是有上限的**：单次 `storage.set` 的值 ≤ **1 MiB**，一个插件的 `plugin-data\<id>\` 整棵树（含 `audio/`）≤ **64 MiB**。超了就拒绝，并写明已经用了多少、这次要写多少——所以一个插件不可能把用户的盘当自己的。
+
 **`storage` 的键是相对路径，不是文件名**（1.11 起）。`media/stickers/bytes/790ed6cc` 会写到
 `plugin-data\<id>\media\stickers\bytes\790ed6cc`，父目录由宿主建好；每一段仍然只能是字母、
 数字、`_`、`-`（最多 4 段、整条 200 字符），所以 `.`、`..`、盘符、反斜杠这些拼法一律被拒，

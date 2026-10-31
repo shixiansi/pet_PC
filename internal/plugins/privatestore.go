@@ -46,6 +46,19 @@ const (
 	storageKeyMaxDepth = 4
 	// storageKeyMaxLen bounds the whole key.
 	storageKeyMaxLen = 200
+	// MaxStorageValue bounds ONE value written through `storage.set`.
+	//
+	// 1 MiB: a hundred times a chat transcript, a thousand times a settings blob. The number
+	// exists because "write the whole conversation into a key" is the shape of a bug - the
+	// private directory is a plugin's own scratch space, not its database, and a plugin that
+	// needs a database should say so rather than quietly filling the user's disk.
+	MaxStorageValue = 1 << 20
+	// MaxPluginDataBytes bounds the WHOLE private directory of one plugin, audio included.
+	//
+	// 64 MiB, and generous on purpose: the biggest real thing a plugin keeps here is a voice
+	// plugin's recorded takes and the qq plugin's 437 small state files. It is a ceiling that
+	// says "you are not a file host", not a budget anybody should be budgeting against.
+	MaxPluginDataBytes = 64 << 20
 )
 
 // StorageKeyPath validates one key and returns the relative path it names.
@@ -159,10 +172,76 @@ func StorageSet(dir string, payload []byte) (any, error) {
 		}
 		return nil, err
 	}
+	// The budget is checked BEFORE the write, and the refusal changes nothing - the same
+	// order every other capability keeps (dispatch.go). "Which key was too big" is the only
+	// thing a plugin can act on, so both numbers are in the message.
+	incoming := int64(len(in.Value))
+	replacing := int64(0)
+	if info, statErr := os.Stat(path); statErr == nil {
+		replacing = info.Size()
+	}
+	if err := checkStorageBudget(dir, incoming, replacing); err != nil {
+		return nil, err
+	}
 	if err := os.WriteFile(path, []byte(in.Value), 0o644); err != nil {
 		return nil, err
 	}
 	return map[string]any{"ok": true}, nil
+}
+
+// checkStorageBudget refuses a write that would take one plugin past its bounds.
+//
+// Two refusals, because they are two different mistakes:
+//
+//   - ONE value over MaxStorageValue: the plugin is using a key as a blob store;
+//   - the DIRECTORY over MaxPluginDataBytes: the plugin is using the user's disk as its own.
+//
+// `replacing` is the size of the file this key already has, so overwriting a large value with
+// a large value is not counted twice - without that, a plugin that keeps one 800 KiB cache
+// would be unable to update it.
+func checkStorageBudget(dir string, incoming, replacing int64) error {
+	if incoming > MaxStorageValue {
+		return fmt.Errorf("storage.set 的值是 %d 字节，超过单值上限 %d（把它拆成几个键，或换一种存法）",
+			incoming, MaxStorageValue)
+	}
+	used := privateDirBytes(dir) - replacing
+	if used < 0 {
+		used = 0
+	}
+	if used+incoming > MaxPluginDataBytes {
+		return fmt.Errorf("插件的私有目录已经用了 %d 字节，再写 %d 字节会超过上限 %d（先删掉不用的键，或把大文件放到别处）",
+			used, incoming, MaxPluginDataBytes)
+	}
+	return nil
+}
+
+// PluginDataBytes is privateDirBytes, exported for the OTHER writers of the same directory.
+//
+// `audio.save` lives in package main and writes WAVs into `<private>/audio/`; without this the
+// per-plugin ceiling would cover `storage.set` only, and a plugin could fill the disk with
+// takes. One counter, one ceiling, every writer.
+func PluginDataBytes(dir string) int64 { return privateDirBytes(dir) }
+
+// privateDirBytes sums the files under one plugin's private directory.
+//
+// It stops walking once the total is past twice the ceiling: the caller only needs to know
+// "over or not", and a plugin that has already blown the budget should not make every later
+// write pay for a full walk of its own mess.
+func privateDirBytes(dir string) int64 {
+	var total int64
+	_ = filepath.WalkDir(dir, func(_ string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
+		}
+		if info, infoErr := entry.Info(); infoErr == nil {
+			total += info.Size()
+		}
+		if total > MaxPluginDataBytes*2 {
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return total
 }
 
 // firstFileInPath reports the first component of path (relative to base) that exists as a FILE,

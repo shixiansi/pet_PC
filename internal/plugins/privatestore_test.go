@@ -344,3 +344,67 @@ func TestFirstFileInPathOnlyBlamesFiles(t *testing.T) {
 		t.Errorf("a path outside the base was walked: %q", blocker)
 	}
 }
+
+// TestStorageBudgetRefusesTwoDifferentMistakes pins both bounds and the reason they are two.
+//
+// One value too big is a plugin using a key as a blob store; the whole directory too big is a
+// plugin using the user's disk as its own. The messages differ because the fixes differ.
+func TestStorageBudgetRefusesTwoDifferentMistakes(t *testing.T) {
+	dir := t.TempDir()
+	// A file that fills most of the budget, so the second assertion does not have to write
+	// 64 MiB to be real.
+	big := filepath.Join(dir, "cache")
+	if err := os.WriteFile(big, nil, 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := os.Truncate(big, MaxPluginDataBytes-100); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+
+	// ONE value over the single-value cap: refused, and the message names that cap.
+	err := checkStorageBudget(dir, MaxStorageValue+1, 0)
+	if err == nil || !strings.Contains(err.Error(), "单值上限") {
+		t.Fatalf("error = %v, want the single-value refusal", err)
+	}
+
+	// The DIRECTORY over the cap: refused, with the used/needed numbers.
+	err = checkStorageBudget(dir, 1024, 0)
+	if err == nil || !strings.Contains(err.Error(), "私有目录已经用了") {
+		t.Fatalf("error = %v, want the directory refusal", err)
+	}
+
+	// Overwriting the big file with a smaller one is allowed: `replacing` is subtracted, so a
+	// plugin that keeps one large cache can still update it.
+	if err := checkStorageBudget(dir, 10, MaxPluginDataBytes-100); err != nil {
+		t.Fatalf("replacing a large value must be allowed: %v", err)
+	}
+
+	// And a small write into a small directory passes.
+	small := t.TempDir()
+	if err := checkStorageBudget(small, 1024, 0); err != nil {
+		t.Fatalf("a small write must pass: %v", err)
+	}
+}
+
+// TestStorageSetRefusesAnOversizedValue is the same bound through the real method, because the
+// gate is only worth anything if it runs before the write.
+func TestStorageSetRefusesAnOversizedValue(t *testing.T) {
+	dir := t.TempDir()
+	huge := strings.Repeat("x", MaxStorageValue+1)
+	payload, err := json.Marshal(map[string]any{"key": "blob", "value": huge})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if _, err := StorageSet(dir, payload); err == nil {
+		t.Fatal("an oversized value must be refused")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "blob")); !os.IsNotExist(err) {
+		t.Fatal("the refusal wrote the file anyway")
+	}
+	// A value at the cap is fine.
+	ok := strings.Repeat("y", MaxStorageValue)
+	payload, _ = json.Marshal(map[string]any{"key": "blob", "value": ok})
+	if _, err := StorageSet(dir, payload); err != nil {
+		t.Fatalf("a value at the cap must be accepted: %v", err)
+	}
+}
