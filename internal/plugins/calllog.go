@@ -28,7 +28,7 @@ package plugins
 func DataMethod(method string) bool {
 	switch method {
 	case "storage.get", "storage.set", "storage.remove", "storage.stat",
-		"storage.dir", "storage.list", "storage.move",
+		"storage.dir", "storage.list", "storage.move", "storage.usage",
 		"share.get", "share.set", "share.remove",
 		"config.get", "config.set",
 		"memory.read", "memory.append",

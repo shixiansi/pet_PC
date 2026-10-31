@@ -395,6 +395,13 @@ var pluginMethods = map[string]pluginMethod{
 	// cleared it while leaving a 24 MB file behind on each run. "Clean up your own folder"
 	// is impossible without being able to list it, short of deleting by a guessed pattern.
 	"storage.list": {perm: plugins.PermStorage, run: pluginPrivateStore(plugins.StorageList)},
+	// How much of this plugin's budget is used.
+	//
+	// The two neighbours answer different questions: `storage.stat` is one key, and the
+	// `storage.pressure` event says "you are at 80%". Neither tells a plugin how much it has to
+	// delete - and working that out by hand means listing the folder and statting every file.
+	// Pure read, so it does not touch the pressure latch (that lives on the write path).
+	"storage.usage": {perm: plugins.PermStorage, run: pluginPrivateStore(plugins.StorageUsage)},
 	// Renaming one of your own files.
 	//
 	// It exists because reorganising is not the same job as saving: a plugin that has to

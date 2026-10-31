@@ -463,6 +463,27 @@ func StorageMove(dir string, payload []byte) (any, error) {
 	return map[string]any{"ok": true, "moved": true}, nil
 }
 
+// StorageUsage reports how much of the per-plugin budget this plugin has used.
+//
+// # WHY IT EXISTS
+//
+// `storage.pressure` says "you are at 80%" and `storage.stat` answers "this ONE key is N bytes".
+// Neither answers the question a plugin actually has after the warning: "how much do I have to
+// delete?". Without this it has to `storage.list` and then stat every key - dozens of round trips
+// against the same directory the host can measure in one walk.
+//
+// The numbers come from the same function the refusals and the pressure event use
+// (privateDirBytes / MaxPluginDataBytes), so "used" here and "used" in the refusal cannot drift.
+func StorageUsage(dir string, _ []byte) (any, error) {
+	return map[string]any{
+		"used":  privateDirBytes(dir),
+		// int64() explicitly: MaxPluginDataBytes is an untyped constant, and putting it into an
+		// `any` would give it the default type int - so `used` (int64) and `limit` (int) would
+		// differ for no reason and every caller would have to care.
+		"limit": int64(MaxPluginDataBytes),
+	}, nil
+}
+
 // RegisterPrivateStore registers the private-store methods into a program's table.
 //
 // A host that offers `storage` calls this instead of hand-writing one entry per
@@ -485,4 +506,5 @@ func RegisterPrivateStore(r *Registry) {
 	register("storage.dir", StorageDir)
 	register("storage.list", StorageList)
 	register("storage.move", StorageMove)
+	register("storage.usage", StorageUsage)
 }

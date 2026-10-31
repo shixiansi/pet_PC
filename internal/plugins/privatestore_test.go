@@ -408,3 +408,45 @@ func TestStorageSetRefusesAnOversizedValue(t *testing.T) {
 		t.Fatalf("a value at the cap must be accepted: %v", err)
 	}
 }
+
+// TestStorageUsageReportsTheBudget pins the answer a plugin needs AFTER storage.pressure.
+//
+// `storage.stat` is one key and the pressure event is a threshold; neither answers "how much do I
+// have to delete?". The numbers come from the same walk the refusals use, or a plugin would be
+// budgeting against a different number than the one that refuses it.
+func TestStorageUsageReportsTheBudget(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a"), []byte("12345"), 0o644); err != nil {
+		t.Fatalf("seed a: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "nested", "b"), []byte("123"), 0o644); err != nil {
+		t.Fatalf("seed b: %v", err)
+	}
+
+	out, err := StorageUsage(dir, nil)
+	if err != nil {
+		t.Fatalf("StorageUsage: %v", err)
+	}
+	got, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("out = %#v, want an object", out)
+	}
+	if got["used"] != int64(8) {
+		t.Fatalf("used = %v, want 8 (5 + 3, nested files included)", got["used"])
+	}
+	if got["limit"] != int64(MaxPluginDataBytes) {
+		t.Fatalf("limit = %v, want %d", got["limit"], MaxPluginDataBytes)
+	}
+
+	// An empty directory is 0, not an error: a plugin may ask this BEFORE it has written anything.
+	empty, err := StorageUsage(t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("StorageUsage(empty): %v", err)
+	}
+	if used := empty.(map[string]any)["used"]; used != int64(0) {
+		t.Fatalf("used(empty) = %v, want 0", used)
+	}
+}
