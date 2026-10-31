@@ -287,7 +287,9 @@ DPAPI（[internal/desktop/crypto_windows.go](internal/desktop/crypto_windows.go)
    插件拿不到自己的安装目录，于是"自己启动"必然要求用户手填两个绝对路径——2026-10-31 的实测是
    五个这样写的插件里四个从来没跑起来过。测试：`TestSidecar*` / `TestManifestSidecar`。
 3. **变化是推的，不是拉的**。`share.changed`（发给声明了 `<owner>/<name>` 的读者 **+ 发布者
-   自己的帧**；跨程序靠"牌盘是文件"那条路）与 `storage.changed`（自己的私有目录）。两个宿主都
+   自己的帧**；跨程序靠"牌盘是文件"那条路）、`storage.changed`（自己的私有目录）与
+   `storage.pressure`（私有目录跨过 80% 的那一次，回落才重置——它存在的意义是"还来得及"，
+   真到上限就只剩 `storage.set` 被拒）。两个宿主都
    必须发：`.dev/check-frontend.cjs` 那条「插件页挂载每个插件自己的文档」硬编码了
    `RegisterShare(..., m.notifyShareReaders)`——服务牌盘却不通知就是回归。测试：
    `TestShareSetNotifiesDeclaredReaders` / `TestStorageWatch*` / `TestShareRecipients`。

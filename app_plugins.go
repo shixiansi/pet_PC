@@ -129,6 +129,11 @@ type PluginEventView struct {
 // that long would stall a drag.
 type pluginHost struct {
 	mu      sync.Mutex
+	// pressureMu/pressured latch storage.pressure: one event per crossing, reset on the way down
+	// (see noteStoragePressure). A plugin that sits at 81% writes often; an event per write would
+	// be the same noise as the polling this project spent a day removing.
+	pressureMu sync.Mutex
+	pressured  map[string]bool
 	manager *plugins.Manager
 	// subs maps a plugin id to the set of events it subscribed to.
 	subs map[string]map[string]bool
@@ -368,7 +373,7 @@ var pluginMethods = map[string]pluginMethod{
 	// sees it used (see pluginMethod.also).
 	"net.fetch":      {perm: plugins.PermNetFetch, also: []string{plugins.PermNetCredentials}, run: pluginNetFetch},
 	"storage.get":    {perm: plugins.PermStorage, run: pluginPrivateStore(plugins.StorageGet)},
-	"storage.set":    {perm: plugins.PermStorage, run: pluginPrivateStore(plugins.StorageSet)},
+	"storage.set":    {perm: plugins.PermStorage, run: pluginPrivateStoreWithPressure(plugins.StorageSet)},
 	"storage.remove": {perm: plugins.PermStorage, run: pluginPrivateStore(plugins.StorageRemove)},
 	// Where the caller's own private directory is. A plugin that starts a downloader has
 	// to tell it where to write, and a chat protocol side has to be able to read the
@@ -1041,6 +1046,24 @@ func pluginPrivateStore(run func(dir string, payload []byte) (any, error)) func(
 		return run(dir, payload)
 	}
 }
+// pluginPrivateStoreWithPressure is pluginPrivateStore plus the `storage.pressure` latch.
+//
+// Only the WRITE path gets it: a read cannot take a plugin closer to the ceiling, and the latch's
+// whole value is that it is rare. The usage is measured AFTER the write succeeded, so the number
+// the plugin receives is the number on disk.
+func pluginPrivateStoreWithPressure(run func(dir string, payload []byte) (any, error)) func(*App, string, []byte) (any, error) {
+	inner := pluginPrivateStore(run)
+	return func(a *App, id string, payload []byte) (any, error) {
+		out, err := inner(a, id, payload)
+		if err != nil {
+			return nil, err
+		}
+		if dir, dirErr := a.pluginManager().PrivateDir(id); dirErr == nil {
+			a.noteStoragePressure(id, plugins.PluginDataBytes(dir), plugins.MaxPluginDataBytes)
+		}
+		return out, nil
+	}
+}
 
 // pluginSurfaceShow opens the plugin's floating surface.
 //
@@ -1420,6 +1443,8 @@ func pluginAudioImport(a *App, id string, payload []byte) (any, error) {
 		os.Remove(tmp)
 		return nil, err
 	}
+	// Audio counts against the same ceiling, so it gets the same warning (see noteStoragePressure).
+	a.noteStoragePressure(id, plugins.PluginDataBytes(filepath.Dir(dir)), plugins.MaxPluginDataBytes)
 	return map[string]any{"name": in.Name, "bytes": len(raw)}, nil
 }
 
@@ -1485,6 +1510,8 @@ func pluginAudioSave(a *App, id string, payload []byte) (any, error) {
 		os.Remove(tmp)
 		return nil, err
 	}
+	// Audio counts against the same ceiling, so it gets the same warning (see noteStoragePressure).
+	a.noteStoragePressure(id, plugins.PluginDataBytes(filepath.Dir(dir)), plugins.MaxPluginDataBytes)
 	return map[string]any{"name": in.Name, "bytes": len(raw)}, nil
 }
 
@@ -1738,6 +1765,43 @@ func pluginShareGet(a *App, id string, payload []byte) (any, error) {
 
 func pluginShareRemove(a *App, id string, payload []byte) (any, error) {
 	return plugins.ShareRemove(a.pluginManager(), id, payload)
+}
+
+// noteStoragePressure emits `storage.pressure` the first time a plugin's private directory crosses
+// the warning line, and clears the latch when it falls back below it.
+//
+// # WHY AN EVENT INSTEAD OF A LINE IN THE REFUSAL
+//
+// The refusal (checkStorageBudget) arrives when it is already too late to be cheap: the write is
+// gone and the plugin has to choose between losing data and losing the user's trust. An event at
+// 80% lets a plugin drop old takes or trim a cache while nothing is broken. It fires ONCE per
+// crossing on purpose - a plugin sitting at 81% writes often, and an event per write would be the
+// same noise as the polling this project spent a day removing.
+//
+// Called after a SUCCESSFUL write, so the number it reports is the number on disk.
+func (a *App) noteStoragePressure(id string, used, limit int64) bool {
+	if used < plugins.PluginDataPressureAt(limit) {
+		a.pluginHost.pressureMu.Lock()
+		delete(a.pluginHost.pressured, id)
+		a.pluginHost.pressureMu.Unlock()
+		return false
+	}
+	a.pluginHost.pressureMu.Lock()
+	if a.pluginHost.pressured[id] {
+		a.pluginHost.pressureMu.Unlock()
+		return false
+	}
+	if a.pluginHost.pressured == nil {
+		a.pluginHost.pressured = map[string]bool{}
+	}
+	a.pluginHost.pressured[id] = true
+	a.pluginHost.pressureMu.Unlock()
+	a.emitPluginEvent(id, "storage.pressure", map[string]any{
+		"used":  used,
+		"limit": limit,
+		"at":    time.Now().Format(time.RFC3339),
+	})
+	return true
 }
 
 // pluginLog writes one line from the plugin into the host's log.

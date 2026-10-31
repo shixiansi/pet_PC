@@ -3228,3 +3228,55 @@ func TestPluginServicesReportsVersions(t *testing.T) {
 		t.Fatalf("serves = %v, want [stats]", got.Serves)
 	}
 }
+
+// TestStoragePressureFiresOncePerCrossing pins the latch, which is the whole point of the event.
+//
+// The threshold is 80% of the real ceiling (51 MiB), so the test drives the decision with a tiny
+// limit instead of writing 51 MiB: noteStoragePressure takes `limit` for exactly this reason.
+func TestStoragePressureFiresOncePerCrossing(t *testing.T) {
+	a := pluginApp(t)
+	events := collectPluginEvents(a)
+	id := installSampleWith(t, a, map[string]any{"permissions": []string{"storage"}})
+
+	// Below the line: no event, and (importantly) nothing latched.
+	if a.noteStoragePressure(id, 50, 100) {
+		t.Fatal("50/100 is below the 80% line and must not fire")
+	}
+	if got := len(events("storage.pressure")); got != 0 {
+		t.Fatalf("events = %d, want 0", got)
+	}
+
+	// Crossing: one event, with the numbers the plugin needs to decide what to drop.
+	if !a.noteStoragePressure(id, 90, 100) {
+		t.Fatal("the first crossing must fire")
+	}
+	got := events("storage.pressure")
+	if len(got) != 1 {
+		t.Fatalf("events = %d, want 1", len(got))
+	}
+	payload, ok := got[0].Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("payload = %#v, want an object", got[0].Payload)
+	}
+	if payload["used"] != int64(90) || payload["limit"] != int64(100) {
+		t.Fatalf("payload = %v, want used=90 limit=100", payload)
+	}
+
+	// Still above: latched, no second event. A plugin sitting at 81% writes often.
+	if a.noteStoragePressure(id, 95, 100) {
+		t.Fatal("a second write while above the line must not fire again")
+	}
+	if got := len(events("storage.pressure")); got != 1 {
+		t.Fatalf("events = %d, want 1 (latched)", got)
+	}
+
+	// Falling back below clears the latch, so a later crossing is a NEW warning - a plugin that
+	// cleaned up and then grew again deserves to be told again.
+	a.noteStoragePressure(id, 10, 100)
+	if !a.noteStoragePressure(id, 90, 100) {
+		t.Fatal("a new crossing after falling back must fire again")
+	}
+	if got := len(events("storage.pressure")); got != 2 {
+		t.Fatalf("events = %d, want 2", got)
+	}
+}

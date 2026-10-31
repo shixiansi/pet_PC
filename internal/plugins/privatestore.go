@@ -215,6 +215,17 @@ func checkStorageBudget(dir string, incoming, replacing int64) error {
 	return nil
 }
 
+// PluginDataPressureRatio is where a plugin is TOLD it is getting close, not where it is refused.
+//
+// 80% of MaxPluginDataBytes. The refusal is the hard edge; this is the warning that arrives while
+// the plugin can still do something cheap about it (drop old takes, trim a cache) instead of
+// discovering the ceiling as a failed write at the worst moment. It fires once per crossing - a
+// plugin that sits at 81% must not get an event per write.
+const PluginDataPressureRatio = 0.8
+
+// PluginDataPressureAt is the byte count that counts as "getting close" for a given ceiling.
+func PluginDataPressureAt(limit int64) int64 { return int64(float64(limit) * PluginDataPressureRatio) }
+
 // PluginDataBytes is privateDirBytes, exported for the OTHER writers of the same directory.
 //
 // `audio.save` lives in package main and writes WAVs into `<private>/audio/`; without this the
