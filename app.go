@@ -291,6 +291,9 @@ func (a *App) startup(ctx context.Context) {
 	// and a plugin's frame cannot reap them (it is torn down with the update). The host
 	// is the only party that outlives both.
 	a.startPluginChildReaper()
+	// The private-directory watch: a plugin's helper script writes files, and the plugin has no
+	// way to notice except polling. See app_plugin_storagewatch.go.
+	a.startPluginStorageWatch()
 		a.restorePosition()
 		// Voice moved to a plugin, so the pet no longer prepares a player or opens
 		// the user's library - it emits facts and the plugin decides what to say.

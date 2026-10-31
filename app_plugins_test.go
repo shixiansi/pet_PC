@@ -2623,6 +2623,78 @@ func TestReapLeavesChildrenOfHealthyPlugins(t *testing.T) {
 	}
 }
 
+// --- storage.changed（自己的私有目录变了） -----------------------------------
+
+// TestChangedStorageKeysIsPure pins the comparison on its own: appeared / touched / unchanged.
+func TestChangedStorageKeysIsPure(t *testing.T) {
+	prev := map[string]map[string]storageStamp{
+		"com.example.a": {"outbox/system": {mod: 1, size: 10}},
+	}
+	cur := map[string]map[string]storageStamp{
+		"com.example.a": {
+			"outbox/system": {mod: 1, size: 10},  // unchanged
+			"outbox/load":   {mod: 2, size: 3},   // appeared
+			"outbox/dsh":    {mod: 3, size: 4},   // appeared
+		},
+		"com.example.b": {"outbox/x": {mod: 1, size: 1}}, // a whole new plugin directory
+	}
+	got := changedStorageKeys(prev, cur)
+	if len(got["com.example.a"]) != 2 {
+		t.Fatalf("a changed keys = %v, want the two that appeared", got["com.example.a"])
+	}
+	if len(got["com.example.b"]) != 1 {
+		t.Fatalf("b changed keys = %v, want its one file", got["com.example.b"])
+	}
+	if again := changedStorageKeys(cur, cur); len(again) != 0 {
+		t.Fatalf("two identical snapshots reported %v", again)
+	}
+}
+
+// TestStorageWatchNotifiesTheOwnerOnly is the whole point: a helper's output wakes its own plugin
+// and nobody else, so six plugins can stop polling once a second.
+func TestStorageWatchNotifiesTheOwnerOnly(t *testing.T) {
+	a := pluginApp(t)
+	events := collectPluginEvents(a)
+	owner := installSampleWith(t, a, map[string]any{"id": "com.example.owner", "permissions": []string{"storage"}})
+	installSampleWith(t, a, map[string]any{"id": "com.example.other", "permissions": []string{"storage"}})
+
+	dir, err := a.pluginManager().PrivateDir(owner)
+	if err != nil {
+		t.Fatalf("PrivateDir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "outbox"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "outbox", "clipboard"), []byte(`{"text":"x"}`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// One tick from an empty snapshot: the file is new, so it must be announced.
+	a.emitChangedStorage(map[string]map[string]storageStamp{})
+
+	got := events("storage.changed")
+	if len(got) != 1 {
+		t.Fatalf("storage.changed events = %d, want 1", len(got))
+	}
+	if got[0].PluginID != owner {
+		t.Fatalf("event went to %q, want the owner %q", got[0].PluginID, owner)
+	}
+	payload, ok := got[0].Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("payload = %#v, want an object", got[0].Payload)
+	}
+	// The KEY is what the plugin passes to storage.get: slash-separated, no extension games.
+	if payload["key"] != "outbox/clipboard" {
+		t.Fatalf("payload.key = %v, want outbox/clipboard", payload["key"])
+	}
+
+	// A second tick with nothing written must stay silent.
+	a.emitChangedStorage(a.pluginStorageStamps())
+	if again := events("storage.changed"); len(again) != 1 {
+		t.Fatalf("storage.changed events = %d after an unchanged tick, want still 1", len(again))
+	}
+}
+
 // --- share.changed（发布 → 声明过它的读者） ---------------------------------
 
 // TestShareSetNotifiesDeclaredReaders pins the new down-link: publishing a key wakes the

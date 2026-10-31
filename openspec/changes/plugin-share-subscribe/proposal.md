@@ -48,3 +48,22 @@ go test -count=1 .                    # TestShareSetNotifiesDeclaredReaders
 node .dev\check-frontend.cjs
 cd market; npm test; node docs/plugin-testkit/plugin-check.mjs plugins/*
 ```
+
+## 6. 第二步：`storage.changed`（同一件事的私有目录一半）
+
+`share.changed` 只覆盖**跨插件**的那一半。另一半是**自己的**私有目录：辅助脚本（剪贴板 / SMTC /
+CPU 采样）是另一个进程，只能往 `PETPC_PLUGIN_DATA` 里写文件，插件只能轮询。2026-10-31 的日志里
+`storage.get` 占了 10 605 条 DEBUG 行的一半（pet-sense / media-sync / privacy-guard / clipask
+各 659 条，每秒一次同一个值）。
+
+所以同一个 change 里补上对称的一条：宿主每 2 秒扫一次每个插件的私有目录（与
+`app_plugin_configwatch.go` 同一个 tick 与同一个理由），有新增/变化就给**那个插件**发
+`storage.changed {key, at}`。`key` 就是 `storage.get` 要的键（`/` 分隔、无扩展名）。
+
+- 只发给所有者，不需要 `events.subscribe`（`storage` 权限已覆盖）。
+- 排除 `config.json`（那是 `config.changed` 的事，否则一次保存跑两遍处理器）。
+- 一次超过 8 个文件只通知前 8 个（记一行 WARN），其余自己 `storage.list`。
+- 文档里要求插件保留一个**15 秒**的慢兜底：没有帧被挂载就收不到事件。
+
+实现：`app_plugin_storagewatch.go`（`pluginStorageStamps` / `changedStorageKeys` /
+`emitChangedStorage`），测试 `TestChangedStorageKeysIsPure` / `TestStorageWatchNotifiesTheOwnerOnly`。
