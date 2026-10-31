@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"PetPC/internal/logging"
+	"PetPC/internal/plugins"
 )
 
 // These cover the two things a diagnostic report can get wrong and never notice: claiming a
@@ -132,5 +133,68 @@ func TestHostKeyReportsPresenceWithoutReadingIt(t *testing.T) {
 	}
 	if !m.HostKey().Present {
 		t.Error("a non-empty key file was reported as absent")
+	}
+}
+
+// TestDiagnosticsNamesWhatIsMissingPerPlugin is the "装好了但什么也不动" half of a report.
+//
+// Every line here is a failure with no install-time error and no visible symptom from the
+// outside: a permission nobody ticked, a helper script the package does not carry, a call
+// target nobody installed, a plugin that is switched off. `pluginProblems` is pure enough to
+// drive directly, which is why this test builds the row rather than installing one.
+func TestDiagnosticsNamesWhatIsMissingPerPlugin(t *testing.T) {
+	m, _ := diagMarket(t)
+	row := plugins.Installed{
+		ID:      "com.example.thing",
+		Version: "1.0.0",
+		Enabled: true,
+		Granted: []string{"storage"},
+		Dir:     t.TempDir(),
+		Manifest: &plugins.Manifest{
+			ID:          "com.example.thing",
+			Permissions: []string{"storage", "plugin.call", "pet.bubble"},
+			Sidecar:     &plugins.SidecarSpec{Script: "helper.ps1"},
+			CallTargets: []string{"com.example.absent/stats"},
+		},
+	}
+	lines := strings.Join(pluginProblems(m, row, map[string]bool{"com.example.thing": true}), "\n")
+	for _, want := range []string{
+		"缺授权：plugin.call、pet.bubble",   // the two nobody ticked, named
+		"辅助脚本不在：helper.ps1",           // the sidecar the package does not carry
+		"callTargets 指向没装的插件：com.example.absent/stats",
+	} {
+		if !strings.Contains(lines, want) {
+			t.Fatalf("problem lines:\n%s\nwant them to mention %q", lines, want)
+		}
+	}
+	if strings.Contains(lines, "停用中") {
+		t.Fatalf("an enabled plugin was reported as switched off:\n%s", lines)
+	}
+
+	// Switched off: said out loud, because a resident frame that never runs looks exactly like
+	// a plugin whose feature is broken.
+	row.Enabled = false
+	if lines := strings.Join(pluginProblems(m, row, map[string]bool{"com.example.thing": true}), "\n"); !strings.Contains(lines, "停用中") {
+		t.Fatalf("a disabled plugin was not reported:\n%s", lines)
+	}
+}
+
+// TestDiagnosticsCarriesThePerPluginProblems proves the lines actually reach the report the user
+// copies - a helper that nothing calls is not a diagnosis.
+func TestDiagnosticsCarriesThePerPluginProblems(t *testing.T) {
+	m, _ := diagMarket(t)
+	// A plugin that declares plugin.share but was granted only that (not storage / pet.bubble):
+	// installShareFixture grants plugin.share only.
+	installShareFixture(t, m, "com.example.half", nil)
+
+	report, err := m.Diagnostics()
+	if err != nil {
+		t.Fatalf("Diagnostics: %v", err)
+	}
+	if !strings.Contains(report, "com.example.half") {
+		t.Fatalf("the plugin is not in the report:\n%s", report)
+	}
+	if !strings.Contains(report, "缺授权：") {
+		t.Fatalf("the missing grants were not reported:\n%s", report)
 	}
 }

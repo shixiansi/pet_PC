@@ -9,6 +9,7 @@ import (
 
 	"PetPC/internal/desktop"
 	"PetPC/internal/logging"
+	"PetPC/internal/plugins"
 )
 
 // hostKeyFile is the file the PET keeps its LLM API key in, DPAPI-encrypted
@@ -88,6 +89,10 @@ func (m *Market) Diagnostics() (string, error) {
 	if len(rows) == 0 {
 		b.WriteString("（没有已装插件）\n")
 	}
+	installed := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		installed[r.ID] = true
+	}
 	for _, r := range rows {
 		state := "启用"
 		if !r.Enabled {
@@ -109,6 +114,9 @@ func (m *Market) Diagnostics() (string, error) {
 			line += "\n    manifest: " + r.Error
 		}
 		b.WriteString(line + "\n")
+		for _, problem := range pluginProblems(m, r, installed) {
+			b.WriteString("    " + problem + "\n")
+		}
 	}
 
 	b.WriteString("\n== 警告 ==\n")
@@ -205,4 +213,79 @@ func writeFileLine(b *strings.Builder, dir, name string) {
 		return
 	}
 	fmt.Fprintf(b, "%-24s %9d B  %s\n", name, info.Size(), info.ModTime().Format("2006-01-02 15:04:05"))
+}
+
+// pluginProblems lists what is WRONG with one installed plugin, in the words a bug report needs.
+//
+// # WHY THESE, AND WHY HERE
+//
+// Every line below is a failure that looks like "the plugin does nothing", produces no error at
+// install time, and is invisible from the outside:
+//
+//   - a permission the user never ticked ("我都授权了" is the report that turns out to be false);
+//   - a helper script the package does not carry (the host would log 找不到脚本 every 5 seconds);
+//   - a callTargets entry pointing at a plugin nobody installed (the call can only fail);
+//   - the plugin being switched off, which stops its resident frame AND every call to it.
+//
+// One line for the disk it occupies, because "why is %AppData% 400 MB" is the other question
+// this report gets asked - and it is measured against the same ceiling the host enforces
+// (plugins.MaxPluginDataBytes), so the number is comparable rather than decorative.
+func pluginProblems(m *Market, row plugins.Installed, installed map[string]bool) []string {
+	var out []string
+	if !row.Enabled {
+		out = append(out, "停用中：它的常驻帧不会跑，别的插件也调用不到它")
+	}
+	if row.Manifest == nil {
+		return out
+	}
+	granted := make(map[string]bool, len(row.Granted))
+	for _, perm := range row.Granted {
+		granted[perm] = true
+	}
+	var missing []string
+	for _, perm := range row.Manifest.Permissions {
+		if !granted[perm] {
+			missing = append(missing, perm)
+		}
+	}
+	if len(missing) > 0 {
+		out = append(out, "缺授权："+strings.Join(missing, "、")+"（装的时候没勾，或后来取消了）")
+	}
+	if spec := row.Manifest.Sidecar; spec != nil {
+		script := filepath.Join(row.Dir, filepath.FromSlash(spec.Script))
+		if _, err := os.Stat(script); err != nil {
+			out = append(out, "辅助脚本不在："+spec.Script+"（包里没有它，宿主会一直启动失败）")
+		}
+	}
+	var absent []string
+	for _, entry := range row.Manifest.CallTargets {
+		target, method, ok := plugins.SplitCallTarget(entry)
+		if !ok || installed[target] {
+			continue
+		}
+		absent = append(absent, target+"/"+method)
+	}
+	if len(absent) > 0 {
+		out = append(out, "callTargets 指向没装的插件："+strings.Join(absent, "、")+"（调用会失败）")
+	}
+	if row.ID != "" {
+		if dir, err := m.manager.PrivateDir(row.ID); err == nil {
+			if used := plugins.PluginDataBytes(dir); used > 0 {
+				out = append(out, fmt.Sprintf("私有目录占用 %s（上限 %s）", humanBytes(used), humanBytes(plugins.MaxPluginDataBytes)))
+			}
+		}
+	}
+	return out
+}
+
+// humanBytes renders a size the way a person reading a bug report wants it.
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.0f KiB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
 }
