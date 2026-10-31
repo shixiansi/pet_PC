@@ -2627,25 +2627,25 @@ func TestReapLeavesChildrenOfHealthyPlugins(t *testing.T) {
 
 // TestChangedStorageKeysIsPure pins the comparison on its own: appeared / touched / unchanged.
 func TestChangedStorageKeysIsPure(t *testing.T) {
-	prev := map[string]map[string]storageStamp{
-		"com.example.a": {"outbox/system": {mod: 1, size: 10}},
+	prev := map[string]map[string]plugins.FileStamp{
+		"com.example.a": {"outbox/system": {Mod: 1, Size: 10}},
 	}
-	cur := map[string]map[string]storageStamp{
+	cur := map[string]map[string]plugins.FileStamp{
 		"com.example.a": {
-			"outbox/system": {mod: 1, size: 10},  // unchanged
-			"outbox/load":   {mod: 2, size: 3},   // appeared
-			"outbox/dsh":    {mod: 3, size: 4},   // appeared
+			"outbox/system": {Mod: 1, Size: 10},  // unchanged
+			"outbox/load":   {Mod: 2, Size: 3},   // appeared
+			"outbox/dsh":    {Mod: 3, Size: 4},   // appeared
 		},
-		"com.example.b": {"outbox/x": {mod: 1, size: 1}}, // a whole new plugin directory
+		"com.example.b": {"outbox/x": {Mod: 1, Size: 1}}, // a whole new plugin directory
 	}
-	got := changedStorageKeys(prev, cur)
+	got := plugins.ChangedStorageStamps(prev, cur)
 	if len(got["com.example.a"]) != 2 {
 		t.Fatalf("a changed keys = %v, want the two that appeared", got["com.example.a"])
 	}
 	if len(got["com.example.b"]) != 1 {
 		t.Fatalf("b changed keys = %v, want its one file", got["com.example.b"])
 	}
-	if again := changedStorageKeys(cur, cur); len(again) != 0 {
+	if again := plugins.ChangedStorageStamps(cur, cur); len(again) != 0 {
 		t.Fatalf("two identical snapshots reported %v", again)
 	}
 }
@@ -2670,7 +2670,7 @@ func TestStorageWatchNotifiesTheOwnerOnly(t *testing.T) {
 	}
 
 	// One tick from an empty snapshot: the file is new, so it must be announced.
-	a.emitChangedStorage(map[string]map[string]storageStamp{})
+	a.emitChangedStorage(map[string]map[string]plugins.FileStamp{})
 
 	got := events("storage.changed")
 	if len(got) != 1 {
@@ -2723,7 +2723,7 @@ func TestStorageWatchRoutesTrayFilesAsShareChanged(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	a.emitChangedStorage(map[string]map[string]storageStamp{})
+	a.emitChangedStorage(map[string]map[string]plugins.FileStamp{})
 
 	got := events("share.changed")
 	if len(got) != 2 {

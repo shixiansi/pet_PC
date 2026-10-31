@@ -31,8 +31,6 @@ package main
 // the next edit - the same state the bug report was about, minus the polling.
 
 import (
-	"os"
-	"path/filepath"
 	"time"
 
 	"PetPC/internal/plugins"
@@ -46,42 +44,21 @@ import (
 // seconds.
 const pluginConfigWatchInterval = 2 * time.Second
 
-// configStamp is what "did this file change" is decided on.
-type configStamp struct {
-	mod  int64
-	size int64
-}
-
 // configStamps reads one stamp per installed plugin, keyed by plugin id.
 //
-// A plugin with no config file yet has no entry, which is why changedConfigs treats "appeared"
-// as a change: the first `config.set` from a workshop must wake the other frames too.
-func (a *App) configStamps() map[string]configStamp {
+// The stamp and the comparison live in internal/plugins (watch.go) because the CONTROL CENTER
+// watches the same files: both programs mount plugin frames, so "your settings changed" is a fact
+// neither can own alone.
+func (a *App) configStamps() map[string]plugins.FileStamp {
 	rows := a.pluginManager().Plugins()
-	out := make(map[string]configStamp, len(rows))
+	out := make(map[string]plugins.FileStamp, len(rows))
 	for _, row := range rows {
 		dir, err := a.pluginManager().PrivateDir(row.ID)
 		if err != nil {
 			continue
 		}
-		info, err := os.Stat(filepath.Join(dir, "config.json"))
-		if err != nil {
-			continue
-		}
-		out[row.ID] = configStamp{mod: info.ModTime().UnixNano(), size: info.Size()}
-	}
-	return out
-}
-
-// changedConfigs reports which plugin ids changed between two snapshots.
-//
-// Pure on purpose: the interesting part of this file is the comparison, and a test can assert it
-// without a goroutine, a sleep or a filesystem.
-func changedConfigs(prev, cur map[string]configStamp) []string {
-	var out []string
-	for id, now := range cur {
-		if before, seen := prev[id]; !seen || before != now {
-			out = append(out, id)
+		if stamp, ok := plugins.ConfigStamp(dir); ok {
+			out[row.ID] = stamp
 		}
 	}
 	return out
@@ -103,7 +80,7 @@ func (a *App) startPluginConfigWatch() {
 				return
 			case <-ticker.C:
 				cur := a.configStamps()
-				for _, id := range changedConfigs(prev, cur) {
+				for _, id := range plugins.ChangedStamps(prev, cur) {
 					// Broadcast with the id in the payload: the subscription gate is the host's
 					// (only subscribers get it), and each plugin compares against its own id.
 					a.emitPluginStateChange(plugins.EventConfigChanged, map[string]any{"pluginId": id})

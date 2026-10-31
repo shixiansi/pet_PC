@@ -35,24 +35,18 @@ package main
 // make every plugin's handler run twice.
 
 import (
-	"os"
-	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"PetPC/internal/logging"
+	"PetPC/internal/plugins"
 )
 
 // pluginStorageWatchInterval matches the config watch: the same tick, the same reasoning ("small
 // enough that a user never notices, large enough that the stat loop is free").
 const pluginStorageWatchInterval = 2 * time.Second
 
-// storageStamp is what "did this file change" is decided on, per file.
-type storageStamp struct {
-	mod  int64
-	size int64
-}
+
 
 // maxStorageEventsPerTick bounds one plugin's notifications in a single tick.
 //
@@ -65,38 +59,15 @@ const maxStorageEventsPerTick = 8
 //
 // The key is the STORAGE KEY the plugin would pass to `storage.get` (slash-separated, relative to
 // the private directory), not the OS path: that is the string the plugin can act on.
-func (a *App) pluginStorageStamps() map[string]map[string]storageStamp {
+func (a *App) pluginStorageStamps() map[string]map[string]plugins.FileStamp {
 	rows := a.pluginManager().Plugins()
-	out := make(map[string]map[string]storageStamp, len(rows))
+	out := make(map[string]map[string]plugins.FileStamp, len(rows))
 	for _, row := range rows {
 		dir, err := a.pluginManager().PrivateDir(row.ID)
 		if err != nil {
 			continue
 		}
-		stamps := map[string]storageStamp{}
-		root := dir
-		_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-			if err != nil || entry.IsDir() {
-				return nil
-			}
-			rel, relErr := filepath.Rel(root, path)
-			if relErr != nil {
-				return nil
-			}
-			key := filepath.ToSlash(rel)
-			// config.json is `config.changed`'s business; reporting it here too would run every
-			// plugin's settings handler twice for one save.
-			if key == "config.json" {
-				return nil
-			}
-			info, infoErr := entry.Info()
-			if infoErr != nil {
-				return nil
-			}
-			stamps[key] = storageStamp{mod: info.ModTime().UnixNano(), size: info.Size()}
-			return nil
-		})
-		out[row.ID] = stamps
+		out[row.ID] = plugins.PrivateDirStamps(dir)
 	}
 	return out
 }
@@ -107,7 +78,7 @@ func (a *App) pluginStorageStamps() map[string]map[string]storageStamp {
 // goroutine, a sleep or a filesystem. A key that APPEARED counts as changed - that is the first
 // write of a helper's outbox, which is exactly the case a polling plugin could not tell from
 // "still empty".
-func changedStorageKeys(prev, cur map[string]map[string]storageStamp) map[string][]string {
+func changedStorageKeys(prev, cur map[string]map[string]plugins.FileStamp) map[string][]string {
 	out := map[string][]string{}
 	for id, now := range cur {
 		before := prev[id]
@@ -144,7 +115,7 @@ func (a *App) startPluginStorageWatch() {
 // emitChangedStorage announces what changed and returns the new snapshot.
 //
 // Split out of the goroutine so a test can drive exactly one tick.
-func (a *App) emitChangedStorage(prev map[string]map[string]storageStamp) map[string]map[string]storageStamp {
+func (a *App) emitChangedStorage(prev map[string]map[string]plugins.FileStamp) map[string]map[string]plugins.FileStamp {
 	cur := a.pluginStorageStamps()
 	rows := a.pluginManager().Plugins()
 	for id, keys := range changedStorageKeys(prev, cur) {
@@ -165,7 +136,7 @@ func (a *App) emitChangedStorage(prev map[string]map[string]storageStamp) map[st
 			// `coder-command`; the frame that reads it runs in the pet. That program's own
 			// `share.changed` can only reach its own windows, so the pet notices the file and
 			// routes it through the same recipient rule.
-			if name, ok := shareTrayName(key); ok {
+			if name, ok := plugins.ShareTrayName(key); ok {
 				for _, to := range shareRecipients(rows, id, name) {
 					a.emitShareChanged(to, id, name)
 				}
@@ -178,20 +149,4 @@ func (a *App) emitChangedStorage(prev map[string]map[string]storageStamp) map[st
 	return cur
 }
 
-// shareTrayName reports whether a private-directory key is a published value, and which name it
-// was published under.
-//
-// `share/` is the host's folder (`shareFileName` in share.go), not the plugin's: a key that lands
-// there is a tray value, and the plugin's own `storage.get` cannot name it.
-func shareTrayName(key string) (string, bool) {
-	const prefix = "share/"
-	if !strings.HasPrefix(key, prefix) {
-		return "", false
-	}
-	name := strings.TrimPrefix(key, prefix)
-	if name == "" || strings.Contains(name, "/") {
-		return "", false
-	}
-	return name, true
-}
 
