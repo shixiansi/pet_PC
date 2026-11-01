@@ -656,22 +656,32 @@ Check "the stack above fits in the band the window has above the pet" `
 # head with the tail, the composer under its feet - rather than as unrelated boxes
 # somewhere in the window.
 #
-# They are 300 wide and the pet is 150, so a centred block necessarily overhangs the pet's
-# own column by 75px on each side, toward the free side of the window. That is the
-# requested shape ("拉长到300"): an earlier version of this gate asserted the boxes were
-# exactly as wide as the pet, which was the design before that.
+# "One column" means one CENTRE, not one width: the manifest declares the question block
+# 300 wide and the card/bar 308 (the extra 8 is the tail's own padding). An earlier version
+# of this gate compared x and w literally, so it failed on a manifest that was right by both
+# the contract and the eye.
 #
-# It is read off the manifest, so a plugin that declared one block half the width of
-# another, offset from it, or off-centre from the pet fails here.
+# The centre is measured on the DECLARATION (`dx + w/2`), not on the window rectangles: with
+# the pet on the left the stack is clamped against the window's left edge, so two blocks of
+# different widths both start at x=0 and their WINDOW centres differ by 4px. That is the
+# clamp working as designed (this same script asserts "declaration is used as written"), not
+# the stack drifting - and the declaration is what the plugin promises.
+#
+# They are 300+ wide and the pet is 150, so a centred block necessarily overhangs the pet's
+# own column by 75px on each side, toward the free side of the window. That is the
+# requested shape ("拉长到300"): an earlier version asserted the boxes were exactly as wide
+# as the pet, which was the design before that.
 $allRects = @($cardRect, $barRect)
 if ($null -ne $questionRect) { $allRects = @($questionRect) + $allRects }
 $cols = ($allRects | ForEach-Object { "x=$($_.X) w=$($_.W)" }) -join ', '
 $widths = ($rounded | ForEach-Object { [int]$_.w }) -join ', '
 $centres = ($rounded | ForEach-Object { [int]$_.dx + [int]$_.w/2 }) -join ', '
-$sameColumn = @($allRects | Where-Object { $_.X -ne $cardRect.X -or $_.W -ne $cardRect.W }).Count -eq 0
-"  columns: $cols   pet w=$petW"
-Check "every floating box sits in the same column" $sameColumn `
-    "the blocks are placed at $cols"
+$centreMax = ($rounded | ForEach-Object { [int]$_.dx + [int]$_.w / 2 } | Measure-Object -Maximum).Maximum
+$centreMin = ($rounded | ForEach-Object { [int]$_.dx + [int]$_.w / 2 } | Measure-Object -Minimum).Minimum
+$sameColumn = ($centreMax - $centreMin) -le 1
+"  columns: $cols   declared centres: $centres   pet w=$petW"
+Check "every floating box shares the pet's centre line" $sameColumn `
+    "the declared centres are $centres (spread $($centreMax - $centreMin)px)"
 Check "every floating box is at least the pet-centred 300 wide" `
     (@($rounded | Where-Object { [int]$_.w -lt 300 }).Count -eq 0) `
     "declared widths $widths (expected 300 or more: the bubble is 300 and a 4px shadow band may sit on each side of it)"

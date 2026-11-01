@@ -167,7 +167,11 @@ $panel0 = [double]([VR]::PanelFraction())
 "  window = ($($r0.Left),$($r0.Top)) $($r0.Right-$r0.Left)x$($r0.Bottom-$r0.Top)"
 "  cat    = $cat0      panel = $([Math]::Round($panel0,1))%"
 
-"=== open the panel ==="
+"=== a plain click on the pet (it must open nothing) ==="
+# 这一节原来点的是"面板"。面板在阶 3 退休了，而单点在今天的设计里**什么都不该开**（要开卡得
+# 右键，或者点宠物框里的对话按钮）。所以这里断言的正是这条：点一下之后，窗口不动、宠物不动，
+# 那块深色面板也不该出现。区域什么时候被撑开，由 verify-live（插件浮层面）与行为 harness
+# （气泡 / 右键菜单）分别用像素守。
 [VR]::Click($petClickX, $petClickY)
 Start-Sleep -Seconds 2
 $r1 = Rect
@@ -202,9 +206,9 @@ $bot0 = [int]$c0[1] + [int]$c0[3] - 1
 $bot1 = [int]$c1[1] + [int]$c1[3] - 1
 Check "pet bottom edge unchanged (exact)" ($bot0 -eq $bot1) "cat bottom edge moved: $bot0 -> $bot1"
 Check "pet size unchanged (exact)" ([int]$c0[3] -eq [int]$c1[3]) "cat height changed: $($c0[3]) -> $($c1[3])"
-Check "panel became visible" ($panel1 -gt 40) "panel only $([Math]::Round($panel1,1))%"
+Check "a plain click opens no card" ($panel1 -lt 5) "a card appeared ($([Math]::Round($panel1,1))%) - a single click must not open anything"
 
-"=== close the panel ==="
+"=== click again (still nothing) ==="
 [VR]::Click($petClickX, $petClickY)
 Start-Sleep -Seconds 2
 $r2 = Rect
@@ -212,13 +216,13 @@ $cat2 = CatBox
 $panel2 = [double]([VR]::PanelFraction())
 "  window = ($($r2.Left),$($r2.Top)) $($r2.Right-$r2.Left)x$($r2.Bottom-$r2.Top)"
 "  cat    = $cat2      panel = $([Math]::Round($panel2,1))%"
-Check "window unchanged after close" ($r2.Left -eq $r0.Left -and $r2.Top -eq $r0.Top) "window moved"
+Check "window unchanged after the second click" ($r2.Left -eq $r0.Left -and $r2.Top -eq $r0.Top) "window moved"
 $c2 = $cat2 -split '[ ,x]+'
 $dx2 = [Math]::Abs([int]$c0[0] - [int]$c2[0])
 $bot2 = [int]$c2[1] + [int]$c2[3] - 1
-Check "pet left edge unchanged after close (exact)" ($dx2 -eq 0) "cat left edge moved by ${dx2}: $cat0 -> $cat2"
-Check "pet bottom edge unchanged after close (exact)" ($bot0 -eq $bot2) "cat bottom edge moved: $bot0 -> $bot2"
-Check "panel hidden again" ($panel2 -lt 5) "panel still $([Math]::Round($panel2,1))%"
+Check "pet left edge unchanged after the second click (exact)" ($dx2 -eq 0) "cat left edge moved by ${dx2}: $cat0 -> $cat2"
+Check "pet bottom edge unchanged after the second click (exact)" ($bot0 -eq $bot2) "cat bottom edge moved: $bot0 -> $bot2"
+Check "still no card" ($panel2 -lt 5) "a card is up ($([Math]::Round($panel2,1))%)"
 
 "=== drag the pet to the left ==="
 $sx = $petClickX; $sy = $petClickY

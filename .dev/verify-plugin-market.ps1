@@ -1,4 +1,4 @@
-# Verifies the plugin market's real window: its frame, its size and its layout.
+﻿# Verifies the plugin market's real window: its frame, its size and its layout.
 #
 # The market is a SEPARATE PROGRAM, and it exists because the pet's panel is a
 # fixed 380x520 rectangle the OS crops the window to. Four problems were visible in
@@ -628,9 +628,12 @@ Check "the client area is inset by a real frame" `
 #
 # The address is a field in #market-sheet now (a setting, not a strip across the
 # window), so that measurement has no subject. What the header has to prove instead is
-# that it is the one row the design says it is: the mark, the SEARCH FIELD and the three
-# window controls, in the same horizontal band, with a search field wide enough to be a
-# search field.
+# that it is the one row the design says it is: the page title on the left, the window's
+# own control on the right, everything in one horizontal band.
+#
+# ⚠ 这一节以前找的是一个 150px 宽的**搜索框**（旧的市场页 JS 界面有）。控制中心换成 Svelte 之后
+# 头部是"标题 + 主题切换"，于是那条断言从重写那天起就一直是红的——门禁在测一个已经不存在的控件。
+# 跨页搜索是设置稿里的另一件事，还没有做；要做的时候这条断言跟着回来。
 #
 # Two measurement details are unchanged because they are still load-bearing:
 #
@@ -658,22 +661,23 @@ foreach ($part in ($runs -split ';')) {
     }
 }
 
-# Mark + search + refresh + settings + theme = five boxes. A header that failed to lay
-# out - or that dropped a control - measures fewer, and that is a FAILURE, not a note:
-# a check that cannot measure what it exists to measure has not passed.
+# 头部至少要有两块墨：左边是标题（牌子 + 页面名），右边是主题切换。丢了控件、或者头部换行，
+# 下面三条里至少一条会红；"量不到"本身也是失败，不是注脚。
 Check "the header draws its controls as separate boxes (found $($segments.Count))" `
-    ($segments.Count -ge 4) `
-    "found $($segments.Count) boxes in the header band; expected the mark, the search field and three window controls"
+    ($segments.Count -ge 2) `
+    "found $($segments.Count) boxes in the header band; expected at least the page title and the theme control"
 
-if ($segments.Count -ge 4) {
+if ($segments.Count -ge 2) {
     "  boxes: " + (($segments | ForEach-Object { "$($_.X0)-$($_.X1)($($_.W))" }) -join ' ')
 
-    # The search field is the WIDEST box on the row by construction (max-width 440,
-    # min-width 150). Measuring the widest box rather than the second one keeps this
-    # robust to the exact number of icon buttons.
-    $widest = $segments | Sort-Object -Property W -Descending | Select-Object -First 1
-    Check "the search field is a real field (>= 150px wide)" ($widest.W -ge 150) `
-        "the widest box in the header is $($widest.W)px; a search field that narrow is a placeholder"
+    # 左端是标题、右端是那颗 34px 的方形按钮。控制中心没有搜索框（见上面的注释），所以这里量的是
+    # 它真实的两端，而不是一个已经不存在的控件。
+    $leftMost = $segments | Sort-Object -Property X0 | Select-Object -First 1
+    $rightMost = $segments | Sort-Object -Property X1 -Descending | Select-Object -First 1
+    Check "the header starts with the page title" ($leftMost.X0 -le 40) `
+        "the leftmost box starts at x=$($leftMost.X0)px; the title is not at the left edge"
+    Check "the header ends with the theme control" ($rightMost.W -ge 24 -and $rightMost.W -le 60) `
+        "the rightmost box is $($rightMost.W)px wide; expected the ~34px theme toggle"
 
     # …and the row is ONE line: the ink inside the leftmost box and inside the rightmost
     # one must share a band. A control that wrapped to a second line would not.
