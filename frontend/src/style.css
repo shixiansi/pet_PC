@@ -16,12 +16,21 @@
   --panel-bg: rgba(255, 255, 255, 0.97); /* = 控制中心的 --bg-surface，只是带一点透明 */
   --panel-border: rgba(15, 23, 42, 0.1);
   --text: #0f172a;
-  --text-dim: #7a8798;
+  /* 这颗是气泡里"说明"那一行、菜单里的副标题：它压在 --panel-bg（≈白）与 --chip-hover 上。
+     旧值 #7a8798 在白底上 3.41:1 —— 一块半透明卡片里的次级文字本来就更难读，不该再扣一档。
+     #5b6472 与控制中心同一个值（.dev/check-frontend.cjs 把这两颗配对钉住了）。 */
+  --text-dim: #5b6472;
+  /* 强调色两个角色，跟控制中心与插件层用同一套名字：--accent 是**当文字/描边**的那一档，
+     --accent-strong 是**填充**（按钮底、徽章的底，字压在上面）。这一页现在只有填充的用法，
+     但名字必须对得上，否则主题包没法一次覆盖三处。 */
   --accent: #7c3aed;
-  --accent-hover: #6d28d9;
-  --danger: #dc2626;
-  --ok: #059669;
-  --warn: #d97706;
+  --accent-strong: #6d28d9;
+  --accent-hover: #5b21b6;
+  /* 三家状态色同样取 -700：它们在这张卡片里是**文字**（"已保存"、"没网"那种一行字），
+     而 -600 压在近白底上只有 3.1–3.6:1。 */
+  --danger: #b91c1c;
+  --ok: #047857;
+  --warn: #b45309;
   --radius: 14px;
   --font: "Inter", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
     system-ui, sans-serif;
@@ -35,6 +44,11 @@
   --chip-border-strong: rgba(15, 23, 42, 0.26);
   --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.18);
   --shadow-lg: 0 4px 12px rgba(15, 23, 42, 0.18);
+
+  /* 压在被填充的底色上的字。写成令牌而不是每处写 #fff，是因为主题包里会有人把填充色换成
+     浅色（石墨的填充就是浅灰白）——那时白字就成了没写。 */
+  --on-accent: #ffffff;
+  --on-danger: #ffffff;
 }
 
 /* 深色版：右键菜单里那一格能切到这里。值取自控制中心的 [data-theme='dark']，所以两个窗口在
@@ -44,11 +58,17 @@
   --panel-bg: rgba(20, 26, 36, 0.94);
   --panel-border: rgba(255, 255, 255, 0.08);
   --text: #e8edf5;
-  --text-dim: #a2b0c2;
-  --accent-hover: #8b5cf6;
+  --text-dim: #a8b4c6;
+  /* 深色下两个角色换值：#a78bfa 是"当文字"的浅紫，填充则是 #7c3aed（白字 5.70:1）。
+     hover 只能在"白字仍读得出来"的那一侧找：#8b5cf6 白字 4.23，不合格；#6d28d9 是 7.10。 */
+  --accent: #a78bfa;
+  --accent-strong: #7c3aed;
+  --accent-hover: #6d28d9;
   --danger: #f87171;
   --ok: #34d399;
   --warn: #fbbf24;
+  /* 深色下 --danger 是浅红：白字压上去只有 2.4，得翻成深色字。 */
+  --on-danger: #1f1113;
   --tint: rgba(255, 255, 255, 0.06);
   --chip-bg: rgba(20, 26, 36, 0.92);
   --chip-hover: rgba(32, 40, 54, 0.96);
@@ -315,8 +335,8 @@ body {
   height: 20px;
   padding: 0 6px;
   border-radius: 10px;
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-strong);
+  color: var(--on-accent);
   font-size: 11px;
   font-weight: 600;
   line-height: 20px;
@@ -696,9 +716,121 @@ body {
   padding: 7px 10px;
   border-radius: 9px;
   background: var(--danger);
-  color: #fff;
+  color: var(--on-danger);
   font-size: 12px;
   text-align: center;
   box-shadow: var(--shadow-lg);
   animation: panel-in 0.14s ease-out;
+}
+
+/* ==========================================================================
+   主题包（palette packs）
+   ==========================================================================
+
+   与控制中心同一套 id（tools/plugin-market/cc/src/packs.css），同一个字段（theme.json 的
+   `pack`），因为这两个窗口是同一件产品的两面：控制中心选了樱花粉，气泡和右键菜单也必须是粉的。
+   包由**另一个窗口**写，这一页只读（Layout.ThemePack → main.js → data-theme-pack）。
+
+   三条规矩与那份文件相同，加包时两边一起加：
+
+   1. 每个包写两套，而且选择器必须带上 `[data-theme='light'|'dark']`——裸的
+      `[data-theme-pack='x']` 在深色下也生效，浅色块里为浅底调过的值会漏进深色窗口。
+   2. 只覆盖令牌，不碰布局：这一页的窗口被 SetWindowRgn 精确裁过，多一个 padding 就是
+      "露桌面"那条老 bug。
+   3. 半透明的那几颗（面板 0.97 / 0.94、chip 0.96 / 0.92）保持各自的不透明度：它们合成到
+      桌面上，换成不透明就是在宠物身后放一块板。
+   ========================================================================== */
+
+/* — 樱花粉 — */
+:root[data-theme='light'][data-theme-pack='sakura'] {
+  --panel-bg: rgba(253, 247, 249, 0.97);
+  --panel-border: rgba(43, 17, 32, 0.1);
+  --text: #2b1120;
+  --text-dim: #7a5c6a;
+  --accent: #be1857;
+  --accent-strong: #db2777;
+  --accent-hover: #9d174d;
+  --tint: rgba(43, 17, 32, 0.05);
+  --chip-bg: rgba(253, 247, 249, 0.96);
+  --chip-hover: #fdf2f6;
+  --chip-border: rgba(43, 17, 32, 0.12);
+  --chip-border-strong: rgba(43, 17, 32, 0.26);
+}
+:root[data-theme='dark'][data-theme-pack='sakura'] {
+  --panel-bg: rgba(24, 13, 20, 0.94);
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --text: #fbe9f1;
+  --text-dim: #d3a8bb;
+  --accent: #f472b6;
+  --accent-strong: #db2777;
+  --accent-hover: #be1857;
+  --tint: rgba(255, 255, 255, 0.06);
+  --chip-bg: rgba(24, 13, 20, 0.92);
+  --chip-hover: rgba(44, 27, 38, 0.96);
+  --chip-border: rgba(255, 255, 255, 0.18);
+  --chip-border-strong: rgba(255, 255, 255, 0.32);
+}
+
+/* — 森野绿 — */
+:root[data-theme='light'][data-theme-pack='forest'] {
+  --panel-bg: rgba(245, 250, 247, 0.97);
+  --panel-border: rgba(13, 32, 24, 0.1);
+  --text: #0d2018;
+  --text-dim: #4e6b5a;
+  --accent: #047857;
+  --accent-strong: #047857;
+  --accent-hover: #036249;
+  --tint: rgba(13, 32, 24, 0.05);
+  --chip-bg: rgba(245, 250, 247, 0.96);
+  --chip-hover: #eef7f1;
+  --chip-border: rgba(13, 32, 24, 0.12);
+  --chip-border-strong: rgba(13, 32, 24, 0.26);
+}
+:root[data-theme='dark'][data-theme-pack='forest'] {
+  --panel-bg: rgba(10, 21, 16, 0.94);
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --text: #e6f5ec;
+  --text-dim: #a8c6b6;
+  --accent: #34d399;
+  --accent-strong: #047857;
+  --accent-hover: #036249;
+  --tint: rgba(255, 255, 255, 0.06);
+  --chip-bg: rgba(10, 21, 16, 0.92);
+  --chip-hover: rgba(22, 40, 31, 0.96);
+  --chip-border: rgba(255, 255, 255, 0.18);
+  --chip-border-strong: rgba(255, 255, 255, 0.32);
+}
+
+/* — 极简石墨 — */
+/* 填充是浅灰白，所以填充上的字翻成深色（--on-accent）。这一颗就是为它存在的。 */
+:root[data-theme='light'][data-theme-pack='graphite'] {
+  --panel-bg: rgba(244, 244, 245, 0.97);
+  --panel-border: rgba(24, 24, 27, 0.1);
+  --text: #18181b;
+  --text-dim: #52525b;
+  --accent: #18181b;
+  --accent-strong: #18181b;
+  --accent-hover: #3f3f46;
+  --tint: rgba(24, 24, 27, 0.05);
+  --chip-bg: rgba(244, 244, 245, 0.96);
+  --chip-hover: #ececee;
+  --chip-border: rgba(24, 24, 27, 0.12);
+  --chip-border-strong: rgba(24, 24, 27, 0.26);
+  /* 灰底比白底暗：琥珀 -700 压在这个 --chip-hover 上只有 4.26，压深一档（5.4）。 */
+  --warn: #9a4507;
+}
+:root[data-theme='dark'][data-theme-pack='graphite'] {
+  --panel-bg: rgba(17, 18, 20, 0.94);
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --text: #e8e9ec;
+  --text-dim: #a2a6ad;
+  --accent: #e8e9ec;
+  --accent-strong: #e8e9ec;
+  --accent-hover: #c9ccd2;
+  --on-accent: #0d0e10;
+  --tint: rgba(255, 255, 255, 0.06);
+  --chip-bg: rgba(17, 18, 20, 0.92);
+  --chip-hover: rgba(34, 37, 42, 0.96);
+  --chip-border: rgba(255, 255, 255, 0.18);
+  --chip-border-strong: rgba(255, 255, 255, 0.32);
 }

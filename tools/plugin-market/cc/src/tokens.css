@@ -5,12 +5,15 @@
  * 12→36 的字号阶梯，以及窗口骨架的两个常量（侧栏 236 · 顶栏 60）。我们这边保留了**自己的
  * 变量名**（`--bg` / `--line` / `--accent`…），于是每个页面都自动跟着变，不需要逐页改色。
  *
- * 两条仍然生效的约束，别在这里破：
+ * 三条仍然生效的约束，别在这里破：
  *  1. 这个文件是**控制中心**的调色板。桌宠那一页是 `frontend/src/style.css`，那边的窗口被
  *     `SetWindowRgn` 裁过，**不许**出现 box-shadow / filter / transform（会画到桌面上）；
  *     控制中心是普通窗口，所以这里的阴影是安全的——但别把这条经验搬回桌宠那边。
  *  2. `:root[data-theme='light']` 必须写得出来：插件帧按 `data-theme` 判断自己在哪个配色里
  *     （`.dev/check-frontend.cjs` 有一条门禁盯着它）。
+ *  3. **名字是有角色的**，`--accent` 是填充、`--accent-ink` 才是文字。这条以前没人写下来，
+ *     于是深色的导航当前项用 #7c3aed 当文字（压在 --bg-active 上 2.89:1）活了两轮评审。
+ *     `.dev/check-contrast.cjs` 现在把"每颗文字令牌 × 每个表面令牌"全跑一遍，深浅两套都跑。
  */
 
 :root,
@@ -28,11 +31,15 @@
   --p-900: #4c1d95;
 
   /* — 语义色（每个都配一个软底，给 tag / banner 用） — */
-  --success: #059669;
+  /* 三家状态色取 -700，不是更眼熟的 -600：它们几乎总是**当文字**压在自带的 --*-bg 上，
+     而 -600 在那种底色上只有 3.1–3.6:1（旧的 #059669 / #d97706 实测 3.58 / 3.07）。
+     现在的最低值是 5.21 / 4.84 / 5.91。这几个数字不是手算的：.dev/check-contrast.cjs
+     每次跑门禁都会重算，改值的人不会再靠"看着挺深"来判断。 */
+  --success: #047857;
   --success-bg: #ecfdf5;
-  --warning: #d97706;
+  --warning: #b45309;
   --warning-bg: #fffbeb;
-  --danger: #dc2626;
+  --danger: #b91c1c;
   --danger-bg: #fef2f2;
   --info: #2563eb;
   --info-bg: #eff6ff;
@@ -63,12 +70,23 @@
   --border: #e6e9ef;
   --border-strong: #d3d9e2;
   --text: #0f172a;
-  --text-dim: #7a8798;
-  --text-faint: #a6b1c0;
+  /* 这两颗是"次级文字 / 提示文字"，不是装饰色：它们压在 --bg-sunken 上也要读得出来。
+     旧值 #7a8798 / #a6b1c0 在 #f6f7f9 上只有 3.41 / **2.03**——浅色窗口里占位符和行尾说明
+     长期是灰到看不见的，只是没人把它算成对比度！现在取 #5b6472 / #64707d（下限 5.45 / 4.61），
+     与插件层 petpc-ui.css 同一个值：同一件产品的两页不该有两种灰。
+     桌宠那一页的 --text-dim 必须是同一个值（.dev/check-frontend.cjs 有配对断言）。 */
+  --text-dim: #5b6472;
+  --text-faint: #64707d;
 
-  /* — 强调色 — */
+  /* — 强调色：两个角色，两个名字 — */
+  /* --accent 是**品牌色当文字/图标/描边**用的那一颗（5.20:1 最低，深色下换 #a78bfa）；
+     --accent-strong 是**填充**（按钮底、开关、选中的胶囊，白字压上去 7.10:1）。
+     这套名字不是我们发明的：插件层 petpc-ui.css 已经这么用了，而它的 27 份副本是逐字节
+     打进插件包里的——改它等于重新发布 27 个插件。所以词表向**改不动的那个**收敛：
+     谁的副本贵，谁的名字算标准。 */
   --accent: #7c3aed;
-  --accent-hover: #6d28d9;
+  --accent-strong: #6d28d9;
+  --accent-hover: #5b21b6;
   --accent-soft: #f5f3ff;
   --accent-dim: #c4b5fd;
   --on-accent: #ffffff;
@@ -175,11 +193,21 @@
   --border: #232d3d;
   --border-strong: #31404f;
   --text: #e8edf5;
-  --text-dim: #a2b0c2;
-  --text-faint: #5a6a7e;
+  /* 深色的次级/提示文字：旧值 #5a6a7e 压在 --bg-raised 上只有 3.16:1，比浅色那两颗还糟。
+     #8e9bb0 的下限是 5.86（最差的底是 --bg-active，那也正是"选中行"的底）。 */
+  --text-dim: #a8b4c6;
+  --text-faint: #8e9bb0;
 
-  --accent: #7c3aed;
-  --accent-hover: #8b5cf6;
+  /* 深色下这两个角色必须换成不同的值，这正是"两个名字"存在的全部理由：
+     #7c3aed 当按钮底、白字压上去是 5.70:1（没问题），但它**当文字**在 --bg 上只有 3.39、
+     压在 --bg-active（选中行）上只有 2.89 —— 深色导航的当前项就是这么变成"看不清"的。
+     所以：文字/图标/描边用 --accent（#a78bfa，最差 6.06），填充用 --accent-strong。 */
+  --accent: #a78bfa;
+  --accent-strong: #7c3aed;
+  /* 填充的 hover 只能在"白字仍然读得出来"的那一侧找：#8b5cf6 白字只有 4.23，不合格；
+     #6d28d9 是 7.10:1。代价是深色下按钮按下时变深（而不是更亮）——填充不是文字，
+     "按下变深"仍然是一个能看懂的方向，而"按下就糊成一片"不是。 */
+  --accent-hover: #6d28d9;
   --accent-soft: #1e1b3a;
   --accent-dim: #4c3d94;
   --on-accent: #ffffff;

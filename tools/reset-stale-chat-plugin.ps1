@@ -28,7 +28,7 @@
 # 关于第 3 步（关键，别跳过）：
 #
 #   内嵌示例源随 exe 分发，它已经是 1.1.0，而且 sha256 与包字节一致。
-#   而远端仓库（`pet-pc-plugins` 的 `main`）**至今仍是 1.0.0**：
+#   而远端仓库（`PetPC-plugin` 的 `main`）**至今仍是 1.0.0**：
 #   它的 index.json 还写着 `"version": "1.0.0"` 和 `...-1.0.0.zip`。
 #   所以只要市场在读远端，重新安装拿到的还是那个没有 `panelSlot`、
 #   没有 `config` 的旧包，症状一模一样。清空地址就是让它改走内嵌源，
@@ -165,5 +165,5 @@ Write-Host '    git commit -m "feat: 对话插件 1.1.0（panelSlot + config 声
 Write-Host "    git push origin main"
 Write-Host ""
 Write-Host "  推送后可以改回地址：在市场程序顶部的地址框里填回"
-Write-Host "  https://gh-proxy.com/https://raw.githubusercontent.com/shixiansi/pet-pc-plugins/main"
+Write-Host "  https://gh-proxy.com/https://raw.githubusercontent.com/shixiansi/PetPC-plugin/main"
 Write-Host "  再点「保存」。"

@@ -73,7 +73,13 @@ func (a *App) startSettingsWatch() {
 		// The colour scheme is shared with the control center (internal/store/theme.go), which
 		// can flip it at any moment. Same rule as the scale: a fresh value on disk is not an
 		// applied change - the page has to be told, and a layout push is what tells it.
+		//
+		// The PACK is the same story from the same file, and it has exactly one writer (the
+		// control center's 主题包 cards). Watching them in one comparison is deliberate: the two
+		// travel together in the layout, so two separate pushes would paint the same frame twice
+		// and - worse - could paint the new scheme with the old pack in between.
 		appliedTheme := a.panelTheme()
+		appliedPack := a.panelThemePack()
 		ticker := time.NewTicker(settingsWatchInterval)
 		defer ticker.Stop()
 		for {
@@ -102,12 +108,12 @@ func (a *App) startSettingsWatch() {
 				// re-apply, there is mark-up to repaint. The control center is where it is
 				// now chosen, so the pet has to be told; the event carries the URL so the
 				// page does not have to guess when to ask again.
-				if theme := a.panelTheme(); theme != appliedTheme {
-					appliedTheme = theme
+				if theme, pack := a.panelTheme(), a.panelThemePack(); theme != appliedTheme || pack != appliedPack {
+					appliedTheme, appliedPack = theme, pack
 					if l, err := a.GetLayout(); err == nil {
 						a.emitEvent("pet:layout", l)
 					}
-					a.log.Infof("settings", "外部改动了配色，已推送布局（%s）", theme)
+					a.log.Infof("settings", "外部改动了外观，已推送布局（配色 %s，主题包 %q）", theme, pack)
 				}
 				if img := a.store.ImagePath(); img != appliedImage {
 					appliedImage = img

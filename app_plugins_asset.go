@@ -38,5 +38,7 @@ const pluginBridgeJS = plugins.BridgeJS
 // a plugin asset path" test, so this function cannot disagree with the market's
 // copy about what the prefix means.
 func (a *App) servePluginAsset(w http.ResponseWriter, r *http.Request) {
-	plugins.ServePluginAsset(a.pluginManager(), w, r)
+	// The pack set rides along: an HTML document gets the chosen pack spliced in, because the frame
+	// is an opaque origin and cannot be reached any other way (internal/plugins/asset.go).
+	plugins.ServePluginAsset(a.pluginManager(), a.packs, w, r)
 }

@@ -250,6 +250,18 @@ function applyLayout(layout) {
     pluginHost?.setTheme(dark ? 'dark' : 'light');
   }
 
+  // The palette pack, from the same push and for the same reason: `<html data-theme-pack>` is what
+  // style.css keys the pack blocks off. An EMPTY pack removes the attribute rather than writing an
+  // empty one - "no attribute" is the stylesheet's default look, while `data-theme-pack=""` is a
+  // pack that does not exist. That difference is invisible until the day the default changes.
+  //
+  // The pet never chooses a pack: the control center's cards do. This line is the whole reason the
+  // two windows cannot end up in different palettes.
+  if (typeof layout.themePack === 'string') {
+    if (layout.themePack) document.documentElement.dataset.themePack = layout.themePack;
+    else delete document.documentElement.dataset.themePack;
+  }
+
   Object.assign(els.pet.style, {
     left: `${layout.petX}px`,
     top: `${layout.petY}px`,

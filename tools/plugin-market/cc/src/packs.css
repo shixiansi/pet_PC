@@ -1,0 +1,170 @@
+/*
+ * 主题包（palette packs）—— 只覆盖令牌，不碰任何组件。
+ *
+ * 一条 `data-theme-pack="sakura"` 就能让整窗换色，因为所有页面画的都是 tokens.css 里的名字。
+ * 这就是为什么这一层能存在：如果哪个页面写死了十六进制，它就会是那张粉底窗口里唯一一块紫的。
+ *
+ * 三条约束，加包的时候别破：
+ *
+ *  1. **每个包必须写两套**（浅色一块、深色一块），而且浅色块的选择器要**带上
+ *     `[data-theme='light']`**。写成裸的 `:root[data-theme-pack='x']` 看着更短，但那样它对深色
+ *     也生效，于是浅色块里为了粉底而压深的状态色会漏进深色窗口（实测 #a34a08 压在深色卡片上
+ *     只有 2.9:1）。这条不是理论：第一版就是那么写的，门禁一次报了 11 处。
+ *  2. **名字就是角色**：`--accent` 当文字、`--accent-strong` 当填充（白字压上去）。包里的这两个
+ *     值必须各自满足自己那个角色的对比度，不能因为"看着是一族颜色"就填同一个。
+ *  3. **`.dev/check-contrast.cjs` 会把每个包 × 两套配色 × 每颗文字令牌都算一遍**（它认得这个文件
+ *     里的 `[data-theme-pack]` 块）。改一个值跑一遍就知道，不用靠眼睛判断"这个粉够不够深"。
+ *
+ * 没有 `violet` 块：紫罗兰就是 tokens.css 的默认值。给默认包再写一遍会造出第二个真相，
+ * 而"改了默认色、忘了改默认包"是这类代码最典型的腐坏方式。
+ */
+
+/* — 樱花粉 ───────────────────────────────────────────────────────────────── */
+/* 主色 #db2777（pink-600）当**填充**，白字 4.60:1；当**文字**它只有 4.0 上下，所以文字用
+   #be1857（pink-700）。这是本文件里最容易被"统一成一个值"破坏的地方。 */
+[data-theme='light'][data-theme-pack='sakura'] {
+  --bg: #fdf7f9;
+  --bg-app: #fdf7f9;
+  --bg-raised: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-sunken: #fdf2f6;
+  --bg-hover: #fdf2f6;
+  --bg-active: #fce7ef;
+  --line: #f2dde5;
+  --border: #f2dde5;
+  --border-strong: #e3c3d0;
+  --text: #2b1120;
+  --text-dim: #7a5c6a;
+  --text-faint: #82626f;
+  --accent: #be1857;
+  --accent-strong: #db2777;
+  --accent-hover: #9d174d;
+  --accent-soft: #fdf2f6;
+  --accent-dim: #f9a8d4;
+  --ring: rgba(219, 39, 119, 0.28);
+  /* 粉底比中性底更"吃"暖色：同一颗 -700 的警告/信息色压在这个 --bg-active 上只剩 4.26 / 4.38，
+     所以这个包自己把它们各压深一档（实测 5.03 / 5.69）。状态色是**按时装**调的，
+     沿用基础配色只对中性底成立。 */
+  --warning: #a34a08;
+  --info: #1d4ed8;
+}
+[data-theme='dark'][data-theme-pack='sakura'] {
+  --bg: #180d14;
+  --bg-app: #180d14;
+  --bg-raised: #241620;
+  --bg-surface: #241620;
+  --bg-sunken: #120a0f;
+  --bg-hover: #2c1b26;
+  --bg-active: #3a1c2c;
+  --line: #35202d;
+  --border: #35202d;
+  --border-strong: #472b3a;
+  --text: #fbe9f1;
+  --text-dim: #d3a8bb;
+  --text-faint: #bb91a4;
+  --accent: #f472b6;
+  --accent-strong: #db2777;
+  --accent-hover: #be1857;
+  --accent-soft: #3a1c2c;
+  --accent-dim: #9d174d;
+  --ring: rgba(244, 114, 182, 0.32);
+}
+
+/* — 森野绿 ───────────────────────────────────────────────────────────────── */
+/* 绿的 -700（#047857）本来就能当文字又能当填充（白字 5.48），所以这里两个角色同值——
+   这是唯一一个"同值不是偷懒"的包。 */
+[data-theme='light'][data-theme-pack='forest'] {
+  --bg: #f5faf7;
+  --bg-app: #f5faf7;
+  --bg-raised: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-sunken: #eef7f1;
+  --bg-hover: #eef7f1;
+  --bg-active: #e3f4e9;
+  --line: #dcede2;
+  --border: #dcede2;
+  --border-strong: #c2ddca;
+  --text: #0d2018;
+  --text-dim: #4e6b5a;
+  /* 灰绿底比中性命白底暗，提示文字和警告色都得跟着压深一档（实测 4.96 / 5.19）。 */
+  --text-faint: #526d5d;
+  --accent: #047857;
+  --accent-strong: #047857;
+  --accent-hover: #036249;
+  --accent-soft: #ecfdf5;
+  --accent-dim: #6ee7b7;
+  --ring: rgba(4, 120, 87, 0.28);
+  --warning: #a34a08;
+}
+[data-theme='dark'][data-theme-pack='forest'] {
+  --bg: #0a1510;
+  --bg-app: #0a1510;
+  --bg-raised: #111f18;
+  --bg-surface: #111f18;
+  --bg-sunken: #070f0b;
+  --bg-hover: #16281f;
+  --bg-active: #123528;
+  --line: #1d3128;
+  --border: #1d3128;
+  --border-strong: #274234;
+  --text: #e6f5ec;
+  --text-dim: #a8c6b6;
+  --text-faint: #8cae9c;
+  --accent: #34d399;
+  --accent-strong: #047857;
+  --accent-hover: #036249;
+  --accent-soft: #123528;
+  --accent-dim: #065f46;
+  --ring: rgba(52, 211, 153, 0.3);
+}
+
+/* — 极简石墨 ─────────────────────────────────────────────────────────────── */
+/* 唯一一个会翻转 `--on-accent` 的包：填充是浅灰白，所以填充上的字必须是深色。
+   凡是"主色是浅色"的包都要照做——白字压在 #e8e9ec 上等于没写。 */
+[data-theme='light'][data-theme-pack='graphite'] {
+  --bg: #f4f4f5;
+  --bg-app: #f4f4f5;
+  --bg-raised: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-sunken: #ececee;
+  --bg-hover: #ececee;
+  --bg-active: #e6e6e8;
+  --line: #e4e4e7;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --text: #18181b;
+  --text-dim: #52525b;
+  --text-faint: #5f5f68;
+  --accent: #18181b;
+  --accent-strong: #18181b;
+  --accent-hover: #3f3f46;
+  --accent-soft: #ececee;
+  --accent-dim: #a1a1aa;
+  --ring: rgba(24, 24, 27, 0.22);
+  /* 中性的灰底（#ececee / #e6e6e8）比白底暗，三颗状态色各压深一档才够（实测 6.16 / 5.22 / 5.38）。 */
+  --success: #065f46;
+  --warning: #9a4507;
+  --info: #1d4ed8;
+}
+[data-theme='dark'][data-theme-pack='graphite'] {
+  --bg: #111214;
+  --bg-app: #111214;
+  --bg-raised: #191b1e;
+  --bg-surface: #191b1e;
+  --bg-sunken: #0d0e10;
+  --bg-hover: #22252a;
+  --bg-active: #2a2d32;
+  --line: #2a2d32;
+  --border: #2a2d32;
+  --border-strong: #3a3e45;
+  --text: #e8e9ec;
+  --text-dim: #a2a6ad;
+  --text-faint: #94989f;
+  --accent: #e8e9ec;
+  --accent-strong: #e8e9ec;
+  --accent-hover: #c9ccd2;
+  --accent-soft: #22252a;
+  --accent-dim: #4a4e56;
+  --on-accent: #0d0e10;
+  --ring: rgba(232, 233, 236, 0.3);
+}

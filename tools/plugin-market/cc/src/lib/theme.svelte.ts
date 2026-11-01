@@ -1,4 +1,4 @@
-import { SetTheme } from './bridge';
+import { SetTheme, SetThemePack } from './bridge';
 
 /*
  * 这个窗口的配色：壳子（顶栏的切换按钮）与「偏好」页的浅/深控件共用同一份状态。
@@ -6,12 +6,20 @@ import { SetTheme } from './bridge';
  * 为什么需要这个模块而不是各页各存一个 `$state`：两处都能改配色，而它们必须同意"现在是哪个"。
  * `document.documentElement.dataset.theme` 仍然是 **CSS 的唯一真相**（`tokens.css` 与
  * 插件帧都按它取值）；这里的 `themeState` 只是它的**响应式镜像**，给按钮和分段控件用。
+ *
+ * 主题包（`data-theme-pack`）走同一条规矩，多一条理由：**它是另一个字段、另一次写入**
+ * （theme.json 里的 `pack`；同一个文件里的 `theme` 连桌宠的右键菜单都能改）。所以包的状态
+ * 不挂在配色上——一次配色切换不该顺手重画一遍调色板，那两件事的写入者都不一样。
  */
 function read(): 'light' | 'dark' {
   return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
 }
 
-export const themeState = $state({ current: read() });
+function readPack(): string {
+  return document.documentElement.dataset.themePack ?? '';
+}
+
+export const themeState = $state({ current: read(), pack: readPack() });
 
 /**
  * 把镜像对齐到 DOM。
@@ -22,6 +30,7 @@ export const themeState = $state({ current: read() });
  */
 export function syncThemeState(): void {
   themeState.current = read();
+  themeState.pack = readPack();
 }
 
 /**
@@ -40,6 +49,27 @@ export async function setTheme(next: 'light' | 'dark'): Promise<void> {
     document.documentElement.dataset.theme = prev;
     themeState.current = prev;
   }
+}
+
+/**
+ * 改主题包。规则与 setTheme 一样——先让 CSS 生效，再落盘，失败就翻回去——
+ * 但有一处不同：**空字符串是"没有包"**，这时要删掉属性而不是写一个空的。
+ * `data-theme-pack=""` 是一个不存在的包，而"没有属性"才是 tokens.css 的默认配色。
+ */
+export async function setPack(id: string): Promise<void> {
+  const prev = readPack();
+  paintPack(id);
+  try {
+    await SetThemePack(id);
+  } catch {
+    paintPack(prev);
+  }
+}
+
+function paintPack(id: string): void {
+  if (id) document.documentElement.dataset.themePack = id;
+  else delete document.documentElement.dataset.themePack;
+  themeState.pack = id;
 }
 
 /** 顶栏那个按钮用的：在两者之间翻。 */

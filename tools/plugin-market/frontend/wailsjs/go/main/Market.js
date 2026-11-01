@@ -34,6 +34,10 @@ export function Install(arg1) {
   return window['go']['main']['Market']['Install'](arg1);
 }
 
+export function InstallTheme(arg1) {
+  return window['go']['main']['Market']['InstallTheme'](arg1);
+}
+
 export function Installed() {
   return window['go']['main']['Market']['Installed']();
 }
@@ -64,6 +68,10 @@ export function PluginRequest(arg1, arg2, arg3) {
 
 export function RememberSelection(arg1) {
   return window['go']['main']['Market']['RememberSelection'](arg1);
+}
+
+export function RemoveTheme(arg1) {
+  return window['go']['main']['Market']['RemoveTheme'](arg1);
 }
 
 export function ResetPetImage() {
@@ -138,8 +146,28 @@ export function SetTheme(arg1) {
   return window['go']['main']['Market']['SetTheme'](arg1);
 }
 
+export function SetThemePack(arg1) {
+  return window['go']['main']['Market']['SetThemePack'](arg1);
+}
+
 export function Theme() {
   return window['go']['main']['Market']['Theme']();
+}
+
+export function ThemePack() {
+  return window['go']['main']['Market']['ThemePack']();
+}
+
+export function ThemePacksProblem() {
+  return window['go']['main']['Market']['ThemePacksProblem']();
+}
+
+export function ThemeStore() {
+  return window['go']['main']['Market']['ThemeStore']();
+}
+
+export function Themes() {
+  return window['go']['main']['Market']['Themes']();
 }
 
 export function Uninstall(arg1, arg2) {

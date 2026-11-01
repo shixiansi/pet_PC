@@ -1,7 +1,7 @@
 // Package sample embeds the built-in plugin source.
 //
 // This is the offline floor of the plugin market. The market's real home is the
-// pet-pc-plugins repository, but it is fetched over the network, and a plugin
+// PetPC-plugin repository, but it is fetched over the network, and a plugin
 // tab that renders nothing when the mirror is unreachable would make the whole
 // feature look broken. So one sample plugin ships inside the binary as an
 // embedded catalogue plus its package.

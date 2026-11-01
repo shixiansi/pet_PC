@@ -231,7 +231,7 @@ func (m *Market) pluginCallLog() *logging.Throttle {
 // Wired into this program's AssetServer. It is the same handler the pet uses, so
 // the traversal defence and the bridge protocol have exactly one implementation.
 func (m *Market) ServePluginAsset(w http.ResponseWriter, r *http.Request) {
-	plugins.ServePluginAsset(gateAdapter{m.manager}, w, r)
+	plugins.ServePluginAsset(gateAdapter{m.manager}, m.packs, w, r)
 }
 
 // ServeHTTP is this program's AssetServer fallback.
@@ -244,7 +244,7 @@ func (m *Market) ServePluginAsset(w http.ResponseWriter, r *http.Request) {
 // URL should say so, and silently serving the market's own index for it would make
 // a broken plugin entry look like a plugin that rendered nothing.
 func (m *Market) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if plugins.ServePluginAsset(gateAdapter{m.manager}, w, r) {
+	if plugins.ServePluginAsset(gateAdapter{m.manager}, m.packs, w, r) {
 		return
 	}
 	http.NotFound(w, r)

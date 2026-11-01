@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+
+	"PetPC/internal/themepacks"
 )
 
 // AssetPrefix is the URL space plugin files are served from.
@@ -31,10 +34,26 @@ const BridgePath = AssetPrefix + "@host/bridge.js"
 // where the path-traversal defence could drift, and that defence is the only thing
 // standing between a request-supplied string and the filesystem.
 //
+// PackSource answers with the `<style>` a pack needs in a scheme, or "" for nothing.
+//
+// An interface rather than a direct call into internal/themepacks so a caller can supply the loaded
+// set (built-ins + what is installed on this machine). A nil PackSource still works: the built-in
+// table is used, which is what tests and the bridge-only paths want.
+type PackSource interface {
+	CSS(scheme, pack string) string
+}
+
+// ServePluginAsset serves one plugin front-end file, or the bridge script.
+//
+// It is the ONE implementation of "give the plugin its own files", used by every
+// program that hosts a plugin interface. Two copies of this would be two places
+// where the path-traversal defence could drift, and that defence is the only thing
+// standing between a request-supplied string and the filesystem.
+//
 // It returns false when the request is not for a plugin asset at all, so a caller
 // can fall through to its own routing rather than having to test the prefix
 // itself.
-func ServePluginAsset(gate Gate, w http.ResponseWriter, r *http.Request) bool {
+func ServePluginAsset(gate Gate, packs PackSource, w http.ResponseWriter, r *http.Request) bool {
 	if !strings.HasPrefix(r.URL.Path, AssetPrefix) {
 		return false
 	}
@@ -99,8 +118,59 @@ func ServePluginAsset(gate Gate, w http.ResponseWriter, r *http.Request) bool {
 	// Plugin files change when the plugin is reinstalled, and the plugin directory
 	// name does not carry a version, so nothing may be cached.
 	w.Header().Set("Cache-Control", "no-store")
+
+	// An HTML document is the plugin's own window: it gets the palette pack injected, because a
+	// sandboxed opaque-origin frame has no other way to learn it (see themepack.go). Everything
+	// else is bytes on disk and is served straight through.
+	if strings.EqualFold(filepath.Ext(absFull), ".html") {
+		serveDocument(w, r, absFull, packs)
+		return true
+	}
 	http.ServeContent(w, r, filepath.Base(absFull), fi.ModTime(), f)
 	return true
+}
+
+// serveDocument rewrites a plugin's HTML on the way out so a theme pack reaches it.
+//
+// WHY REWRITE AND NOT postMessage: the frame is `sandbox="allow-scripts"` with no
+// `allow-same-origin`, so the host cannot touch its DOM at all. Posting a token table would require
+// every plugin author to write an apply-tokens handler - i.e. "the pack works only in plugins that
+// opted in", which is the opposite of what a pack is. Injecting a `<style>` element needs nothing
+// from the plugin and works for the 27 shared-ui plugins and the wild ones alike.
+//
+// The file itself is never modified: this is a read, a splice, and a write to the response.
+func serveDocument(w http.ResponseWriter, r *http.Request, abs string, packs PackSource) {
+	body, err := os.ReadFile(abs)
+	if err != nil {
+		http.Error(w, "open failed", http.StatusInternalServerError)
+		return
+	}
+	// `?theme=` and `?pack=` come from the host page's iframe src (both programs put them there).
+	// An absent or unknown pack yields "", which means "do not touch the document at all".
+	out := themepacks.SpliceInto(body, packStyle(packs, r))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(out)))
+	if r.Method == http.MethodHead {
+		return
+	}
+	if _, err := w.Write(out); err != nil {
+		return
+	}
+}
+
+// packStyle picks the `<style>` for this request: the caller's set first, the compiled-in table as
+// the fallback.
+//
+// A nil PackSource is not a degraded mode - it is "built-ins only", which is what tests and any
+// caller that has no data directory want. The alternative (a mandatory implementation) would force
+// every caller to know about the themes directory even when it serves no documents.
+func packStyle(packs PackSource, r *http.Request) string {
+	scheme := r.URL.Query().Get("theme")
+	pack := r.URL.Query().Get("pack")
+	if packs != nil {
+		return packs.CSS(scheme, pack)
+	}
+	return themepacks.StyleTag(scheme, pack)
 }
 
 // splitAssetPath splits "<id>/<relpath>" and validates both halves.

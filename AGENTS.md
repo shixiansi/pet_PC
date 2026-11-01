@@ -20,6 +20,11 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 > 一个气泡卡、一个右键菜单、以及一套权限闸门。别在宿主里"顺手加个 AI 功能"——工具调用、
 > 长期记忆这类东西要先想清楚它属于宿主还是属于插件（现在的答案是插件）。
 >
+> **连"宠物长什么样"也不归宿主了。** manifest 声明 `body: true` 的插件，它的入口文档就画在
+> 宠物那一格里，宿主只在**没有**这样的插件时画自带的那张图。所以宿主手里关于宠物的东西只剩
+> 一个矩形：别在宿主里画宠物身上的内容——头顶那行字与角标是 `pet.badge` 与待办快照两个
+> **能力**，不是宿主的长相。
+>
 > **没有一个"面板"可以往里加东西了。** 那个 380x520 的 tab 面板已经退休：它有过的两个标签
 > （待办 / 对话）各自变成插件的浮层面，`Layout` 里只剩它那块**矩形**（宠物旁边的槽位）。
 > 所以"给桌宠加个界面"只有三条路：加一格右键菜单、加一种气泡、或者写一个插件。
@@ -122,6 +127,13 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 放大来容它，就会在宠物旁留下一条页面从不绘制、却会吞掉桌面点击的窗口。所以"给桌宠加个按钮"
 不是加一个 `div`，而是先决定它住在谁的盒子里。
 
+**宠物本体那一格是同一道题的另一个答案，而且它只有一种解法。** 画本体的插件帧（`#pet-body`）
+只能**整格铺在 `#pet` 里**：它要画的就是被裁出来的那块矩形，往外一像素都会被原生区域切掉。
+两条随之而来的规则：这一层**必须透明**（不透明就是宠物身后一块方板），并且**必须
+`pointer-events: none`**——拖动、右键菜单、悬停按钮全都发生在这只宠物身上，而手势是宿主的；
+一个吃指针的本体帧会得到一只拖不走、右不动、藏不掉的宠物。头顶那行字与角标按 DOM 顺序画在
+它上面（所以 `#pet-body` 刻意**没有** `z-index`：给了它就会盖住那两个）。
+
 **右键菜单是气泡，不是第四个占位。** 2026-10 之前桌宠右键借的是托盘的原生弹出菜单
 （`Tray.ShowMenuAtCursor`），理由是"页面画的菜单得挤进裁剪区域，那就是第四个占位"。这条推理
 错在前提：菜单要的东西气泡全都有——固定矩形、按矩形裁剪、以及"同一位置只放一个"的折叠规则。
@@ -159,6 +171,13 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 （正在填的表单、滚动位置、已经答过的握手）。所以页面只给一个稳定挂载点，帧由 `$effect`
 命令式建、命令式销毁。
 
+**这个窗口里有三处调用它，只有一份实现**：插件页（`PluginFrame.svelte`）、**「扩展能力」的
+测试台**（`pages/Bench.svelte`），以及测试台自己的重挂。第三处是两个新需求逼出来的，不是新机制：
+`init.surface` 变成参数（插件页永远只说 `panel/workshop`，而"被下边缘切掉"只发生在桌宠的矩形里），
+每一条过边界的消息可以被观察（`onMessage`），以及一个"模拟未授权"开关（`denyRequests`——
+`init` 里 `granted` 清空 **且** 请求在宿主这一层就被拒，两者在 `mountPlugin` 里一起决定，因为
+只做一半就是在教插件错误地认识自己）。它**不**改真实授权：那是「插件」页上用户的决定。
+
 还有一条**过边界前必须复制成纯数据**的规则：Svelte 5 的 `$state` 会把**纯对象与数组**
 深度代理，而 Proxy **过不了** `postMessage` 的结构化克隆——`init` 里带一个被代理的数组，
 抛的是 `Uncaught DataCloneError: … could not be cloned.`，而这个异常发生在**消息监听器
@@ -178,14 +197,14 @@ Go + Wails v2 + 原生 JS（没有前端框架、没有 TypeScript）。没有 W
 
 文档判断"我在哪个窗口"**优先用 `init.host`**（`{program, methods}`，两个程序各自从自己的能力表
 算出来，见 `internal/plugins.HostInfo`），退化时才是 `init.surface.slot`：桌宠给 `chat` /
-`todos` / `pomodoro` / `background`，控制中心给 `workshop`。`kind` 不能用来判断——常驻帧的
-`kind` 也是 `panel`。**能问"这个窗口服务不服务 X"就别背那张表**：`host.methods.includes(m)`
+`todos` / `pomodoro` / `background` / `body`（画宠物本体的那一格），控制中心给 `workshop`。
+`kind` 不能用来判断——常驻帧的 `kind` 也是 `panel`。**能问"这个窗口服务不服务 X"就别背那张表**：`host.methods.includes(m)`
 与宿主闸门是同一个答案（真机上 571 行 `本程序不支持该方法`，全部来自背错表或者干脆不问）。
 在 `workshop` 里缺的能力要**说出口**（对话插件把输入框变成只读并写明去哪发，番茄钟隐藏计时
 按钮并写明计时在桌宠上），一个点了没反应的控件比没有控件更糟。
 
 **对外的契约只有一份，而且它住在插件仓**：[`market/docs/plugin-dev.md`](market/docs/plugin-dev.md)
-（GitHub：<https://github.com/shixiansi/pet-pc-plugins/blob/main/docs/plugin-dev.md>），配套的自检
+（GitHub：<https://github.com/shixiansi/PetPC-plugin/blob/main/docs/plugin-dev.md>），配套的自检
 工具是 `market/docs/plugin-testkit/`（一个小目录，插件作者整个拷进自己的仓就能跑，不需要本仓库、
 也不需要宿主代码）：
 
@@ -244,6 +263,13 @@ DPAPI（[internal/desktop/crypto_windows.go](internal/desktop/crypto_windows.go)
    那一份"，**故意更旧**。所以 `TestBuiltinSampleAgreesWithTheMarketCatalogue` 只要求"sample 里的
    每个插件市场还认"，不比条数也不比版本（2026-11-01 之前它要求两边条数相等，于是市场长到 36 个
    之后天天红，红得没人看）。
+   **`market/tools/package.ps1` 也因此不许把市场目录整个抄进兜底源**：`sample/embed.go` 是一份
+   **手写的**包名单（`//go:embed` 只认仓库里的具体文件），所以"复制全部 zip + 覆盖 index.json"
+   会让兜底目录宣告 36 个下载、二进制只带 10 个——点安装就 404，而 `TestBuiltinSampleMatchesIndex`
+   要到事后才红。脚本现在只刷新样例**已有**的包（同名 = 同版本才换字节）、按磁盘重算 sha256、
+   **不新增文件**，并丢掉市场已经不认的 id；给兜底源加插件仍然是手改 `embed.go` + 重跑脚本。
+   另外这个脚本只能在 `pwsh` 下跑：`param()` 的默认值用了 `$PSScriptRoot`，而 Windows PowerShell
+   5.1 在绑定参数时还没有它。
 
 ### 3.8 日志：一直在写、有等级、没有正文
 
@@ -283,9 +309,19 @@ DPAPI（[internal/desktop/crypto_windows.go](internal/desktop/crypto_windows.go)
    退出时**不**收（协议端要跨重启活着），只点名。测试：`TestProcessKill*` / `TestReap*`。
 2. **辅助脚本交给宿主托管**（manifest 的 `sidecar`）。四条校验：包内相对路径、必须写进
    `assets`、必须申请 `process`、必须声明 `background`；脚本从 `PETPC_PLUGIN_ID` /
-   `PETPC_PLUGIN_DATA` 拿上下文，宿主负责启动与回收。**别再让插件自己 `process.launch`**：
+   `PETPC_PLUGIN_DATA` 拿上下文，宿主负责启动与回收。**sidecar 是宿主的程序，不是插件的**：
+   它的 `stderr` 进日志（WARN，按行截断+按行节流），**宿主退出时停掉**（与 `process.launch`
+   相反——那是插件自己的程序，可能必须跨重启活着）。2026-10-31 两条都错过一次：8/10 个脚本
+   静默退出而日志只有「已启动」，以及 `vision-helper.ps1` 同时有 8 份在跑。
+   **别再让插件自己 `process.launch`**：
    插件拿不到自己的安装目录，于是"自己启动"必然要求用户手填两个绝对路径——2026-10-31 的实测是
-   五个这样写的插件里四个从来没跑起来过。测试：`TestSidecar*` / `TestManifestSidecar`。
+   五个这样写的插件里四个从来没跑起来过。**`.ps1` 的编码也是这条契约的一部分**：Windows
+   PowerShell 5.1 用本机 ANSI 代码页解码没有 BOM 的脚本，一句中文注释就能吃掉后面的引号，
+   脚本一启动就 ParserError，而报的行号指向一行完全正常的代码——五个 sidecar 插件里四个是这种
+   形状，一个字节都没产出过。宿主现在在启动前把原因写成一行 WARN（`sidecarScriptEncoding`），
+   作者侧由 `plugin-check.mjs` 的 `sidecar-encoding` 拦；脚本要么带 BOM，要么纯 ASCII。
+   测试：`TestSidecar*` / `TestManifestSidecar` / `TestSidecarScriptEncodingNamesTheTrap` /
+   `TestDecodeChildOutputReadsTheCodePageAPowerShellWrites`。
 3. **变化是推的，不是拉的**，而且**两个宿主都要推**。三条事件：`config.changed`、
    `storage.changed`（自己的私有目录）、`share.changed`（声明了 `<owner>/<name>` 的读者
    **+ 发布者自己的帧**；跨程序靠"牌盘是文件"那条路）。另有 `storage.pressure`（私有目录跨过
@@ -334,7 +370,7 @@ node .dev\check-frontend.cjs
 ```
 
 另外有一个 `contract` job：它把**公开的插件仓**检出到 `market/`，于是
-`internal/plugins` 的 sample 字节对比（§3.7）与 `.dev/check-frontend.cjs` 的 138 条静态接线
+`internal/plugins` 的 sample 字节对比（§3.7）与 `.dev/check-frontend.cjs` 的 142 条静态接线
 检查真的会在 CI 里跑——在此之前它们只在开发机上跑过，而"没检出所以 SKIP"的代价是十个内置包
 里九个漂了整整一轮没人知道。
 

@@ -3,9 +3,9 @@
 **这份文档现在只住在插件仓里**，因为它讲的是插件，而读它的人是从插件仓（或它的 GitHub 地址）
 进来的：
 
-- GitHub：<https://github.com/shixiansi/pet-pc-plugins/blob/main/docs/plugin-dev.md>
+- GitHub：<https://github.com/shixiansi/PetPC-plugin/blob/main/docs/plugin-dev.md>
 - 本机检出：`market/docs/plugin-dev.md`
-- 配套的自检工具：<https://github.com/shixiansi/pet-pc-plugins/blob/main/docs/plugin-testkit/README.md>
+- 配套的自检工具：<https://github.com/shixiansi/PetPC-plugin/blob/main/docs/plugin-testkit/README.md>
   （本机：`market/docs/plugin-testkit/`）
 
 ## 为什么这里只剩一句话

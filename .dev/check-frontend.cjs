@@ -1930,11 +1930,35 @@ check(
     // Read from the CONTROL CENTER's frame host now - the old market frontend is not built
     // any more, so assertions against it certified code no window could run.
     /plugin-asset\/\$\{pluginId\}\/\$\{entry\}\?theme=\$\{theme\}/.test(ccPluginFrame) &&
-    /if \(initialised\) post\(\{ type: 'theme', theme: current \}\)/.test(ccPluginFrame) &&
+    // The guard is what makes the message reach a document that is already running; the log line
+    // the bench added lives INSIDE it, so the shape it is matched in moved with it rather than
+    // the rule changing.
+    /if \(initialised\) \{\s*post\(\{ type: 'theme', theme: current \}\);/.test(ccPluginFrame) &&
     /theme: current,/.test(ccPluginFrame) &&
     /document\.documentElement\.dataset\.theme === 'light'/.test(ccPluginFrame) &&
     /:root\[data-theme='light'\]/.test(ccTokens),
   'a plugin (or the host) does not carry the window’s scheme, so it stays dark in a light window',
+);
+check(
+  'the palette pack reaches plugin documents by INJECTION, not by asking the plugin',
+  // A frame is an opaque origin: the host cannot touch its DOM, so the only implementation that
+  // needs nothing from plugin authors is "splice a <style> into the document on the way out".
+  // This pins all three links: the Go table produces a tag, the asset route splices it, and BOTH
+  // hosts name the pack on the frame URL (`?pack=`).
+  /func StyleTag\(scheme, pack string\) string/.test(
+    fs.readFileSync(path.join(root, 'internal/themepacks/themepacks.go'), 'utf8'),
+  ) &&
+    /themepacks\.SpliceInto\(body, packStyle\(packs, r\)\)/.test(
+      fs.readFileSync(path.join(root, 'internal/plugins/asset.go'), 'utf8'),
+    ) &&
+    /strings\.EqualFold\(filepath\.Ext\(absFull\), "\.html"\)/.test(
+      fs.readFileSync(path.join(root, 'internal/plugins/asset.go'), 'utf8'),
+    ) &&
+    /\?theme=\$\{theme\}&pack=\$\{windowPack\(\)\}/.test(ccPluginFrame) &&
+    /\?theme=\$\{currentTheme\(\)\}&pack=\$\{currentPack\(\)\}/.test(
+      fs.readFileSync(path.join(root, 'frontend/src/plugin-host.js'), 'utf8'),
+    ),
+  'the pack is not injected into plugin documents, or a host stopped naming it on the frame URL',
 );
 check(
   'the market states a plugin\'s state as a dot on its card icon',
@@ -2188,6 +2212,62 @@ check(
   'the scheme is not applied at boot, not saved, or no page can change it',
 );
 
+// --- 主题包：清单、色板、绑定三者必须同时存在 ---------------------------------------
+//
+// A pack is three files that must agree, and each of them fails silently on its own:
+//   - `lib/packs.ts` is what the CARDS offer (a card whose id has no palette renders in the
+//     previous colours and looks like "the click did nothing");
+//   - `cc/src/packs.css` / `frontend/src/style.css` are the two windows (one window following the
+//     pack and the other not is exactly the "一个亮一个暗" bug this repo has already had);
+//   - the Go side + the bridge are what makes the choice survive a restart.
+//
+// The `data-theme='light'` half of the selector is asserted on purpose: packs.css has a header
+// explaining that a bare `[data-theme-pack='x']` leaks the light block's values into the dark
+// window, and that failure only shows up as "some status colours are unreadable at night".
+const ccPacksTs = fs.readFileSync(path.join(root, 'tools/plugin-market/cc/src/lib/packs.ts'), 'utf8');
+const ccPacksCss = fs.readFileSync(path.join(root, 'tools/plugin-market/cc/src/packs.css'), 'utf8');
+const ccMarketThemeGo = fs.readFileSync(path.join(root, 'tools/plugin-market/market.go'), 'utf8');
+const packIds = [...ccPacksTs.matchAll(/id:\s*'([a-z0-9-]+)'/g)].map((m) => m[1]);
+const paletteFor = (src, scheme, id) =>
+  new RegExp(`\\[data-theme='${scheme}'\\]\\[data-theme-pack='${id}'\\]`).test(src);
+const missingPalettes = packIds
+  .filter((id) => id !== 'violet') // violet IS tokens.css / style.css's default; a block for it would be a second truth
+  .flatMap((id) => [
+    paletteFor(ccPacksCss, 'light', id) ? null : `控制中心 浅色缺 ${id}`,
+    paletteFor(ccPacksCss, 'dark', id) ? null : `控制中心 深色缺 ${id}`,
+    paletteFor(css, 'light', id) ? null : `桌宠页 浅色缺 ${id}`,
+    paletteFor(css, 'dark', id) ? null : `桌宠页 深色缺 ${id}`,
+  ])
+  .filter(Boolean);
+check(
+  'every pack the cards offer has a palette, in BOTH windows and BOTH schemes',
+  packIds.length >= 3 && missingPalettes.length === 0,
+  missingPalettes.length ? missingPalettes.join('; ') : `pack ids read as ${JSON.stringify(packIds)}`,
+);
+check(
+  'the pack reaches the host and comes back to both windows',
+  /export const ThemePack = /.test(ccBridge) &&
+    /export const SetThemePack = /.test(ccBridge) &&
+    /export const OnThemePack = /.test(ccBridge) &&
+    /func \(m \*Market\) ThemePack\(\) string/.test(ccMarketThemeGo) &&
+    /func \(m \*Market\) SetThemePack\(/.test(ccMarketThemeGo) &&
+    /store\.WritePanelThemePack/.test(ccMarketThemeGo) &&
+    /await applyStoredPack\(\)/.test(ccMainTs) &&
+    /setPack\(/.test(ccPrefsPage) &&
+    /OnThemePack\(/.test(ccApp),
+  'the pack is not bound, not applied at boot, or no page can write it',
+);
+check(
+  'the pet paints the pack it is told about, and removes the attribute when there is none',
+  /ThemePack: a\.panelThemePack\(\)/.test(mainGo) &&
+    /func \(a \*App\) panelThemePack\(\) string/.test(mainGo) &&
+    /layout\.themePack/.test(fs.readFileSync(path.join(root, 'frontend/src/main.js'), 'utf8')) &&
+    /delete document\.documentElement\.dataset\.themePack/.test(
+      fs.readFileSync(path.join(root, 'frontend/src/main.js'), 'utf8'),
+    ),
+  'the layout does not carry themePack, or the pet page never applies it',
+);
+
 // --- 桌宠那一页与控制中心用同一套令牌 ------------------------------------------------
 //
 // 两个窗口是同一件产品的两面，而且现在用的是**同一侧**：参考稿的浅色。它们必须同意"强调色、
@@ -2373,6 +2453,66 @@ check(
     // A DOWNGRADE must not be offered: only the "newer" direction has a button.
     /isNewer\(entry\.version, installed\)/.test(ccPluginsPage),
   'the plugin page cannot offer a newer package, so an older plugin keeps its old interface',
+);
+
+// --- 扩展能力：插件测试台 -------------------------------------------------------------
+//
+// WHY A GATE. The bench is the only screen that shows (a) where a document was told it landed and
+// (b) what it was told it may do - and both look perfect when they are wrong. A hard-coded
+// `panel/workshop` renders exactly like the 插件 page does, and a "模拟未授权" switch that emptied
+// the page while leaving the wire payload alone would lie about its only effect. Neither is
+// visible in a screenshot, and the render smoke can only catch the shapes it happens to drive -
+// so the structural rules are nailed here as well:
+//
+//   1. ONE host implementation. A `document.createElement('iframe')` on this page would be a
+//      third sandbox boundary to keep in step with the pet's and the plugin page's - the drift
+//      AGENTS.md §3.3 is about;
+//   2. the pet's three positions survive into `init.surface` (panel/workshop, panel/background,
+//      surface + rect), because "被下边缘切掉" is unreachable from a workshop frame;
+//   3. 模拟未授权 empties `granted` AND refuses before the gate, forced together in the host
+//      module, and the page never calls `Grant`/`SetEnabled` - authorising a plugin is the user's
+//      decision on 插件, not a side effect of opening a test bed.
+const ccBenchPage = fs.readFileSync(path.join(root, 'tools/plugin-market/cc/src/pages/Bench.svelte'), 'utf8');
+check(
+  'the control center has a 扩展能力 page, and it mounts frames through the ONE host module',
+  /id: 'bench', label: '扩展能力'/.test(ccApp) &&
+    /mountPlugin\(/.test(ccBenchPage) &&
+    !/createElement\('iframe'\)/.test(ccBenchPage),
+  'the bench is missing from the rail, does not use plugin-frame.ts, or grew its own iframe',
+);
+check(
+  'the bench can put a document in the pet’s positions, and says which one in init.surface',
+  /kind: 'surface'/.test(ccBenchPage) &&
+    /rectIndex/.test(ccBenchPage) &&
+    /'background'/.test(ccBenchPage) &&
+    // …including the PET ITSELF (manifest `body`), which is a different rectangle from a
+    // floating surface and is the one place a "does my pet fit" question can be looked at.
+    /kind: 'body'/.test(ccBenchPage) &&
+    /hasBody/.test(ccBenchPage) &&
+    // …and the host actually carries it: `init.surface` used to be the literal workshop, which
+    // is why the bench needed this field to become a parameter at all.
+    /function plainSurface/.test(ccPluginFrame) &&
+    /^\s+surface,$/m.test(ccPluginFrame),
+  'the bench cannot show a floating surface (or the hidden 常驻帧, or the pet itself), so its rectangle is never measured',
+);
+check(
+  'the bench simulates "nothing granted" on the wire, and never edits the real grants',
+  // Both halves are decided together inside mountPlugin; a page that only cleared what it drew,
+  // or a host that kept refusing after a real grant, teaches a plugin the wrong thing about itself.
+  /const granted = deny \? \[\] :/.test(ccPluginFrame) &&
+    /if \(deny\) \{/.test(ccPluginFrame) &&
+    !/\bGrant\s*\(/.test(ccBenchPage) &&
+    !/SetEnabled\s*\(/.test(ccBenchPage),
+  'the refusal path is simulated on screen only, or opening the bench can authorise a plugin',
+);
+check(
+  'a frame mounts without the Wails runtime (the browser and the smoke have none)',
+  // `EventsOn` forwards to `window.runtime`; unguarded, the call threw inside the `$effect` and
+  // the document never mounted - in `npm run dev` and in the render smoke, i.e. exactly the two
+  // places a page is meant to be debuggable.
+  /let stopEvents: \(\) => void = \(\) => \{\};/.test(ccPluginFrame) &&
+    /stopEvents = EventsOn\('pet:plugin-event'/.test(ccPluginFrame),
+  'an unguarded EventsOn() is back, so mounting a frame throws wherever there is no Wails runtime',
 );
 
 for (const line of notes) console.log(line);

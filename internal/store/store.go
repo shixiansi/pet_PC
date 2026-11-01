@@ -217,7 +217,7 @@ const (
 // project already uses: the raw host is unreachable from mainland China, and a
 // plugin market nobody can load is not a market. The repository is public, so
 // the address needs no credential.
-const DefaultMarketBaseURL = "https://gh-proxy.com/https://raw.githubusercontent.com/shixiansi/pet-pc-plugins/main"
+const DefaultMarketBaseURL = "https://gh-proxy.com/https://raw.githubusercontent.com/shixiansi/PetPC-plugin/main"
 
 // normaliseBaseURL trims a market address and drops a trailing slash, while
 // leaving an EMPTY value empty.

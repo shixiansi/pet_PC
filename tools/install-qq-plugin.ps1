@@ -4,7 +4,7 @@
 # WHY THIS EXISTS AT ALL, given the market program installs plugins properly:
 #
 # the market reads a CATALOGUE, and the catalogue it is configured with is the
-# published one (gh-proxy -> shixiansi/pet-pc-plugins). Packaging this repo updates
+# published one (gh-proxy -> shixiansi/PetPC-plugin). Packaging this repo updates
 # market/index.json, market/dist and the built-in sample source, but publishing the
 # separate market repository is a push this machine cannot do. So a freshly built
 # package is invisible to a market whose address still points at the published one -

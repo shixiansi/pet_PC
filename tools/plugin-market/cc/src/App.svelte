@@ -3,9 +3,10 @@
   import Plugins from './pages/Plugins.svelte';
   import Market from './pages/Market.svelte';
   import Logs from './pages/Logs.svelte';
+  import Bench from './pages/Bench.svelte';
   import Preferences from './pages/Preferences.svelte';
   import Advanced from './pages/Advanced.svelte';
-  import { Theme, OnTheme } from './lib/bridge';
+  import { Theme, ThemePack, OnTheme, OnThemePack } from './lib/bridge';
   import { themeState, toggleTheme } from './lib/theme.svelte';
 
   // Five pages, one level. Coopanion splits its settings into a normal mode and an
@@ -37,10 +38,19 @@
   // declared settings are edited on the 插件 page from its manifest - so there is nothing left
   // for these two pages to show, and a page that silently writes keys nobody reads is worse
   // than no page.
+  //
+  // 「扩展能力」 is the seventh, and it is NOT a development-only page even though it reads like
+  // one: the 插件 page mounts every plugin in the one place this window can offer (filling the
+  // page, `init.surface = panel/workshop`), so the two questions that decide whether a plugin's
+  // interface survives - "what does it do inside the rectangle the pet crops to?" and "what does
+  // it do when the user granted nothing?" - had no screen anywhere. The bench answers both with
+  // the SAME host implementation (`lib/plugin-frame.ts`) and the same gate: it shows position,
+  // grants, and every message in both directions, and it never decides a permission itself.
   const pages = [
     { id: 'start', label: '开始', hint: '桌宠的样子、外观与启动', component: Start },
     { id: 'plugins', label: '插件', hint: '已装插件的启停、权限、设置与界面', component: Plugins },
     { id: 'market', label: '市场', hint: '插件源上有什么，能装与能更新', component: Market },
+    { id: 'bench', label: '扩展能力', hint: '把插件挂进测试台：位置、授权、消息与事件', component: Bench },
     { id: 'logs', label: '日志', hint: '两个程序写下的日志，按等级与子系统筛', component: Logs },
     { id: 'preferences', label: '偏好', hint: '这个窗口的配色，以及数据放在哪', component: Preferences },
     { id: 'advanced', label: '高级', hint: '模型配置、数据目录与诊断报告', component: Advanced },
@@ -57,10 +67,18 @@
         document.documentElement.dataset.theme = dark ? 'dark' : 'light';
         themeState.current = dark ? 'dark' : 'light';
       }).catch(() => {});
+      // 主题包也在这里补一次：它同样由**另一个窗口**写（桌宠的右键菜单不碰它，但这是同一条
+      // "读一次就停在旧值"的坑）。失败就算了——补读是兜底，不是主路径。
+      void ThemePack().then((pack) => {
+        if (themeState.pack === pack) return;
+        if (pack) document.documentElement.dataset.themePack = pack;
+        else delete document.documentElement.dataset.themePack;
+        themeState.pack = pack;
+      }).catch(() => {});
     };
     // Two sources, because they cover different situations:
-    //   - the host's `market:theme` event: the pet's menu changed the shared file while this
-    //     window sat open and focused - the case that was reported as "not real time";
+    //   - the host's `market:theme` / `market:theme-pack` events: the shared file changed while
+    //     this window sat open and focused - the case that was reported as "not real time";
     //   - `focus`: a belt for when the event was missed (the window was busy, or the watcher
     //     started after the flip).
     // A timer in this page was the first attempt and it hung the render smoke test: a page with a
@@ -72,9 +90,18 @@
       document.documentElement.dataset.theme = dark ? 'dark' : 'light';
       themeState.current = dark ? 'dark' : 'light';
     });
+    // 两条事件，两个字段：包由「偏好」页写，明暗连桌宠的菜单都能写，所以它们不能合成一条
+    // （否则每次切明暗都要重画一遍调色板，而且还要替对方编一个值）。
+    const offPack = OnThemePack((pack) => {
+      if (themeState.pack === pack) return;
+      if (pack) document.documentElement.dataset.themePack = pack;
+      else delete document.documentElement.dataset.themePack;
+      themeState.pack = pack;
+    });
     return () => {
       window.removeEventListener('focus', sync);
       off();
+      offPack();
     };
   });
   let current = $state<string>('start');
@@ -219,6 +246,7 @@
   .nav-item:hover { background: var(--bg-hover); color: var(--text); }
   .nav-item.is-active {
     background: var(--bg-active);
+    /* 文字角色，不是填充角色：深色下 #7c3aed 压在 --bg-active 上只有 2.89:1。 */
     color: var(--accent);
     font-weight: 600;
   }

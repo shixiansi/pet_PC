@@ -956,7 +956,8 @@
     transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
   }
   .row:hover { background: var(--bg-hover); }
-  /* 选中行与左栏的当前页说同一套语言：浅紫底 + 紫字。它比"描一圈浅紫"更容易一眼认出。 */
+  /* 选中行与左栏的当前页说同一套语言：浅紫底 + 紫字。它比"描一圈浅紫"更容易一眼认出。
+     紫字用 --accent：那是"当文字"的那一档（深色下是浅紫 #a78bfa），不是填充色。 */
   .row.selected { background: var(--bg-active); color: var(--accent); font-weight: 600; }
   .row.selected .row-meta { color: var(--accent); }
   .row.is-off .row-name { color: var(--text-dim); }
@@ -1229,7 +1230,7 @@
   .checks { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
   .check { display: flex; align-items: center; gap: var(--space-1); color: var(--text-dim); font-size: 12px; }
 
-  .chip.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .chip.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
   .chip:disabled { opacity: 0.5; cursor: default; }
 
   /* The one destructive control on this page. Colour only — no shadow, no transform: this

@@ -56,6 +56,17 @@ function currentTheme() {
   return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
 }
 
+/**
+ * The palette pack the page is painted in, or "" when none was chosen.
+ *
+ * Same rule as currentTheme: read the attribute, never a copy. main.js writes it from
+ * `Layout.ThemePack`, and the host splices the pack's tokens into each document it serves - so this
+ * is the one place the frames learn which pack to be drawn in.
+ */
+function currentPack() {
+  return document.documentElement.dataset.themePack || '';
+}
+
 /** The message the plugin sends to announce itself, and the host's answer. */
 const TYPE_READY = 'ready';
 /**
@@ -200,7 +211,19 @@ class PluginFrame {
     // `?theme=` is part of the contract, not decoration: the plugin puts it on `<html
     // data-theme>` before its first paint, so a light window never shows a dark frame first.
     // The asset route keys on `r.URL.Path` (main.go), so the query costs nothing.
-    frame.setAttribute('src', `/plugin-asset/${this.pluginId}/${this.entry}?theme=${currentTheme()}`);
+    //
+    // `?pack=` rides along for the same reason and is NOT part of the plugin's contract: the host
+    // splices a `<style>` into the document it serves (internal/plugins/asset.go), so a pack needs
+    // nothing from the plugin author. That is the only way it can work at all - the frame is an
+    // opaque origin, and the host cannot touch its DOM.
+    //
+    // Consequence worth knowing: a pack change reaches frames that mount AFTER it. The stylesheet is
+    // baked into the served document, so an already-open panel keeps its palette until it is
+    // reopened - re-creating frames to re-theme them would throw away a half-filled form.
+    frame.setAttribute(
+      'src',
+      `/plugin-asset/${this.pluginId}/${this.entry}?theme=${currentTheme()}&pack=${currentPack()}`,
+    );
     frame.dataset.pluginId = this.pluginId;
     frame.dataset.kind = this.kind;
     // The version the document came from. It is on the element as well as on the

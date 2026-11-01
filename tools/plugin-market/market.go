@@ -11,6 +11,7 @@ import (
 
 	"PetPC/internal/logging"
 	"PetPC/internal/plugins"
+	"PetPC/internal/themepacks"
 	"PetPC/internal/store"
 )
 
@@ -30,6 +31,10 @@ type Market struct {
 	cfgPath string
 	// manager is the shared lifecycle implementation.
 	manager *plugins.Manager
+	// packs is the theme-pack catalogue (built-ins + themes/<id>). Shared by the whole process so
+	// its cache is the process's cache: the asset route asks it for a style on every plugin document.
+	packs *themepacks.Set
+
 	// keeper encrypts declared secrets at rest.
 	keeper plugins.SecretKeeper
 
@@ -85,6 +90,7 @@ func newMarketAt(dir, cfgPathOverride string) (*Market, error) {
 		dataDir: dir,
 		cfgPath: filepath.Join(dir, "plugin-market.json"),
 		keeper:  marketSecretKeeper{},
+		packs:   themepacks.NewSet(dir),
 	}
 	// Always on, at the same default as the pet, so a report about "控制中心打不开插件界面"
 	// has something to read without anyone relaunching with a flag. The level override is
@@ -129,8 +135,8 @@ func (m *Market) startup(ctx context.Context) {
 		m.dataDir, m.log.Level(), m.log.Path())
 	// The colour scheme is shared with the pet, which can change it while this window is open.
 	// Handing over the value the window is about to open with is what keeps the first tick from
-	// re-announcing it.
-	m.startThemeWatch(m.Theme())
+	// re-announcing it. The pack is watched by the same ticker (its own event, its own value).
+	m.startThemeWatch(m.Theme(), m.ThemePack())
 	// The control center mounts the same plugin documents the pet does, so a plugin's own settings
 	// or data changing has to reach the frames in THIS window too - otherwise its list can only
 	// poll (which is exactly what todo and ast-coder were doing). See pluginwatch.go.
@@ -488,6 +494,40 @@ func (m *Market) SetTheme(name string) error {
 	return store.WritePanelTheme(dir, theme)
 }
 
+// ThemePack answers with the palette pack BOTH windows draw in, or "" when the user never chose.
+//
+// Empty is passed through rather than answered with the default: the stylesheet owns the default
+// (violet), and a Go constant here would be a second place to change it - the kind of duplicate
+// that disagrees only after someone edits one of them.
+//
+// Same file, same argument as Theme() above: one value, two owners, and the owner that writes last
+// wins because both writes are a read-modify-write of a single small file.
+func (m *Market) ThemePack() string {
+	m.mu.Lock()
+	dir := m.dataDir
+	m.mu.Unlock()
+	return store.ReadPanelThemePack(dir)
+}
+
+// SetThemePack stores the pack for both windows and leaves the scheme alone.
+//
+// The pet re-reads the shared file once a second and pushes a fresh layout when either field
+// changed, so this needs no IPC; the reverse direction is theme_watch.go's job.
+func (m *Market) SetThemePack(name string) error {
+	m.mu.Lock()
+	dir := m.dataDir
+	m.mu.Unlock()
+	pack := store.NormalizePack(name)
+	if err := store.WritePanelThemePack(dir, pack); err != nil {
+		return err
+	}
+	// INFO, not DEBUG, and no payload beyond the id: choosing a look is a visible action, and the
+	// id is not user content. It is also the only evidence a bug report would carry ("我选了樱花，
+	// 重启变回紫的" needs to know what was written and when).
+	m.log.Infof("market", "主题包切成 %q（桌宠与控制中心共用）", pack)
+	return nil
+}
+
 // normalizeTheme maps anything that is not "light" onto "dark" - the rule this program's own
 // field used before the scheme became shared. Only m.cfg.Theme reads are left on it (see Theme),
 // and every write goes through store.NormalizeTheme so an unknown value cannot mean "dark" here
@@ -499,6 +539,54 @@ func normalizeTheme(name string) string {
 	return themeDark
 }
 
+
+// Themes answers with every palette pack the user may pick: the compiled-in ones first, then
+// whatever is installed in `themes/<id>/`.
+//
+// The list carries each pack's tokens, so the 偏好 page draws its preview cards from the host's own
+// palette instead of keeping a second copy of anyone's colours. `Problems` is the readability audit
+// for that pack (see internal/themepacks/audit.go) - a pack the user installed themselves can be
+// unreadable, and the card has to say so rather than pretend.
+func (m *Market) Themes() []themepacks.Entry {
+	return m.packs.Entries()
+}
+
+// ThemePacksProblem answers why the themes directory could not be read, or "" when it is fine.
+//
+// Separate from Themes() so a page can say "读不到 themes 目录" without having to infer it from an
+// empty list - an empty list is also what "no packs installed" looks like, and those two need
+// different sentences.
+func (m *Market) ThemePacksProblem() string {
+	return m.packs.Problem()
+}
+
+// ThemeStore lists what the market source offers as theme packs.
+//
+// One struct rather than (rows, note, error): Wails maps (result, error) onto the JS promise, so a
+// second string would be dropped and the page would get an empty shelf with no explanation.
+func (m *Market) ThemeStore() (plugins.ThemeStoreView, error) {
+	return m.manager.ThemesCatalogue()
+}
+
+// InstallTheme downloads one pack from the source and validates it before writing.
+func (m *Market) InstallTheme(id string) error {
+	if err := m.manager.InstallTheme(id); err != nil {
+		m.log.Warnf("market", "安装主题包 %s 失败：%v", id, err)
+		return err
+	}
+	m.log.Infof("market", "已安装主题包 %s", id)
+	return nil
+}
+
+// RemoveTheme deletes an installed pack. Built-in ids are refused inside the manager.
+func (m *Market) RemoveTheme(id string) error {
+	if err := m.manager.RemoveTheme(id); err != nil {
+		m.log.Warnf("market", "卸载主题包 %s 失败：%v", id, err)
+		return err
+	}
+	m.log.Infof("market", "已卸载主题包 %s", id)
+	return nil
+}
 
 // usageLine reads the usage counter the pet keeps for this plugin.
 //

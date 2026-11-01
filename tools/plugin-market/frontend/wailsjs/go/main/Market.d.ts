@@ -5,6 +5,7 @@ import {store} from '../models';
 import {main} from '../models';
 import {desktop} from '../models';
 import {http} from '../models';
+import {themepacks} from '../models';
 
 export function Catalogue():Promise<plugins.MarketView>;
 
@@ -22,6 +23,8 @@ export function HotkeyLabels():Promise<desktop.HotkeyView>;
 
 export function Install(arg1:string):Promise<void>;
 
+export function InstallTheme(arg1:string):Promise<void>;
+
 export function Installed():Promise<Array<plugins.Installed>>;
 
 export function LogTail(arg1:main.LogQuery):Promise<main.LogView>;
@@ -37,6 +40,8 @@ export function PluginMarketPath():Promise<string|boolean>;
 export function PluginRequest(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function RememberSelection(arg1:string):Promise<void>;
+
+export function RemoveTheme(arg1:string):Promise<void>;
 
 export function ResetPetImage():Promise<store.Config>;
 
@@ -74,7 +79,17 @@ export function SetSnapToEdge(arg1:boolean):Promise<store.Config>;
 
 export function SetTheme(arg1:string):Promise<void>;
 
+export function SetThemePack(arg1:string):Promise<void>;
+
 export function Theme():Promise<string>;
+
+export function ThemePack():Promise<string>;
+
+export function ThemePacksProblem():Promise<string>;
+
+export function ThemeStore():Promise<plugins.ThemeStoreView>;
+
+export function Themes():Promise<Array<themepacks.Entry>>;
 
 export function Uninstall(arg1:string,arg2:boolean):Promise<void>;
 

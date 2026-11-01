@@ -4,7 +4,8 @@
 不是桌宠面板里的一个标签页。
 
 它负责**全部**插件管理：浏览市场、安装、逐项授权、启停、卸载，
-以及编辑插件自己声明的配置（包括对话插件的 AI 配置与 API Key）。
+以及编辑插件自己声明的配置（包括对话插件的 AI 配置与 API Key），
+还有**把插件挂起来测**（「扩展能力」页，见 §2.16）。
 桌宠只负责**运行**插件。
 
 ---
@@ -205,14 +206,17 @@ frame 元素上还设置 `color-scheme`，让文档里的原生滚动条/光标�
 
 1. 三个包升 patch：`chat 1.4.0 → 1.4.1`、`qq 1.9.0 → 1.9.1`、`voice 1.0.0 → 1.0.1`；
 2. `pwsh -File market/tools/package.ps1` —— 重打 zip、实算 sha256、回写 `market/index.json`，
-   并把 zip 与 index 复制进宿主的内置源 `internal/plugins/sample/`；
-3. 按该 README 的要求删掉被取代的旧包，并把 `sample/embed.go` 的 `//go:embed` 清单改成新文件名
-   （它是逐一列名的，不改就**编译失败**——这是好事）；
+   并**刷新**宿主内置源 `internal/plugins/sample/` 里已有的那些包（同名同版本才换字节；样例的
+   `index.json` 按磁盘重算 sha256 后重写）。它**不会**把市场目录整个抄进兜底源：`sample/embed.go`
+   是一份手写的包名单，多出来的 zip 会让兜底目录宣告 36 个下载、二进制只带 10 个；
+3. 想让兜底源跟着**换版本**，仍然是手工的：新包放进 `sample/`、删掉被取代的旧包、把
+   `sample/embed.go` 的 `//go:embed` 清单改成新文件名（它逐一列名，不改就**编译失败**——这是好事），
+   然后再跑一次脚本，让样例 `index.json` 的版本与 sha256 对上；
 4. 重编市场程序（内置源随 exe 一起走）；
 5. **本机**把这三份新包装进 `<dataDir>/plugins/<id>/` 并在 `plugins.json` 里改版本号，等于替用户
    做了一次「更新」——不动 `plugin-data/` 里的私有数据与授权，所以设置与密钥都还在。
 
-线上发布（`git push` 到 `pet-pc-plugins`）仍由维护者执行：远端 index 还是旧版本时，市场里的
+线上发布（`git push` 到 `PetPC-plugin`）仍由维护者执行：远端 index 还是旧版本时，市场里的
 「更新」按钮不会出现，这一步不由 agent 做。
 
 ### 2.5 第五种控件：`select`（用户：「谁知道 36 是知识」）
@@ -678,6 +682,25 @@ Proxy 根本不存在。所以桩现在用 `.map(asHostSends)` 摊平成**纯数
 
 ---
 
+### 2.14 主题包：一份说明，两个窗口，外加插件文档里的一段 `<style>`（2026-11-01）
+
+2026-11-01，界面改造方案里"看得见"的那一层落地。要点与坑：
+
+- **一个文件、两个字段**：`theme.json` 从 `{theme}` 变成 `{theme, pack}`。两个写者（桌宠右键菜单改明暗、
+  控制中心「偏好」页改包）都是**读-改-写**——各写各的字段，谁也抹不掉谁。`internal/store/theme.go`
+  与 `theme_test.go` 守着这条（两个方向都测）。
+- **四条内建包 + 任意已安装包**：内建的在 `internal/themepacks`（Go 表）与两份 CSS
+  （`cc/src/packs.css`、`frontend/src/style.css`）里各有一份，`TestPackPalettesMatchTheStylesheets`
+  三方比对；装进来的包只在 `themes/<id>/theme.json`，由宿主加载并做**值消毒 + 对比度自检**，
+  不合格的包会在卡片上标出来而不是被拒绝（用户已经选了它）。
+- **插件界面靠注入**：帧是 opaque origin 的沙箱 iframe，宿主碰不到它的 DOM。所以
+  `internal/plugins/asset.go` 在服务 entry 文档时把 `:root:root{…}` 拼在 `</head>` 之前——
+  选择器写成 `:root:root` 是为了压过插件自己的 `:root[data-theme="dark"]`（同特异性、后写者胜），
+  位置必须在插件自己的 `<link>` 之后。**包对已经挂着的帧在下次打开时生效**（文档里那段 CSS 是
+  服务端拼的，重挂才能换）。
+- **主题商店**：和插件市场同一个 base URL、同一条 sha256 校验，但装的是**一个 theme.json**，
+  不是 zip——主题包只有颜色，没有代码，所以装它不需要授权。`themes/index.json` 由市场仓提供，
+  由 `tools/check-catalogue.mjs` 校验（文件存在、摘要对得上、两套令牌齐全、名字在白名单里）。
 ## 3. 两个程序的关系
 
 ```
@@ -878,7 +901,7 @@ $t = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes('build\bin\PetPCPlu
 - **不做**：评分/评论/下载量统计、自动更新与版本回滚、插件签名与非对称校验、
   多市场聚合、插件间依赖解析、GitHub Pages 托管市场页、把 exe 作为 Release 附件分发。
 
-### 2.14 配色是**一个**设置，两个窗口共用（2026-10-29）
+### 2.15 配色是**一个**设置，两个窗口共用（2026-10-29）
 
 用户原话：「怎么右键和设置界面的主题不统一的，一个亮一个暗的，像是独立的」。
 
@@ -906,7 +929,7 @@ $t = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes('build\bin\PetPCPlu
 门禁：`the colour scheme is one value both windows read and write`（两边都得走 store 的共享文件，
 且谁都不许再长出 `CardTheme` 这种自己的开关字段）。
 
-### 2.15 插件市场改成卡片网格（2026-10-29）
+### 2.16 插件市场改成卡片网格（2026-10-29）
 
 用户给了张参考图，原话「插件市场改成这样的布局」。原来是一列横排的「行」，改成了**卡片网格**：
 
@@ -929,3 +952,45 @@ $t = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes('build\bin\PetPCPlu
 
 判据：`cc npm run check` 0/0、`npm run smoke` 87/87（市场那 6 条文案断言原样通过——id、`已安装 v…`、
 只有一处「安装」都保住了）、`check-frontend` 138 条、真浏览器截图（1180 与 1600 宽）。
+
+### 2.17 「扩展能力」：控制中心里的插件测试台（2026-11-01）
+
+用户原话：「在设置界面新增扩展能力的菜单，里面可以直接展示插件的测试平台」。
+
+这一页回答的是「这个插件**到了别的地方**会怎样」，而「插件」页回答的是「它长什么样」。
+三件事只有这一页能看见：
+
+| 想测的 | 插件页 | 测试台 |
+| --- | --- | --- |
+| 它在桌宠那块矩形里（被 `SetWindowRgn` 裁）会不会被切掉 | 不行：永远 `panel/workshop` | 选「浮层面第 N 块」，框就是清单那一块（380×260） |
+| 用户什么都没勾时界面还立得住吗 | 只能真的去改授权 | 「模拟未授权」：`granted` 清空 + 请求在宿主层就被拒，真实授权不动 |
+| 握手/请求/响应/宿主事件各是什么 | 一行都看不到 | 每条一行（方向、类型、方法、字节数、错误原文） |
+
+页面上的东西：插件下拉（只列**挂得上**的：启用 + manifest 能解析 + 有 `entry`；其余在下面点名并
+说明原因）、位置下拉（工作区 / 浮层面第 N 块 / 隐藏常驻帧）、矩形与宽高（改尺寸会**重新握手**，
+因为尺寸写在 `init.surface.rect` 里）、100/75/50% 缩放、`模拟未授权`、`重挂`、`清空日志`、
+以及两件开发工具：**手推一条事件**（`share.changed` / `storage.changed` / `config.changed`
+——这三个名字是宿主真的会推的，手册 §7）和**以插件身份调一个方法**（走同一个
+`Market.PluginRequest`，拒绝原样显示）。
+
+三条要说清的边界：
+
+1. **它量不了排版。** 沙箱是 `allow-scripts`（不含 `allow-same-origin`），帧是 opaque origin，
+   父页面读不到它的 DOM。`getBoundingClientRect()` 一条也拿不到，所以"按钮被下边缘切掉"仍然只有
+   `plugin-testkit/preview.mjs`（真浏览器 + 能读 DOM）看得见。**这一页量的是框，不是内容**——
+   页面上也这么写着，免得有人把它当排版门禁。
+2. **它不改真实授权。** 页面上没有 `Grant`/`SetEnabled`；「模拟未授权」的两半（`init` 里的
+   空清单、宿主层的拒绝）在 `plugin-frame.ts` 里一起决定，所以不可能只做一半。
+3. **它不是第二个宿主。** 帧仍然由 `plugin-frame.ts` 建，沙箱规则一字不改。这一页只多要了
+   三样东西：`surface`（位置）、`onMessage`（日志）、`denyRequests`（模拟拒绝）。
+
+顺手修掉的一个真问题：`plugin-frame.ts` 里 `EventsOn('pet:plugin-event', …)` 原来没有保护，
+而它转发到 `window.runtime`（只有 Wails 窗口有）。于是 `npm run dev` 与渲染冒烟里，挂一个帧就抛
+`Cannot read properties of undefined (reading 'EventsOnMultiple')`——**在 `$effect` 里**，症状是
+"这一页坏了"。本轮的冒烟第一次跑就撞在它上面（26 条断言还没开始就先崩）。现在没 runtime 时降级成
+"没有宿主事件"，而那正是浏览器里的真实情况。
+
+判据（都在本机跑过）：`cc npm run check` 0/0、`cc npm run smoke` **108/108**（本页 +26 条）、
+`node .dev/check-frontend.cjs` **142** 条全绿（本页 +4 条）、重建 `PetPCPluginMarket.exe` 后
+在 exe 里能搜到本页独有的字符串（`扩展能力` / `测试台 · v1` / `推一条事件给插件`）。
+**页面左上角的 `测试台 · v1` 就是构建标记**——它不变，说明窗口里跑的还是旧构建。

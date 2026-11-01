@@ -229,7 +229,7 @@
     font-size: 12px;
     padding-bottom: var(--space-1);
   }
-  input[type='checkbox'] { accent-color: var(--accent); }
+  input[type='checkbox'] { accent-color: var(--accent-strong); }
 
   .log {
     list-style: none;

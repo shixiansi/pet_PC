@@ -49,14 +49,15 @@ node_modules/
 # Local development toolchain and scratch space created by this workspace's
 # sandboxed setup (Go module cache, Wails CLI, test data, screenshots).
 #
-# The whole directory is excluded, then the three frontend verification gates are
+# The whole directory is excluded, then the frontend verification gates are
 # put back: README documents them as the project's regression checks (structure,
-# real-browser behaviour, geometry dump), so they are project source rather than
-# scratch, and a change to a gate has to be reviewable alongside the code it
-# guards. Everything else under .dev/ (hundreds of MB of toolchain and probe
-# output) stays out.
+# real-browser behaviour, geometry dump, contrast), so they are project source
+# rather than scratch, and a change to a gate has to be reviewable alongside the
+# code it guards. Everything else under .dev/ (hundreds of MB of toolchain and
+# probe output) stays out.
 .dev/*
 !.dev/check-frontend.cjs
+!.dev/check-contrast.cjs
 !.dev/run-frontend-harness.cjs
 !.dev/layout-report.cjs
 

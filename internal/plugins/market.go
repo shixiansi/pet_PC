@@ -22,7 +22,7 @@ import (
 // cannot be fetched. The address is a configuration value rather than a
 // constant in the code path, so a different mirror or a different repository
 // name needs one edit here and nothing else.
-const DefaultMarketBaseURL = "https://gh-proxy.com/https://raw.githubusercontent.com/shixiansi/pet-pc-plugins/main"
+const DefaultMarketBaseURL = "https://gh-proxy.com/https://raw.githubusercontent.com/shixiansi/PetPC-plugin/main"
 
 // embeddedPrefix marks a download that is served from the built-in sample
 // source instead of the network. It is a scheme rather than a bare file name so

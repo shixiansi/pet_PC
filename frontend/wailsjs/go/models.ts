@@ -197,6 +197,7 @@ export namespace main {
 	    panelOnRight: boolean;
 	    scale: number;
 	    theme: string;
+	    themePack: string;
 	    bubble?: BubbleView;
 	    pluginSurface?: PluginSurfaceView;
 	
@@ -219,6 +220,7 @@ export namespace main {
 	        this.panelOnRight = source["panelOnRight"];
 	        this.scale = source["scale"];
 	        this.theme = source["theme"];
+	        this.themePack = source["themePack"];
 	        this.bubble = this.convertValues(source["bubble"], BubbleView);
 	        this.pluginSurface = this.convertValues(source["pluginSurface"], PluginSurfaceView);
 	    }

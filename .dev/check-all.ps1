@@ -34,16 +34,22 @@
 #   5. static wiring checks - every element id, every binding call and every
 #                             subscribed event has a counterpart, and the new CSS
 #                             breaks none of the window-region rules.
-#   6. plugin front-end tests - the PLUGINS' OWN app.js, in jsdom, against a fake
+#   6. contrast checks      - every text token against every surface token, in BOTH
+#                             colour schemes, recomputed (WCAG, 4.5:1). Colours were
+#                             the one category nobody could go red on: the 2026-11-01
+#                             review found #a6b1c0 at 2.03:1 in the control center and
+#                             a 2.89:1 "current page" in dark mode, both shipped for
+#                             two rounds of review because both were checked by eye.
+#   7. plugin front-end tests - the PLUGINS' OWN app.js, in jsdom, against a fake
 #                             host. This is the only gate that executes plugin
 #                             code: the static checks only read it as text, and the
 #                             harness runs the pet's page against a fake backend.
-#   7. behaviour harness    - the real bundle in a real browser engine against a
+#   8. behaviour harness    - the real bundle in a real browser engine against a
 #                             fake backend: the pet's click and its hover button, the
 #                             panel slot, the plugin surface's geometry and protocol,
 #                             settings round trips.
-#   8. wails build          - the shipping artifact must link.
-#   9. region pixel checks  - the SHIPPING binary against the real desktop: the
+#   9. wails build          - the shipping artifact must link.
+#  10. region pixel checks  - the SHIPPING binary against the real desktop: the
 #                             panel/bubble/overlay crop, the pet not moving, and
 #                             the thought puffs actually being ellipses. This is
 #                             the only gate that can see the native window region,
@@ -177,6 +183,13 @@ try {
     }
 
     Gate 'static wiring checks' { node (Join-Path $PSScriptRoot 'check-frontend.cjs') }
+
+    # 配色。这一道是纯算术，但因为"算"从来没人做，它一直是这个仓库里唯一一类
+    # 改了不会有任何东西变红的改动：2026-11-01 的界面评审实算出来的 #a6b1c0(2.03:1)、
+    # #7a8798(3.41:1)、深色 #7c3aed 当文字(2.89:1) 全都活过了两轮"已修复"。
+    # 词表是硬编码的（角色，不是值），值从 CSS 里读——所以改色的人不必来这里，
+    # 但他改完必须过得了这一关。
+    Gate 'contrast checks' { node (Join-Path $PSScriptRoot 'check-contrast.cjs') }
 
     # The plugins' own front ends have their own test suite, and it is a DIFFERENT
     # kind of check from everything above: the static checks read the plugin

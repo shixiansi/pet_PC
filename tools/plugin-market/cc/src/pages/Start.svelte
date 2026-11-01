@@ -141,7 +141,7 @@
 
 <style>
   .row { display: flex; align-items: center; gap: var(--space-3); }
-  input[type='range'] { width: 260px; accent-color: var(--accent); }
+  input[type='range'] { width: 260px; accent-color: var(--accent-strong); }
   output { font: var(--font-mono); color: var(--text); min-width: 44px; }
   .switch {
     display: flex;
@@ -152,7 +152,7 @@
     color: var(--text);
   }
   .switch:last-of-type { border-bottom: 0; }
-  input[type='checkbox'] { accent-color: var(--accent); }
+  input[type='checkbox'] { accent-color: var(--accent-strong); }
   .hint { margin: var(--space-3) 0 0; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
   .err { margin: var(--space-2) 0 0; color: var(--danger); font-size: 12px; }
 </style>

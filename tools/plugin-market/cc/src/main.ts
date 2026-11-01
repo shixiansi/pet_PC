@@ -1,7 +1,7 @@
 import { mount } from 'svelte';
 import './app.css';
 import App from './App.svelte';
-import { Theme } from './lib/bridge';
+import { Theme, ThemePack } from './lib/bridge';
 import { syncThemeState } from './lib/theme.svelte';
 
 // Svelte 5 mounts from an explicit call rather than the legacy `new App({target})`.
@@ -55,5 +55,27 @@ async function applyStoredTheme() {
   syncThemeState();
 }
 
+// 主题包也要在挂载前落到 `<html>` 上，理由与配色相同（`packs.css` 按 `data-theme-pack` 取值），
+// 多一条：它和配色在同一个文件里，但**是两个字段**——用户可能只换包、不动明暗。
+//
+// 超时同样是有意的：一条不响应的绑定不该把窗口按在空白页上。包读不到就是"没有包"，
+// 也就是默认配色——这比"猜一个包"安全，也比不挂载好。
+async function applyStoredPack() {
+  const asked = Promise.race([
+    ThemePack(),
+    new Promise<string>((_, reject) => setTimeout(() => reject(new Error('themePack 没回应')), 1500)),
+  ]);
+  let pack = '';
+  try {
+    pack = await asked;
+  } catch {
+    // 保持空：默认配色
+  }
+  if (pack) document.documentElement.dataset.themePack = pack;
+  else delete document.documentElement.dataset.themePack;
+  syncThemeState();
+}
+
 await applyStoredTheme();
+await applyStoredPack();
 mount(App, { target });

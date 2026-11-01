@@ -511,8 +511,8 @@
   /* The one action a card has is FILLED: on a page whose job is "install this", an outline the same
      weight as the pills reads as decoration. */
   .btn.primary {
-    background: var(--accent);
-    border-color: var(--accent);
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
     color: var(--on-accent);
     box-shadow: 0 1px 2px rgba(124, 58, 237, 0.3);
   }

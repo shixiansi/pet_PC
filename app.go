@@ -13,6 +13,7 @@ import (
 	"PetPC/internal/desktop"
 	"PetPC/internal/logging"
 	"PetPC/internal/plugins"
+	"PetPC/internal/themepacks"
 	"PetPC/internal/store"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -130,6 +131,13 @@ type App struct {
 	// window geometry that a drag must never have to queue behind.
 	pluginHost pluginHost
 
+	// packs is the theme-pack catalogue: the built-ins plus whatever is installed in `themes/`.
+	//
+	// It is a POINTER SHARED BY THE WHOLE PROCESS so its cache is the process's cache. The asset
+	// route asks it for a `<style>` on every plugin document, and re-reading the directory there
+	// would put a stat per frame mount on the hot path.
+	packs *themepacks.Set
+
 	// audioMu guards the audio sink plugins play through.
 	//
 	// It is a separate mutex from App.mu for the same reason pluginHost's is:
@@ -222,6 +230,9 @@ func NewApp() (*App, error) {
 		log:       lg,
 		scale:     1,
 		geomReady: make(chan struct{}),
+		// One Set for the process: it caches the themes directory against its mtime, so building a
+		// new one per request would stat the directory on every plugin document.
+		packs: themepacks.NewSet(dir),
 	}, nil
 }
 
@@ -587,6 +598,14 @@ type Layout struct {
 	// this one is only the pet's own cards.
 	Theme string `json:"theme"`
 
+	// ThemePack is the palette pack the same cards must be drawn in ("sakura", …), or
+	// "" when the user never chose one.
+	//
+	// It rides the layout for the same reason Theme does, and it is ADDITIVE on purpose:
+	// a page that predates packs ignores the field, and an install that predates them
+	// sends "". Neither case is an error, and neither needs a version bump.
+	ThemePack string `json:"themePack"`
+
 	// Bubble is the speech bubble when one is showing, or nil.
 	//
 	// Its content travels with the layout rather than in a separate event
@@ -904,6 +923,11 @@ func (a *App) applyWindowGeometry() (Layout, error) {
 		// Read on every layout, not cached at startup: the menu flips it, and the next push
 		// has to carry the new value or the cards would change only after a restart.
 		Theme: a.panelTheme(),
+		// The pack travels with the scheme for the same reason, and it is written by the OTHER
+		// window (the control center's 主题包 cards). Empty means "no pack chosen": the pet page
+		// then drops the attribute and its own stylesheet's default applies - reporting "violet"
+		// here would be this program inventing a choice the user never made.
+		ThemePack: a.panelThemePack(),
 	}
 	if hasBubble {
 		// The bubble is reported in CSS pixels from the same physical rectangle
@@ -1480,6 +1504,15 @@ func (a *App) panelTheme() string {
 	// Nothing stored yet: light, which is the scheme the control center's window is designed
 	// around and therefore the one the pet's cards match on a fresh install.
 	return store.ThemeLight
+}
+
+// panelThemePack is the palette pack the same file carries, or "" when none was chosen.
+//
+// The pet never writes this: the control center's 主题包 cards do, and the pet picks it up on its
+// next push (like the scheme). Empty is passed through rather than defaulted here, so the
+// stylesheet stays the only place that says what "no pack" looks like.
+func (a *App) panelThemePack() string {
+	return store.ReadPanelThemePack(a.store.Dir())
 }
 
 // SetCardTheme switches the scheme for BOTH windows (see panelTheme).

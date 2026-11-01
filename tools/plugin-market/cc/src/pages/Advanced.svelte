@@ -219,7 +219,7 @@
     color: var(--text);
   }
   .switch:last-of-type { border-bottom: 0; }
-  input[type='checkbox'] { accent-color: var(--accent); }
+  input[type='checkbox'] { accent-color: var(--accent-strong); }
   .field {
     display: grid;
     grid-template-columns: 88px 1fr;

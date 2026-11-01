@@ -73,9 +73,20 @@ describe('the pet drawn by a plugin', () => {
     expect(pet().classList.contains('body-from-plugin')).toBe(true);
     // The frame is the plugin's own file from the host's asset route, and it is sandboxed to
     // scripts only - the same rule every other plugin frame follows.
-    expect(el.getAttribute('src')).toBe('/plugin-asset/com.example.pet-body/pet.html?theme=dark');
+    //
+    // `&pack=` is empty here on purpose (this layout chose no pack): the host appends it
+    // unconditionally so the asset route can splice that pack's tokens into the document, and an
+    // empty value means "inject nothing" rather than "inject the default".
+    expect(el.getAttribute('src')).toBe('/plugin-asset/com.example.pet-body/pet.html?theme=dark&pack=');
     expect(el.getAttribute('sandbox')).toBe('allow-scripts');
     expect(el.dataset.pluginId).toBe('com.example.pet-body');
+  });
+
+  it('passes the chosen pack to the frame, so the host can inject its tokens', async () => {
+    await withRows([bodyRow()], { theme: 'light', themePack: 'sakura' });
+    expect(frame().getAttribute('src')).toBe(
+      '/plugin-asset/com.example.pet-body/pet.html?theme=light&pack=sakura',
+    );
   });
 
   it('does not mount a plugin that is switched off, or one without the permission', async () => {

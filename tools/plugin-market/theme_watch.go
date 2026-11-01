@@ -30,15 +30,23 @@ import (
 // EventsOn() in a page with an emit in Go, and it resolves constants named eventXxx.
 const eventMarketTheme = "market:theme"
 
+// eventMarketThemePack carries the new palette pack to the page.
+//
+// A SECOND event rather than widening the first one: the scheme is also flipped by the pet's
+// right-click menu, and that writer knows nothing about packs. One event carrying both fields would
+// make every scheme flip announce a pack the pet never touched - and a page that reacts by
+// re-applying a pack has just re-rendered the window for no reason.
+const eventMarketThemePack = "market:theme-pack"
+
 // themeWatchInterval is the same one second the pet's settings watcher uses: two stats of a tiny
 // file per second, and below the "did it work?" threshold for a colour change.
 const themeWatchInterval = time.Second
 
-// startThemeWatch emits eventMarketTheme whenever the shared scheme changes.
+// startThemeWatch emits eventMarketTheme / eventMarketThemePack whenever the shared look changes.
 //
 // The first tick compares against what the caller already painted, so starting the watcher never
 // re-sends the value the window opened with.
-func (m *Market) startThemeWatch(applied string) {
+func (m *Market) startThemeWatch(appliedTheme, appliedPack string) {
 	if m.ctx == nil {
 		return
 	}
@@ -52,12 +60,21 @@ func (m *Market) startThemeWatch(applied string) {
 				return
 			case <-ticker.C:
 				theme := store.ReadPanelTheme(m.dataDir)
-				if theme == "" || theme == applied {
-					continue
+				if theme != "" && theme != appliedTheme {
+					appliedTheme = theme
+					runtime.EventsEmit(ctx, eventMarketTheme, theme)
+					m.log.Infof("market", "另一个窗口改了配色（%s），已通知页面", theme)
 				}
-				applied = theme
-				runtime.EventsEmit(ctx, eventMarketTheme, theme)
-				m.log.Infof("market", "另一个窗口改了配色（%s），已通知页面", theme)
+				// An empty pack is a real answer ("no pack chosen, use the default"), so this one
+				// compares the empty string too - unlike the scheme, where empty means "nothing
+				// stored yet". Note there is no `continue` above any more: the two values change
+				// independently and one tick may have to report both.
+				pack := store.ReadPanelThemePack(m.dataDir)
+				if pack != appliedPack {
+					appliedPack = pack
+					runtime.EventsEmit(ctx, eventMarketThemePack, pack)
+					m.log.Infof("market", "另一个窗口改了主题包（%q），已通知页面", pack)
+				}
 			}
 		}
 	}()

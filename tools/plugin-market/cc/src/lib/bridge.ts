@@ -226,7 +226,7 @@ const FAKE_CONFIG: Config = store.Config.createFrom({
   snapToEdge: true,
   edgeMargin: 8,
   autostart: false,
-  marketBaseUrl: 'https://gh-proxy.com/https://raw.githubusercontent.com/shixiansi/pet-pc-plugins/main',
+  marketBaseUrl: 'https://gh-proxy.com/https://raw.githubusercontent.com/shixiansi/PetPC-plugin/main',
   globalHotkeys: false,
   reminderOnStartup: false,
   reminderEnabled: false,
@@ -302,7 +302,7 @@ export type MarketEntry = plugins.MarketEntry;
 // manager): the chat row the page lists at 1.7.4 has 1.7.5 available, and the voice row is
 // current - so a page that offered an update for everything would fail the smoke test.
 const FAKE_MARKET: MarketView = plugins.MarketView.createFrom({
-  base: 'https://gh-proxy.com/https://raw.githubusercontent.com/shixiansi/pet-pc-plugins/main',
+  base: 'https://gh-proxy.com/https://raw.githubusercontent.com/shixiansi/PetPC-plugin/main',
   fallback: false,
   notice: '',
   entries: [
@@ -606,6 +606,56 @@ export const SetTheme = (name: string): Promise<void | unknown> => {
   return later(undefined);
 };
 
+// --- 外观：主题包 --------------------------------------------------------------
+//
+// The pack is the OTHER half of the look and lives in the same shared file (theme.json's `pack`),
+// so the pet's windows follow it too. `''` is a real answer: "no pack chosen", which means the
+// stylesheet's default palette (violet) - not "unknown pack".
+//
+// The fake keeps it in memory for the same reason FAKE_THEME exists: the dev loop has to be able to
+// click a card and see the window change, without a host process.
+let FAKE_PACK = '';
+export const ThemePack = (): Promise<string> => (DEV ? later(FAKE_PACK) : host.ThemePack());
+export const SetThemePack = (id: string): Promise<void | unknown> => {
+  if (!DEV) return host.SetThemePack(id);
+  // The host validates the shape and stores '' for anything that is not a pack id; the fake does
+  // the same, or a page that passed a display name would look correct here and lose the choice on
+  // the real thing.
+  FAKE_PACK = /^[a-z0-9-]{1,32}$/.test(id) ? id : '';
+  return later(undefined);
+};
+
+// 已安装的主题包。**开发桩返回空**：浏览器里没有数据目录，也没有人往 themes/ 里放过包。
+// 空列表是诚实的答案（页面上"已安装"那一栏就是空的），伪造几个包会让人以为装成功了。
+export type PackEntry = {
+  id: string;
+  name: string;
+  author?: string;
+  version?: string;
+  builtin?: boolean;
+  problems?: string[];
+  error?: string;
+  tokens?: Record<string, Record<string, string>>;
+};
+export const Themes = (): Promise<PackEntry[]> => (DEV ? later([]) : host.Themes());
+export const ThemePacksProblem = (): Promise<string> => (DEV ? later('') : host.ThemePacksProblem());
+
+// 主题商店。桩里是空货架 + 一句说明，理由同上：浏览器里没有市场源，也没有数据目录。
+export type ThemeStoreRow = {
+  id: string;
+  name: string;
+  version: string;
+  author: string;
+  description: string;
+  download: string;
+  sha256: string;
+};
+export type ThemeStoreView = { entries?: ThemeStoreRow[] | null; note?: string };
+export const ThemeStore = (): Promise<ThemeStoreView> =>
+  DEV ? later({ entries: [], note: '（浏览器里的假货架：真实清单来自市场源的 themes/index.json）' }) : host.ThemeStore();
+export const InstallTheme = (id: string): Promise<void | unknown> => (DEV ? later(undefined) : host.InstallTheme(id));
+export const RemoveTheme = (id: string): Promise<void | unknown> => (DEV ? later(undefined) : host.RemoveTheme(id));
+
 // --- 高级页的诊断面 --------------------------------------------------------------
 
 // The same text the Go side builds, shortened but not reshaped: a fake that drops the
@@ -723,4 +773,14 @@ export const LogTail = (q: LogQuery): Promise<LogView> => (DEV ? later(fakeLog(q
 export const OnTheme = (cb: (theme: string) => void): (() => void) => {
   if (DEV) return () => {};
   return EventsOn('market:theme', (theme: string) => cb(theme === 'light' ? 'light' : 'dark'));
+};
+
+// 主题包的那条事件。**单独一条**，不是给上面那条加个字段：明暗连桌宠的右键菜单都能改，
+// 而包只有「偏好」页会改。合成一条的话，每次切明暗都得替对方编一个包值，编错了就是
+// "切深色顺手把用户选的主题包换回默认"。
+//
+// 空字符串是合法值（= 没有包），所以这里不做归一化，只校验形状。
+export const OnThemePack = (cb: (pack: string) => void): (() => void) => {
+  if (DEV) return () => {};
+  return EventsOn('market:theme-pack', (pack: string) => cb(/^[a-z0-9-]{1,32}$/.test(pack) ? pack : ''));
 };

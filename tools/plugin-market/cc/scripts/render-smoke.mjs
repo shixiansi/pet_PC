@@ -157,9 +157,11 @@ check('插件：帧的 sandbox 恰好是 allow-scripts（没有 allow-same-origi
 // 帧带的方案 = 窗口当前的方案，而不是写死的 dark：这一轮起 data-theme 真的会被应用
 // （main.ts 在 mount 之前读宿主存的值），所以这里跟着它断言。
 const scheme = () => w.document.documentElement.dataset.theme;
+// 主题包也走 URL（宿主靠它把包的令牌注进插件文档），没有选包时是空串。
+const packOf = () => w.document.documentElement.dataset.themePack || '';
 check('插件：帧的地址是 /plugin-asset/<id>/<entry>?theme=<窗口的方案>',
   (chatFrame?.getAttribute('src') || '') ===
-    '/plugin-asset/com.shixiansi.plugin-chat/index.html?theme=' + scheme());
+    '/plugin-asset/com.shixiansi.plugin-chat/index.html?theme=' + scheme() + '&pack=' + packOf());
 check('插件：权限文案来自 []LabelPair', text().includes('调用你已配置的大模型（流式返回）'));
 check('插件：权限计数来自 Granted（4/5）', text().includes('4/5'));
 
@@ -279,7 +281,7 @@ check('插件：声明了浮层面的插件也在这里挂界面（这是上一�
 check('插件：它的帧也走同一个沙箱与 URL 约定',
   pomoFrame?.getAttribute('sandbox') === 'allow-scripts' &&
     (pomoFrame?.getAttribute('src') || '') ===
-      '/plugin-asset/com.shixiansi.plugin-pomodoro/panel.html?theme=' + scheme());
+      '/plugin-asset/com.shixiansi.plugin-pomodoro/panel.html?theme=' + scheme() + '&pack=' + packOf());
 check('插件：番茄钟现在有声明出来的设置项，所以有「设置」', Boolean(chip('设置')));
 chip('设置')?.click();
 await settle();
@@ -338,6 +340,147 @@ await settle();
 check('市场：点「安装」之后那一行变成已安装', !installBtn() && text().includes('已安装 v1.2.0'));
 check('市场：装完明说要去「插件」页授权（安装不等于启用）',
   text().includes('去「插件」页给它授权'));
+
+// --- the 扩展能力 page: the plugin test bench ------------------------------------------
+//
+// WHY THIS GROUP EXISTS. The bench is the one screen that shows what the 插件 page cannot:
+// the position a document is told it landed in (`init.surface`), the grants it is told it has,
+// and every message in both directions. Each of those is invisible in a screenshot of a frame
+// that happens to render, and each of them can be silently wrong in a way that still looks fine:
+//
+//   - a hard-coded `panel/workshop` would show a floating-surface plugin in a box it was never
+//     measured against, and it would look correct;
+//   - "模拟未授权" that empties `granted` in the UI but leaves the wire payload alone would be a
+//     switch that lies about the only thing it changes;
+//   - a log that only recorded `ready` would look like a log.
+//
+// So the assertions are on the INIT PAYLOADS (not on the DOM's appearance) and on the log's
+// contents: what the plugin was actually told, and what actually crossed.
+const benchFrame = () => w.document.querySelector('.stage-col iframe.plugin-frame');
+const benchStage = () => w.document.querySelector('.stage-col');
+async function answerReady(f) {
+  const sent = [];
+  const win = f?.contentWindow;
+  if (!win) return sent;
+  win.postMessage = (msg) => { sent.push(msg); };
+  w.dispatchEvent(new w.MessageEvent('message', { data: { v: 1, type: 'ready' }, source: win }));
+  await settle();
+  return sent;
+}
+const pickOption = (sel, value) => {
+  const el = w.document.querySelector(sel);
+  el.value = value;
+  el.dispatchEvent(new w.Event('change', { bubbles: true }));
+};
+
+await open('扩展能力');
+check('扩展能力：rail 上有这一页，插件与位置两个下拉都在',
+  Boolean(w.document.querySelector('select.plugin-select')) &&
+    Boolean(w.document.querySelector('select.place-select')) &&
+    text().includes('测试台'));
+check('扩展能力：默认挂第一个挂得上的插件，并说得出它的 id',
+  text().includes('com.shixiansi.plugin-chat'));
+check('扩展能力：挂不上的插件在下面点名，并给出宿主会给的理由（停用 / manifest）',
+  text().includes('已停用') && text().includes('manifest 读不出来'));
+const firstBenchFrame = benchFrame();
+check('扩展能力：选中后挂的是一个帧，沙箱恰为 allow-scripts（与插件页同一条边界）',
+  firstBenchFrame?.getAttribute('sandbox') === 'allow-scripts');
+check('扩展能力：帧的地址与主题沿用同一套约定',
+  (firstBenchFrame?.getAttribute('src') || '') ===
+    '/plugin-asset/com.shixiansi.plugin-chat/index.html?theme=' + scheme() + '&pack=' + packOf());
+
+const benchInit = (await answerReady(firstBenchFrame)).find((m) => m && m.type === 'init');
+check('扩展能力：握手告诉插件它在本窗口的工作区（panel/workshop）',
+  benchInit?.surface?.kind === 'panel' && benchInit?.surface?.slot === 'workshop');
+check('扩展能力：握手带的是闸门里的真实授权', Array.isArray(benchInit?.granted) && benchInit.granted.includes('llm.chat'));
+check('扩展能力：消息日志记下了 ready 与 init（两个方向都在）',
+  [...w.document.querySelectorAll('.side ol.log li')].length >= 2 &&
+    text().includes('panel/workshop'));
+
+// One request, refused by the dev stub on purpose (`PluginRequest` has no fake). What matters is
+// that the REFUSAL is what the log shows: a bench that printed "ok" for a request nothing
+// answered would be the same class of lie as a fake host that agrees with the page.
+if (firstBenchFrame?.contentWindow) {
+  w.dispatchEvent(new w.MessageEvent('message', {
+    data: { v: 1, type: 'request', id: '1', method: 'storage.get', payload: { key: 'state' } },
+    source: firstBenchFrame.contentWindow,
+  }));
+  await settle();
+}
+check('扩展能力：请求的拒绝原样进日志（ok:false 有自己的颜色）',
+  Boolean(w.document.querySelector('.side ol.log li.bad')) && text().includes('没有真实请求可答'));
+
+// 「模拟未授权」 must change the WIRE, not just the page: granted empties out and the request is
+// refused before the gate. Both halves are asserted, because a switch that did one of the two
+// would teach a plugin the wrong thing about itself.
+const denyBox = w.document.querySelector('input.deny');
+denyBox.checked = true;
+denyBox.dispatchEvent(new w.Event('change', { bubbles: true }));
+await settle();
+const deniedFrame = benchFrame();
+check('扩展能力：打开「模拟未授权」会重挂（授权在 init 里，改它必须重新握手）',
+  Boolean(deniedFrame) && deniedFrame !== firstBenchFrame);
+const deniedInit = (await answerReady(deniedFrame)).find((m) => m && m.type === 'init');
+check('扩展能力：这时插件被告知什么都没授予', Array.isArray(deniedInit?.granted) && deniedInit.granted.length === 0);
+if (deniedFrame?.contentWindow) {
+  w.dispatchEvent(new w.MessageEvent('message', {
+    data: { v: 1, type: 'request', id: '2', method: 'storage.get', payload: {} },
+    source: deniedFrame.contentWindow,
+  }));
+  await settle();
+}
+check('扩展能力：拒绝发生在测试台这一层，并写明是模拟的',
+  text().includes('模拟未授权（这个插件在 init 里被告知什么都没授予）'));
+
+// A plugin that declares rectangles: the box on screen must be EXACTLY the declared rectangle,
+// and the handshake must say so. This is the whole reason the page exists - the pet crops the
+// window to that rectangle, so "the plugin renders" and "the plugin renders inside what the user
+// sees" are two different questions.
+denyBox.checked = false;
+denyBox.dispatchEvent(new w.Event('change', { bubbles: true }));
+await settle();
+pickOption('select.plugin-select', 'com.shixiansi.plugin-pomodoro');
+await settle();
+const card = w.document.querySelector('.stage-col .card');
+check('扩展能力：声明了矩形的插件默认按那一块挂，框就是那条矩形（380×260）',
+  card?.style.width === '380px' && card?.style.height === '260px');
+check('扩展能力：位置下拉里也有桌宠的常驻帧（它声明了 background）',
+  [...w.document.querySelectorAll('select.place-select option')].some((o) => o.textContent.includes('常驻帧')));
+const pomoBenchFrame = benchFrame();
+check('扩展能力：换了插件就换文档',
+  (pomoBenchFrame?.getAttribute('src') || '') ===
+    '/plugin-asset/com.shixiansi.plugin-pomodoro/panel.html?theme=' + scheme() + '&pack=' + packOf());
+const pomoInit = (await answerReady(pomoBenchFrame)).find((m) => m && m.type === 'init');
+check('扩展能力：握手说的是浮层面的第几块，连矩形一起给',
+  pomoInit?.surface?.kind === 'surface' && pomoInit?.surface?.rectIndex === 0 &&
+    pomoInit?.surface?.rectCount === 1 && pomoInit?.surface?.rect?.w === 380);
+
+// A host-pushed event, by hand. It must reach the frame (as the same `event` message the real
+// down-link uses) and be visible in the log.
+const sendEventBtn = w.document.querySelector('button.event-send');
+sendEventBtn.click();
+await settle();
+check('扩展能力：手推的事件进日志，并写明是手动推的', text().includes('share.changed（手动推送）'));
+check('扩展能力：日志现在有 4 种以上的消息，而不是只有 ready',
+  [...w.document.querySelectorAll('.side ol.log li .type')].map((el) => el.textContent)
+    .filter((v, i, a) => a.indexOf(v) === i).length >= 4);
+
+const beforeRemount = benchFrame();
+[...w.document.querySelectorAll('button.btn')].find((b) => b.textContent.trim() === '重挂').click();
+await settle();
+check('扩展能力：「重挂」真的换了一个文档（新的握手）', benchFrame() !== beforeRemount && Boolean(benchFrame()));
+
+[...w.document.querySelectorAll('button.btn')].find((b) => b.textContent.trim() === '清空日志').click();
+await settle();
+check('扩展能力：「清空日志」清得掉，并说明下一步会发生什么',
+  w.document.querySelectorAll('.side ol.log li').length === 0 && text().includes('还没有消息'));
+
+// The method console goes through the same gate; in the browser there is no frame, so the honest
+// answer is a refusal - and it must be shown, not swallowed.
+w.document.querySelector('button.method-send').click();
+await settle();
+check('扩展能力：方法控制台走闸门，拒绝会被原样显示',
+  (w.document.querySelector('.side pre.result')?.textContent || '').startsWith('失败：'));
 
 // --- uninstalling, and the question it has to carry -----------------------------------
 //

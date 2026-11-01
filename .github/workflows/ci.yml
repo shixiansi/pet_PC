@@ -15,7 +15,7 @@
 # 仓库就能跑，而"没检出所以跳过"的代价是两个真问题：
 #   - internal/plugins 的 sample 字节对比：没有 market/ 时它 SKIP，而 SKIP 的结果是
 #     九个内置包与市场漂了整整一轮没人知道（那次修完才发现的）；
-#   - .dev/check-frontend.cjs 的 138 条静态接线检查：它读 market/plugins/*。
+#   - .dev/check-frontend.cjs 的静态接线检查：它读 market/plugins/*。
 #   - .dev/verify-*.ps1 四个像素门禁：需要真实交互桌面和 WebView2 控制器。
 #   - wails build：需要 Wails CLI 与 WebView2，且这几分钟的构建在 PR 上的
 #     收益不如把 go vet/test 稳定跑起来。
@@ -136,7 +136,7 @@ jobs:
       # check-frontend.cjs 找到 market/plugins 与 market/docs。
       - uses: actions/checkout@v4
         with:
-          repository: shixiansi/pet-pc-plugins
+          repository: shixiansi/PetPC-plugin
           path: market
 
       - uses: actions/setup-go@v5
@@ -153,5 +153,11 @@ jobs:
         shell: pwsh
         run: go test ./internal/plugins/ -run 'TestBuiltinSample' -count=1 -v
 
-      - name: 静态接线检查（138 条）
+      - name: 静态接线检查（142 条）
         run: node .dev/check-frontend.cjs
+
+      # 配色。它不需要 market/（只读宿主仓的两个令牌文件），放在这条 job 里是因为这里
+      # 已经装好了 Node、而且每次改动都会跑到——配色回归是"改完没人会红"的那一类，
+      # 只留给维护者本机跑等于没有这道门禁。
+      - name: 对比度检查（文字令牌 ≥ 4.5:1，深浅两套）
+        run: node .dev/check-contrast.cjs

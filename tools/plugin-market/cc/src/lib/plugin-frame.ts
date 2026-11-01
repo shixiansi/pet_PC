@@ -12,6 +12,14 @@
  * those three plugins have no visible interface in any program: just a headless frame in
  * the pet.
  *
+ * THE THIRD CALLER: the 「扩展能力」 page's test bench (`pages/Bench.svelte`). It mounts the same
+ * documents to answer a different question - "what does this plugin do when it lands HERE?" - so it
+ * is the SAME implementation rather than a second one. Two iframe hosts sharing one window would
+ * drift, and the copy that drifts is the one nobody ships. What the bench needs on top is
+ * visibility (every message, via `onMessage`) and one sanctioned lie (`denyRequests`: answer every
+ * request as refused without ever reaching the gate, so the "user granted nothing" path can be
+ * walked in the UI without editing the real grants).
+ *
  * WHAT IS IDENTICAL TO THE PET'S HOST, AND MUST STAY SO
  *
  * `sandbox="allow-scripts"` alone - adding allow-same-origin would hand every installed
@@ -81,6 +89,51 @@ function loadHostInfo(): void {
 /** The colour scheme a frame is drawn in. */
 export type FrameTheme = 'light' | 'dark';
 
+/** One declared rectangle, as `init.surface.rect` carries it (measured from the pet). */
+export interface MountRect {
+  dx: number;
+  dy: number;
+  w: number;
+  h: number;
+  radius?: number;
+}
+
+/**
+ * Where the document is told it landed (`init.surface`).
+ *
+ * The pet has three shapes and this window has one, so the bench can show a plugin all four:
+ *
+ *   - `{kind:'panel', slot:'workshop'}`  - here, filling the page (this window's own answer);
+ *   - `{kind:'panel', slot:'background'}` - the pet's hidden常驻帧 (no rectangle at all);
+ *   - `{kind:'surface', rectIndex, rect}` - one of the pet's floating rectangles;
+ *   - `{kind:'body', slot:'body', rect}` - the PET itself (`manifest.body`): one rectangle, the
+ *     pet's own, which the user sizes with 桌宠大小.
+ *
+ * It is a TYPED COPY rather than "whatever the caller had": the values are told to the document
+ * across `postMessage`, so they must be plain data (a Svelte `$state` proxy would throw) - see the
+ * DataCloneError note in `mountPlugin`.
+ */
+export interface MountSurface {
+  kind: 'panel' | 'surface' | 'body';
+  slot?: string;
+  rectIndex?: number;
+  rectCount?: number;
+  rect?: MountRect | null;
+}
+
+/** One message that crossed the boundary, as the bench's log shows it. */
+export interface BoundaryEvent {
+  /** `HH:MM:SS.mmm`, local. */
+  at: string;
+  /** `in` = the plugin said it, `out` = the host said it. */
+  dir: 'in' | 'out';
+  type: 'ready' | 'init' | 'request' | 'response' | 'event' | 'theme' | 'error';
+  /** One line, already worded: the bench prints it verbatim. */
+  text: string;
+  /** For `response` only: did the host answer `ok`. */
+  ok?: boolean;
+}
+
 /** What one mount needs from the installed row. Nothing here is derived. */
 export interface MountRequest {
   pluginId: string;
@@ -88,6 +141,20 @@ export interface MountRequest {
   entry: string;
   permissions: string[];
   granted: string[];
+  /** Optional; the default is this window's own answer, `panel/workshop`. */
+  surface?: MountSurface;
+  /** Optional observer of every message in both directions. The bench's log; nothing else uses it. */
+  onMessage?: (ev: BoundaryEvent) => void;
+  /**
+   * Answer every request as refused, WITHOUT calling the gate, and tell the document in `init`
+   * that nothing was granted.
+   *
+   * It exists so the "the user ticked nothing" path can be walked without touching the real
+   * grants: `Grant()` would change what the gate enforces for the plugin everywhere, and that is
+   * the user's decision on the 插件 page, not a test-bench toggle. Both halves are forced to agree
+   * here (empty `granted` + refusal at this layer), which is the only way this can be honest.
+   */
+  denyRequests?: boolean;
 }
 
 /** A mounted frame, as the page holds it. */
@@ -95,6 +162,12 @@ export interface PluginFrame {
   readonly pluginId: string;
   /** Tells the document the window's scheme changed - WITHOUT remounting it. */
   setTheme(theme: FrameTheme): void;
+  /**
+   * Posts one `event` at the document - the same wire message the host's real down-link
+   * (`share.changed` / `storage.changed` / `config.changed`) arrives as, but triggered by hand.
+   * The bench's "推一条事件"; the plugin cannot tell the two apart, which is the point.
+   */
+  sendEvent(name: string, payload: unknown): void;
   /** Removes the frame and the window listener. Safe to call twice. */
   destroy(): void;
 }
@@ -113,11 +186,27 @@ export function windowTheme(): FrameTheme {
 }
 
 /**
+ * The palette pack in force, or '' when none was chosen.
+ *
+ * The frame does not RECEIVE the palette: it is spliced into the document the host serves
+ * (`internal/plugins/asset.go`), because the frame is an opaque origin and this window cannot touch
+ * its DOM. So all this function does is name the pack in the URL.
+ *
+ * A pack change reaches frames mounted AFTER it: an open document keeps the stylesheet it was served
+ * with, and re-creating frames to re-theme them would throw away whatever the user had typed into a
+ * plugin's own form.
+ */
+export function windowPack(): string {
+  return document.documentElement.dataset.themePack ?? '';
+}
+
+/**
  * Mounts one plugin interface under `mount`.
  *
  * Callers must destroy the previous frame before mounting the next one: the page shows one
  * plugin at a time, and a second document would still be running with permissions the user
- * granted to it.
+ * granted to it. The rail swaps pages, so the plugin page and the bench are never both mounted -
+ * which is what keeps that "one document at a time" claim true across the whole window.
  */
 export function mountPlugin(mount: HTMLElement, req: MountRequest, theme: FrameTheme): PluginFrame {
   // Start the capability-table read on the first mount rather than at module load: this module
@@ -143,7 +232,23 @@ export function mountPlugin(mount: HTMLElement, req: MountRequest, theme: FrameT
   const entry = req.entry;
   const version = req.version;
   const permissions = [...(req.permissions ?? [])];
-  const granted = [...(req.granted ?? [])];
+  // Both halves of the bench's "模拟未授权" are decided HERE, together, so they can never
+  // disagree: a frame that refuses every request while its `init` claims grants is a frame that
+  // teaches its plugin the wrong thing about itself.
+  const deny = req.denyRequests === true;
+  const granted = deny ? [] : [...(req.granted ?? [])];
+  const surface = plainSurface(req.surface);
+  const observe = typeof req.onMessage === 'function' ? req.onMessage : null;
+
+  /** Hands one line to the observer. A throwing observer must not break the bridge. */
+  function emit(ev: Omit<BoundaryEvent, 'at'>) {
+    if (!observe) return;
+    try {
+      observe({ at: clock(), ...ev });
+    } catch {
+      /* the log is a viewer; it does not get to break the transport */
+    }
+  }
 
   const frame = document.createElement('iframe');
   frame.className = 'plugin-frame';
@@ -152,7 +257,11 @@ export function mountPlugin(mount: HTMLElement, req: MountRequest, theme: FrameT
   // `?theme=` is how the plugin knows which scheme to paint on its FIRST frame; the `theme`
   // message below covers a switch that happens later. Two channels on purpose - see
   // setTheme.
-  frame.setAttribute('src', `/plugin-asset/${pluginId}/${entry}?theme=${theme}`);
+  //
+  // `?pack=` has only ONE channel, and it is not a message: the host splices the pack's tokens into
+  // the document it serves, so the scheme can be switched live while the pack takes effect on the
+  // next mount. That asymmetry is the price of not requiring plugin authors to implement anything.
+  frame.setAttribute('src', `/plugin-asset/${pluginId}/${entry}?theme=${theme}&pack=${windowPack()}`);
   frame.dataset.pluginId = pluginId;
   frame.dataset.pluginVersion = version;
   // Native widgets inside the document (scrollbars, carets, a <select> popup) would otherwise
@@ -187,6 +296,10 @@ export function mountPlugin(mount: HTMLElement, req: MountRequest, theme: FrameT
           '）：面板/插件的状态可能被 Svelte 的 $state 代理着，过边界前要复制成纯数据。',
         err,
       );
+      // …and one line for the bench, because the console is not a screen anybody looks at. A
+      // message that never crossed is the single most confusing failure this file has, and it
+      // looked like "the plugin's界面 is broken" for a whole round.
+      emit({ dir: 'out', type: 'error', text: String(message.type) + ' 没发出去：值过不了结构化克隆' });
     }
   }
 
@@ -202,6 +315,15 @@ export function mountPlugin(mount: HTMLElement, req: MountRequest, theme: FrameT
     const method = data.method;
     if (typeof id !== 'string' || typeof method !== 'string') return;
     const payload = JSON.stringify(data.payload ?? {});
+    emit({ dir: 'in', type: 'request', text: method + '  ← ' + byteCount(payload) });
+    if (deny) {
+      // The bench's "拒绝全部": the refusal happens HERE, before the gate, and says so. Calling the
+      // gate and then overwriting its answer would make the log disagree with the host's log.
+      const error = '测试台：模拟未授权（这个插件在 init 里被告知什么都没授予）';
+      post({ type: 'response', id, ok: false, error });
+      emit({ dir: 'out', type: 'response', ok: false, text: method + '  → ' + error });
+      return;
+    }
     try {
       const raw = await PluginRequest(req.pluginId, method, payload);
       // The binding returns the method's JSON as a STRING; the bridge expects the value
@@ -217,8 +339,11 @@ export function mountPlugin(mount: HTMLElement, req: MountRequest, theme: FrameT
         }
       }
       post({ type: 'response', id, ok: true, result: value });
+      emit({ dir: 'out', type: 'response', ok: true, text: method + '  → ok  ' + byteCount(raw) });
     } catch (err) {
-      post({ type: 'response', id, ok: false, error: why(err) });
+      const message = why(err);
+      post({ type: 'response', id, ok: false, error: message });
+      emit({ dir: 'out', type: 'response', ok: false, text: method + '  → ' + message });
     }
   }
 
@@ -232,8 +357,12 @@ export function mountPlugin(mount: HTMLElement, req: MountRequest, theme: FrameT
     if (data.type === 'ready') {
       // Exactly one init. The plugin announces itself once; a second answer would be a second
       // grant list applied after the plugin already rendered against the first.
-      if (initialised) return;
+      if (initialised) {
+        emit({ dir: 'in', type: 'ready', text: 'ready（第二条：忽略，init 只发一次）' });
+        return;
+      }
       initialised = true;
+      emit({ dir: 'in', type: 'ready', text: 'ready' });
       post({
         type: 'init',
         pluginId,
@@ -246,12 +375,24 @@ export function mountPlugin(mount: HTMLElement, req: MountRequest, theme: FrameT
         // The window's scheme. The same value was on the frame URL for the first paint; this
         // is the one a plugin should trust, because a switch updates it.
         theme: current,
-        // The slot name is how a plugin with several appearances tells them apart: the pet
-        // mounts the same document as 'background' or 'chat', and here it is the workshop.
-        surface: { kind: 'panel', slot: 'workshop' },
+        // Where this document landed. It used to be hard-coded to the workshop; the bench mounts
+        // the same documents as the pet's floating rectangles and as its hidden常驻帧, and a
+        // plugin that reads `surface.kind`/`slot`/`rect` to decide what to draw would otherwise
+        // be told it is always in this window (see the bench's 位置 selector).
+        surface,
         // Which program this is, and what it answers. Optional in the protocol, and omitted
         // when the read has not landed yet - a plugin that ignores it is unaffected.
         ...(hostInfo ? { host: hostInfo } : {}),
+      });
+      emit({
+        dir: 'out',
+        type: 'init',
+        text:
+          surface.kind === 'surface' || surface.kind === 'body'
+            ? surface.kind + ' #' + ((surface.rectIndex ?? 0) + 1) + '/' + (surface.rectCount ?? 1) +
+              ' · granted ' + granted.length + '/' + permissions.length + (deny ? '（模拟未授权）' : '')
+            : 'panel/' + (surface.slot || '') + ' · granted ' + granted.length + '/' + permissions.length +
+              (deny ? '（模拟未授权）' : ''),
       });
       return;
     }
@@ -275,13 +416,27 @@ export function mountPlugin(mount: HTMLElement, req: MountRequest, theme: FrameT
   //
   // The id check is not decoration: `EventsOn` is a broadcast, and a frame must never receive
   // another plugin's traffic.
-  const stopEvents = EventsOn('pet:plugin-event', (ev: unknown) => {
-    const msg = ev as { pluginId?: unknown; name?: unknown; payload?: unknown } | null;
-    if (!msg || msg.pluginId !== pluginId || typeof msg.name !== 'string') return;
-    // Copied field by field: `ev` came through the Wails binding and may be a proxy, and a
-    // proxy cannot cross `postMessage` (see the DataCloneError note above).
-    post({ type: 'event', name: msg.name, payload: msg.payload ?? {} });
-  });
+  //
+  // IT MAY NOT EXIST. `EventsOn` forwards to `window.runtime`, which only a Wails window has -
+  // in `npm run dev` and in the render smoke (jsdom) there is none, and an unguarded call threw
+  // `Cannot read properties of undefined (reading 'EventsOnMultiple')` from inside a `$effect`,
+  // i.e. the frame never mounted and the error surfaced as "the page is broken". A browser that
+  // can mount a frame but has no host events is exactly the true situation, so the fallback is
+  // "no events" rather than "no frame".
+  let stopEvents: () => void = () => {};
+  try {
+    stopEvents = EventsOn('pet:plugin-event', (ev: unknown) => {
+      const msg = ev as { pluginId?: unknown; name?: unknown; payload?: unknown } | null;
+      if (!msg || msg.pluginId !== pluginId || typeof msg.name !== 'string') return;
+      // Copied field by field: `ev` came through the Wails binding and may be a proxy, and a
+      // proxy cannot cross `postMessage` (see the DataCloneError note above).
+      const payload = msg.payload ?? {};
+      post({ type: 'event', name: msg.name, payload });
+      emit({ dir: 'out', type: 'event', text: msg.name + '（宿主推送）' });
+    });
+  } catch {
+    stopEvents = () => {};
+  }
 
   return {
     pluginId,
@@ -290,7 +445,16 @@ export function mountPlugin(mount: HTMLElement, req: MountRequest, theme: FrameT
       frame.style.colorScheme = current;
       // Nothing to tell a document that has not completed its handshake - its `init` carries
       // the scheme anyway.
-      if (initialised) post({ type: 'theme', theme: current });
+      if (initialised) {
+        post({ type: 'theme', theme: current });
+        emit({ dir: 'out', type: 'theme', text: current });
+      }
+    },
+    sendEvent(name: string, payload: unknown) {
+      const label = typeof name === 'string' ? name.trim() : '';
+      if (!label) return;
+      post({ type: 'event', name: label, payload: payload ?? {} });
+      emit({ dir: 'out', type: 'event', text: label + '（手动推送）' });
     },
     destroy() {
       if (!alive) return;
@@ -314,4 +478,74 @@ function why(e: unknown): string {
   } catch {
     return String(e);
   }
+}
+
+/**
+ * Turns a caller's `surface` into the exact plain object `init` carries.
+ *
+ * Default is this window's own answer (`panel/workshop`), because that is what the 插件 page's
+ * frames are and what every plugin has been told since the workshop existed - a caller that never
+ * mentions `surface` must keep getting byte-identical behaviour.
+ *
+ * Every field is re-read as a primitive: the caller's object may be a Svelte `$state` proxy, and a
+ * proxy cannot cross `postMessage` (see mountPlugin's DataCloneError note). Numbers are coerced
+ * rather than trusted because a `<input type="number">` hands back strings at the edges.
+ */
+function plainSurface(s: MountSurface | undefined): MountSurface {
+  if (!s) return { kind: 'panel', slot: 'workshop' };
+  if (s.kind === 'body') {
+    // The pet's own rectangle. `slot` is what the PET sends, and the plugin uses it to tell "I am
+    // the pet" from "I am a card beside it" - so the bench has to say the same thing.
+    const r = s.rect;
+    return {
+      kind: 'body',
+      slot: 'body',
+      rectIndex: 0,
+      rectCount: 1,
+      rect: r
+        ? { dx: 0, dy: 0, w: Number(r.w) || 0, h: Number(r.h) || 0 }
+        : null,
+    };
+  }
+  if (s.kind === 'surface') {
+    const r = s.rect;
+    return {
+      kind: 'surface',
+      rectIndex: Number(s.rectIndex ?? 0) || 0,
+      rectCount: Number(s.rectCount ?? 1) || 1,
+      rect: r
+        ? {
+            dx: Number(r.dx) || 0,
+            dy: Number(r.dy) || 0,
+            w: Number(r.w) || 0,
+            h: Number(r.h) || 0,
+            ...(r.radius === undefined ? {} : { radius: Number(r.radius) || 0 }),
+          }
+        : null,
+    };
+  }
+  // An unknown slot is passed through as given: the host does not decide where a plugin is
+  // allowed to think it landed, and a bench that silently rewrote it would be testing its own
+  // spelling rather than the plugin's behaviour.
+  return { kind: 'panel', slot: s.slot || 'workshop' };
+}
+
+/** `HH:MM:SS.mmm`, local - the log's time column. */
+function clock(): string {
+  const d = new Date();
+  const p = (n: number, w = 2) => String(n).padStart(w, '0');
+  return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) + '.' + p(d.getMilliseconds(), 3);
+}
+
+/** A payload's size in the log's own words - the pattern the host's log lines already use. */
+function byteCount(value: unknown): string {
+  if (typeof value !== 'string') return '0 B';
+  // UTF-8 length, like the Go side's byte counts: a Chinese message is 3 bytes per character and
+  // a log that said "1 B" for it would make the two programs' numbers disagree.
+  let bytes = 0;
+  for (const ch of value) {
+    const code = ch.codePointAt(0) ?? 0;
+    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+  }
+  return bytes + ' B';
 }
