@@ -196,8 +196,8 @@ func writeFileLine(b *strings.Builder, dir, name string) {
 //   - the plugin being switched off, which stops its resident frame AND every call to it.
 //
 // One line for the disk it occupies, because "why is %AppData% 400 MB" is the other question
-// this report gets asked - and it is measured against the same ceiling the host enforces
-// (plugins.MaxPluginDataBytes), so the number is comparable rather than decorative.
+// this report gets asked. There is no ceiling any more (2026-11-01), so the number stands
+// alone instead of being read as a percentage of something.
 func pluginProblems(m *Market, row plugins.Installed, installed map[string]bool) []string {
 	var out []string
 	if !row.Enabled {
@@ -239,7 +239,7 @@ func pluginProblems(m *Market, row plugins.Installed, installed map[string]bool)
 	if row.ID != "" {
 		if dir, err := m.manager.PrivateDir(row.ID); err == nil {
 			if used := plugins.PluginDataBytes(dir); used > 0 {
-				out = append(out, fmt.Sprintf("私有目录占用 %s（上限 %s）", humanBytes(used), humanBytes(plugins.MaxPluginDataBytes)))
+				out = append(out, fmt.Sprintf("私有目录占用 %s（宿主不设上限；在控制中心的「插件」页可以看明细）", humanBytes(used)))
 			}
 		}
 	}

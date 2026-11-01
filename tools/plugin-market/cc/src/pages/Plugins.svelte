@@ -12,8 +12,18 @@
     Catalogue,
     Update,
     Uninstall,
+    Occupancy,
+    CleanPluginFolder,
   } from '../lib/bridge';
-  import type { PluginRow, PluginConfig, ConfigEditor, MarketView, MarketEntry } from '../lib/bridge';
+  import type {
+    PluginRow,
+    PluginConfig,
+    ConfigEditor,
+    MarketView,
+    MarketEntry,
+    PluginOccupancy,
+    FolderOccupancy,
+  } from '../lib/bridge';
 
   // The row type is the GENERATED one (wailsjs/go/models.ts -> plugins.Installed), not a
   // hand-written description of it. That is the whole fix: this page used to declare
@@ -52,6 +62,68 @@
   const selected = $derived(rows.find((r) => r.ID === selectedId) ?? null);
   const grantedCount = $derived((selected?.Granted ?? []).length);
   const permCount = $derived(selected?.Manifest?.permissions?.length ?? 0);
+
+  // --- 私有目录占用 ---------------------------------------------------------------
+  //
+  // The host does NOT cap how much a plugin stores (2026-11-01: the 64 MiB ceiling was deleted).
+  // What replaced it is this: a number the user can read. That change is the whole reason the qq
+  // plugin no longer invents eviction policies - and the reason this section is read-only except
+  // for folders the PLUGIN graded `evictable`.
+  //
+  // Kept separate from `rows` because it is a measurement, not a registry entry: it is fetched
+  // after the list lands and may legitimately fail (a directory being written while we walk it),
+  // in which case the page still shows the plugins - just without the byte counts.
+  let occupancy = $state<Record<string, PluginOccupancy>>({});
+  let occError = $state('');
+  /** Which folder is being cleared right now, so the button can say so. */
+  let clearing = $state('');
+
+  async function loadOccupancy() {
+    try {
+      const list = await Occupancy();
+      const next: Record<string, PluginOccupancy> = {};
+      for (const row of list ?? []) next[row.id] = row;
+      occupancy = next;
+      occError = '';
+    } catch (e) {
+      occError = '读取占用失败：' + why(e);
+    }
+  }
+
+  /**
+   * 清一个由插件自己声明为 `evictable` 的目录。
+   *
+   * THE CONFIRMATION IS NOT DECORATION: this is the only place in this window where a click deletes
+   * files. A folder the plugin graded `user-data` has no button at all (see the markup), and the host
+   * refuses it by name even if a stale page sends the request - but asking first is the difference
+   * between "a cache" and "the user's sticker library", which is exactly what went wrong on 2026-11-01.
+   */
+  async function clearFolder(id: string, folder: FolderOccupancy) {
+    if (clearing) return;
+    const label = folder.label || folder.key;
+    const ok = confirm(
+      `清空「${label}」？这会删掉 ${formatBytes(folder.bytes)} 的文件。\n\n目录：${folder.key}\n插件声明它是可以重新产生的，删了会自动重建。`,
+    );
+    if (!ok) return;
+    clearing = `${id}:${folder.key}`;
+    try {
+      await CleanPluginFolder(id, folder.key);
+      await loadOccupancy();
+      notice = `已清空 ${label}（释放 ${formatBytes(folder.bytes)}）`;
+    } catch (e) {
+      error = '清理失败：' + why(e);
+    } finally {
+      clearing = '';
+    }
+  }
+
+  function formatBytes(n: number): string {
+    const value = Number(n) || 0;
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
 
   // --- the plugin's own settings (manifest.config) -----------------------------------
   //
@@ -138,6 +210,9 @@
     } catch (e) {
       problems.push('已装列表：' + why(e));
     }
+    // Occupancy AFTER the list lands, and never fatal: a directory being written while we walk
+    // it may refuse a listing, and that must not cost the page its plugin rows.
+    void loadOccupancy();
     try {
       // The labels come from the host, not from a map in this file: the install dialog is
       // the user's consent, and consent described two ways is consent to two things.
@@ -590,6 +665,12 @@
             <span class="dot" class:on={r.Enabled && !r.Error} class:err={Boolean(r.Error)}></span>
             <span class="row-name">{name(r)}</span>
             <span class="row-meta">v{r.Version || '?'}</span>
+            <!-- 占用的那一格：列表里只放一个数字（"6.4 MB"），明细在详情区。
+                 宿主不设上限，所以这里不是"配额用了多少"，而是"占了多少"——没有百分比，
+                 因为没有分母。 -->
+            {#if occupancy[r.ID]?.bytes}
+              <span class="row-size" title="私有目录占用">{formatBytes(occupancy[r.ID].bytes)}</span>
+            {/if}
           </button>
         {/each}
       {/if}
@@ -711,6 +792,60 @@
 
       {#if selected.Error}
         <p class="err">manifest 有问题：{selected.Error}</p>
+      {/if}
+
+      <!-- 占用明细：宿主量出来的字节 + 插件自己给的分级。
+           只有 `evictable` 的目录有清理按钮；`user-data` 一律只标一行说明，不给按钮——
+           "清理"和"删掉用户的东西"不是同一个动词，这正是 2026-11-01 那次事故的边界。 -->
+      {#if occupancy[selected.ID]?.bytes}
+        {@const occ = occupancy[selected.ID]}
+        <details class="occ-drop">
+          <summary class="occ-summary">
+            占用 <b>{formatBytes(occ.bytes)}</b>
+            <span class="occ-files">· {occ.files} 个文件</span>
+            {#if occ.evictableBytes > 0}
+              <span class="occ-tag ok">可清 {formatBytes(occ.evictableBytes)}</span>
+            {/if}
+          </summary>
+          <div class="occ-panel">
+            <p class="occ-note">
+              宿主<strong>不限制</strong>插件存多少东西，只把占用列出来给你看。能不能清由插件自己标注：
+              自动收集的缓存删了能重建，你的数据删了就没了。
+            </p>
+            <ul class="occ-list">
+              {#each occ.folders ?? [] as folder (folder.key)}
+                <li class="occ-row">
+                  <div class="occ-what">
+                    <code>{folder.key || '（根目录）'}</code>
+                    {#if folder.label}<span class="occ-label">{folder.label}</span>{/if}
+                    {#if folder.grade === 'unknown'}
+                      <span class="occ-tag">未分类</span>
+                    {:else if folder.grade === 'user-data'}
+                      <span class="occ-tag user">你的数据</span>
+                    {:else}
+                      <span class="occ-tag ok">可清理</span>
+                    {/if}
+                  </div>
+                  <div class="occ-acts">
+                    <span class="occ-bytes">{formatBytes(folder.bytes)}</span>
+                    {#if folder.grade === 'evictable' && folder.bytes > 0}
+                      <button
+                        type="button"
+                        class="chip"
+                        disabled={clearing === selected.ID + ':' + folder.key}
+                        onclick={() => clearFolder(selected.ID, folder)}
+                        title="清空这个目录（插件声明它可以重新产生）"
+                      >{clearing === selected.ID + ':' + folder.key ? '清理中…' : '清理'}</button>
+                    {:else if folder.grade === 'user-data'}
+                      <span class="occ-keep" title="删了就找不回来了，所以这里不给按钮">不可自动清理</span>
+                    {/if}
+                  </div>
+                </li>
+              {/each}
+            </ul>
+            {#if occError}<p class="err">{occError}</p>{/if}
+          </div>
+        </details>
       {/if}
 
       {#if mountable(selected)}
@@ -1256,7 +1391,66 @@
     font-size: 12px;
     padding: var(--space-2) var(--space-3);
   }
-</style>
 
+  /* --- 私有目录占用 ---------------------------------------------------------- */
+  /* 列表里那一格：等宽数字，右对齐，不参与名字的省略号计算。 */
+  .row-size {
+    margin-left: auto;
+    flex: none;
+    font: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
 
+  .occ-drop {
+    flex: none;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg-raised);
+  }
+  .occ-summary {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    cursor: pointer;
+    font-size: var(--fs-sm);
+    color: var(--text);
+    list-style: none;
+  }
+  .occ-summary::-webkit-details-marker { display: none; }
+  .occ-summary b { font-variant-numeric: tabular-nums; }
+  .occ-files, .occ-note { color: var(--text-dim); }
+  .occ-files { font-size: var(--fs-xs); }
 
+  .occ-panel { padding: 0 var(--space-3) var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+  .occ-note { margin: 0; font-size: var(--fs-xs); line-height: 1.6; }
+  .occ-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+  .occ-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .occ-row:last-child { border-bottom: 0; }
+  .occ-what { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; flex: 1 1 auto; }
+  .occ-what code { font: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+  .occ-label { font-size: var(--fs-xs); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .occ-acts { display: flex; align-items: center; gap: var(--space-2); flex: none; }
+  .occ-bytes { font: var(--font-mono); font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .occ-keep { font-size: var(--fs-xs); color: var(--text-faint); }
+
+  .occ-tag {
+    flex: none;
+    font-size: 10.5px;
+    font-weight: 600;
+    padding: 1px 7px;
+    border-radius: var(--radius-full);
+    background: var(--bg-sunken);
+    color: var(--text-dim);
+  }
+  /* 可清理 = 成功色（删了能重建）；你的数据 = 警告色（删了就没了）。颜色在这里是语义，不是装饰。 */
+  .occ-tag.ok { background: var(--success-bg); color: var(--success); }
+  .occ-tag.user { background: var(--warning-bg); color: var(--warning); }</style>

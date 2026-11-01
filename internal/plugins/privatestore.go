@@ -41,6 +41,11 @@ import (
 // The bounds below are part of the contract, not tuning knobs: a plugin that asks for
 // a deeper or longer key gets a refusal naming the limit, rather than a path the host
 // silently truncates.
+//
+// NOTHING HERE BOUNDS HOW MUCH A PLUGIN MAY STORE. That is deliberate, and it is the
+// lesson of 2026-11-01 (see the file header): a per-plugin byte ceiling turned every
+// plugin that legitimately needed room into a plugin that had to invent its own eviction
+// policy, and every one of those policies was wrong in a way that cost the user data.
 const (
 	// storageKeyMaxDepth is how many folders deep a key may go.
 	storageKeyMaxDepth = 4
@@ -48,17 +53,12 @@ const (
 	storageKeyMaxLen = 200
 	// MaxStorageValue bounds ONE value written through `storage.set`.
 	//
-	// 1 MiB: a hundred times a chat transcript, a thousand times a settings blob. The number
-	// exists because "write the whole conversation into a key" is the shape of a bug - the
-	// private directory is a plugin's own scratch space, not its database, and a plugin that
-	// needs a database should say so rather than quietly filling the user's disk.
+	// KEPT, and it is not a capacity policy: it is a SHAPE constraint. A value over 1 MiB means
+	// the plugin is using one key as a blob store, and the fix for that is a different data
+	// layout, not more room. It never FIRES for a sticker library (one image is one key, far
+	// below 1 MiB), which is exactly what a shape constraint should look like: it is not
+	// visible to any plugin that stores things the natural way.
 	MaxStorageValue = 1 << 20
-	// MaxPluginDataBytes bounds the WHOLE private directory of one plugin, audio included.
-	//
-	// 64 MiB, and generous on purpose: the biggest real thing a plugin keeps here is a voice
-	// plugin's recorded takes and the qq plugin's 437 small state files. It is a ceiling that
-	// says "you are not a file host", not a budget anybody should be budgeting against.
-	MaxPluginDataBytes = 64 << 20
 )
 
 // StorageKeyPath validates one key and returns the relative path it names.
@@ -172,16 +172,14 @@ func StorageSet(dir string, payload []byte) (any, error) {
 		}
 		return nil, err
 	}
-	// The budget is checked BEFORE the write, and the refusal changes nothing - the same
-	// order every other capability keeps (dispatch.go). "Which key was too big" is the only
-	// thing a plugin can act on, so both numbers are in the message.
+	// One shape check, and it is about the SHAPE of a value, not the room it takes: a plugin
+	// that writes more than 1 MiB into a single key is storing a blob where it should be storing
+	// rows, and the fix is its own data layout. There is NO per-plugin total ceiling - see the
+	// constants above and the file header for why that one had to go.
 	incoming := int64(len(in.Value))
-	replacing := int64(0)
-	if info, statErr := os.Stat(path); statErr == nil {
-		replacing = info.Size()
-	}
-	if err := checkStorageBudget(dir, incoming, replacing); err != nil {
-		return nil, err
+	if incoming > MaxStorageValue {
+		return nil, fmt.Errorf("storage.set 的值是 %d 字节，超过单值上限 %d（把它拆成几个键，或换一种存法）",
+			incoming, MaxStorageValue)
 	}
 	if err := os.WriteFile(path, []byte(in.Value), 0o644); err != nil {
 		return nil, err
@@ -189,64 +187,11 @@ func StorageSet(dir string, payload []byte) (any, error) {
 	return map[string]any{"ok": true}, nil
 }
 
-// checkStorageBudget refuses a write that would take one plugin past its bounds.
+// PluginDataBytes is privateDirBytes, exported for the UI that SHOWS occupancy.
 //
-// Two refusals, because they are two different mistakes:
-//
-//   - ONE value over MaxStorageValue: the plugin is using a key as a blob store;
-//   - the DIRECTORY over MaxPluginDataBytes: the plugin is using the user's disk as its own.
-//
-// `replacing` is the size of the file this key already has, so overwriting a large value with
-// a large value is not counted twice - without that, a plugin that keeps one 800 KiB cache
-// would be unable to update it.
-func checkStorageBudget(dir string, incoming, replacing int64) error {
-	if incoming > MaxStorageValue {
-		return fmt.Errorf("storage.set 的值是 %d 字节，超过单值上限 %d（把它拆成几个键，或换一种存法）",
-			incoming, MaxStorageValue)
-	}
-	used := privateDirBytes(dir) - replacing
-	if used < 0 {
-		used = 0
-	}
-	// The cap stops a plugin from BECOMING oversized. It does NOT evict, and it must not brick
-	// a plugin that is already over - which is what the first version did.
-	//
-	// 2026-10-31, the day it shipped: the qq plugin's directory was already 497 MiB (391 cached
-	// stickers, none of them written by the version of the code that had a cap). Every
-	// `storage.set` was refused, so the bot could not even save its ledger - a much worse failure
-	// than being over budget, and one the user cannot fix from the plugin that refuses to work.
-	// The host cannot choose what to delete either, so "refuse everything" was never a policy;
-	// it was a deadlock.
-	//
-	// What is enforced instead: a plugin UNDER the cap may not cross it, and one value may never
-	// exceed MaxStorageValue. A plugin already over the cap keeps working, is named in the
-	// diagnostics report (with its size), and gets told once per session (see noteOverBudget).
-	if used > MaxPluginDataBytes {
-		return nil
-	}
-	if used+incoming > MaxPluginDataBytes {
-		return fmt.Errorf("插件的私有目录已经用了 %d 字节，再写 %d 字节会超过上限 %d（先删掉不用的键，或把大文件放到别处）",
-			used, incoming, MaxPluginDataBytes)
-	}
-	return nil
-}
-
-// PluginDataPressureRatio is where a plugin is TOLD it is getting close, not where it is refused.
-//
-// 80% of MaxPluginDataBytes. The refusal is the hard edge; this is the warning that arrives while
-// the plugin can still do something cheap about it (drop old takes, trim a cache) instead of
-// discovering the ceiling as a failed write at the worst moment. It fires once per crossing - a
-// plugin that sits at 81% must not get an event per write.
-const PluginDataPressureRatio = 0.8
-
-// PluginDataPressureAt is the byte count that counts as "getting close" for a given ceiling.
-func PluginDataPressureAt(limit int64) int64 { return int64(float64(limit) * PluginDataPressureRatio) }
-
-// PluginDataBytes is privateDirBytes, exported for the OTHER writers of the same directory.
-//
-// `audio.save` lives in package main and writes WAVs into `<private>/audio/`; without this the
-// per-plugin ceiling would cover `storage.set` only, and a plugin could fill the disk with
-// takes. One counter, one ceiling, every writer.
+// It no longer feeds a ceiling - there is none. Its one remaining caller is the control center's
+// per-plugin occupancy view, which needs the same number `storage.usage` reports so the user and
+// the plugin cannot disagree about how much space a plugin takes.
 func PluginDataBytes(dir string) int64 { return privateDirBytes(dir) }
 
 // privateDirBytes sums the files under one plugin's private directory.
@@ -486,24 +431,55 @@ func StorageMove(dir string, payload []byte) (any, error) {
 	return map[string]any{"ok": true, "moved": true}, nil
 }
 
-// StorageUsage reports how much of the per-plugin budget this plugin has used.
+// StorageUsage reports what this plugin's private directory holds.
 //
-// # WHY IT EXISTS
+// # WHAT CHANGED, AND WHY (2026-11-01)
 //
-// `storage.pressure` says "you are at 80%" and `storage.stat` answers "this ONE key is N bytes".
-// Neither answers the question a plugin actually has after the warning: "how much do I have to
-// delete?". Without this it has to `storage.list` and then stat every key - dozens of round trips
-// against the same directory the host can measure in one walk.
+// It used to answer "used / limit" - a quota report. A plugin read it to decide what to delete
+// before the host started refusing writes. That whole conversation was the disease: it turned
+// "the user's sticker library" into "a budget to manage", and every plugin that took it seriously
+// wrote an eviction policy that destroyed user data. There is no ceiling any more, so there is no
+// percentage to report.
 //
-// The numbers come from the same function the refusals and the pressure event use
-// (privateDirBytes / MaxPluginDataBytes), so "used" here and "used" in the refusal cannot drift.
+// What it answers now is what a user-facing occupancy view needs: how much, how many files, and
+// a per-FOLDER breakdown so a plugin can label the parts it knows about (its own media vs its own
+// index). It never suggests deleting anything.
 func StorageUsage(dir string, _ []byte) (any, error) {
+	byDir := map[string]any{}
+	total := int64(0)
+	count := 0
+	_ = filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return nil
+		}
+		total += info.Size()
+		count++
+		// First path segment under the private directory, or "" for a file at its root.
+		rel, relErr := filepath.Rel(dir, path)
+		if relErr != nil {
+			return nil
+		}
+		top := strings.Split(filepath.ToSlash(rel), "/")[0]
+		if top == rel {
+			top = ""
+		}
+		current, _ := byDir[top].(int64)
+		byDir[top] = current + info.Size()
+		return nil
+	})
 	return map[string]any{
-		"used":  privateDirBytes(dir),
-		// int64() explicitly: MaxPluginDataBytes is an untyped constant, and putting it into an
-		// `any` would give it the default type int - so `used` (int64) and `limit` (int) would
-		// differ for no reason and every caller would have to care.
-		"limit": int64(MaxPluginDataBytes),
+		"used":  total,
+		"files": count,
+		// Per-folder totals. Keys are the first segment (`media`, `state`, …) with "" for the
+		// files at the root.
+		"folders": byDir,
+		// Retained so a plugin that still reads it does not break: it means "the host does not
+		// cap this", which is the truth and is worth saying explicitly rather than with a zero.
+		"limit": int64(-1),
 	}, nil
 }
 

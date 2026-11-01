@@ -10,6 +10,10 @@ export function ChoosePetImage() {
   return window['go']['main']['Market']['ChoosePetImage']();
 }
 
+export function CleanPluginFolder(arg1, arg2) {
+  return window['go']['main']['Market']['CleanPluginFolder'](arg1, arg2);
+}
+
 export function DataDir() {
   return window['go']['main']['Market']['DataDir']();
 }
@@ -48,6 +52,10 @@ export function LogTail(arg1) {
 
 export function MainSettings() {
   return window['go']['main']['Market']['MainSettings']();
+}
+
+export function Occupancy() {
+  return window['go']['main']['Market']['Occupancy']();
 }
 
 export function PermissionLabels() {

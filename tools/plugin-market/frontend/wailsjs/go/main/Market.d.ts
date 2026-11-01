@@ -11,6 +11,8 @@ export function Catalogue():Promise<plugins.MarketView>;
 
 export function ChoosePetImage():Promise<store.Config>;
 
+export function CleanPluginFolder(arg1:string,arg2:string):Promise<Record<string, any>>;
+
 export function DataDir():Promise<string>;
 
 export function Diagnostics():Promise<string>;
@@ -30,6 +32,8 @@ export function Installed():Promise<Array<plugins.Installed>>;
 export function LogTail(arg1:main.LogQuery):Promise<main.LogView>;
 
 export function MainSettings():Promise<store.Config>;
+
+export function Occupancy():Promise<Array<plugins.PluginOccupancy>>;
 
 export function PermissionLabels():Promise<Array<main.LabelPair>>;
 

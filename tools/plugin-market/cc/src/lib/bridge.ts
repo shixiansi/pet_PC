@@ -784,3 +784,17 @@ export const OnThemePack = (cb: (pack: string) => void): (() => void) => {
   if (DEV) return () => {};
   return EventsOn('market:theme-pack', (pack: string) => cb(/^[a-z0-9-]{1,32}$/.test(pack) ? pack : ''));
 };
+
+// --- 私人目录占用 --------------------------------------------------------------
+//
+// 宿主不设容量上限（2026-11-01 删掉了那道 64 MiB 的闸门，见 internal/plugins/occupancy.go），
+// 取而代之的是"把占用量出来给人看"。分级由插件自己给：宿主不知道 `media/stickers/bytes` 是
+// 用户的图还是能重下的缓存，猜错的方向是把用户的图标成"可清理"。
+// 类型来自生成的那一份（wailsjs/go/models.ts → plugins.PluginOccupancy），不在这里重抄一遍：
+// 重抄的代价是两边慢慢对不上，而 `npm run check` 正是为了让"宿主没送这个字段"变成编译错误
+// 而不是界面上的一格空白。
+export type PluginOccupancy = plugins.PluginOccupancy;
+export type FolderOccupancy = plugins.FolderOccupancy;
+export const Occupancy = (): Promise<PluginOccupancy[]> => (DEV ? later([]) : host.Occupancy());
+export const CleanPluginFolder = (id: string, folder: string): Promise<Record<string, any>> =>
+  DEV ? later({ ok: true, freed: 0 }) : host.CleanPluginFolder(id, folder);

@@ -6,8 +6,10 @@
     ThemeStore,
     InstallTheme,
     RemoveTheme,
+    Occupancy,
     type PackEntry,
     type ThemeStoreRow,
+    type PluginOccupancy,
   } from '../lib/bridge';
   import { themeState, setTheme, setPack } from '../lib/theme.svelte';
   import { PACKS, DEFAULT_PACK, packToStore } from '../lib/packs';
@@ -36,6 +38,30 @@
   let storeBusy = $state('');
   let storeError = $state('');
 
+  // 插件占用总表。读不到不算错误（目录正在被写时可能列不出来），那种情况只影响这一块。
+  let occ = $state<PluginOccupancy[]>([]);
+  let occError = $state('');
+  const totalBytes = $derived(occ.reduce((n, r) => n + (r.bytes || 0), 0));
+  const totalFiles = $derived(occ.reduce((n, r) => n + (r.files || 0), 0));
+  const totalEvictable = $derived(occ.reduce((n, r) => n + (r.evictableBytes || 0), 0));
+
+  async function loadOccupancy() {
+    try {
+      occ = (await Occupancy()) ?? [];
+      occError = '';
+    } catch (e) {
+      occError = '读不到插件占用：' + why(e);
+    }
+  }
+
+  function humanBytes(n: number): string {
+    const value = Number(n) || 0;
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+
   void boot();
   async function boot() {
     try {
@@ -45,6 +71,7 @@
     }
     await loadPacks();
     await loadStore();
+    await loadOccupancy();
   }
 
   async function loadPacks() {
@@ -322,6 +349,48 @@
       卸载插件时「同时删除它的配置与数据」删的就是 <code>plugin-data/&lt;id&gt;</code>。
     </p>
     {#if err}<p class="err">{err}</p>{/if}
+  </section>
+
+  <!-- 总表：每个插件占多少。宿主**不设**容量上限（2026-11-01 删掉了那道 64 MiB 的闸门），
+       所以这里没有"配额"这一列——只有"占了多少"，加上插件自己标注的可清理部分。
+       明细（按目录拆分、清理按钮）在「插件」页选中某个插件之后。 -->
+  <section class="card">
+    <header class="card-head">
+      <h2>插件占用</h2>
+      <p class="hint">
+        宿主不限制插件存多少东西，只把占用列出来。可清理的那部分由插件自己标注（缓存、下载中间产物）；
+        你的数据（表情包、记忆、历史）永远不在此列。
+      </p>
+    </header>
+
+    {#if occ.length === 0}
+      <p class="field-note">{occError || '还没有装任何插件，或者读不到占用。'}</p>
+    {:else}
+      <table class="occ-table">
+        <thead>
+          <tr><th>插件</th><th class="num">占用</th><th class="num">文件</th><th class="num">可清理</th></tr>
+        </thead>
+        <tbody>
+          {#each occ as row (row.id)}
+            <tr>
+              <td>{row.name || row.id}</td>
+              <td class="num">{humanBytes(row.bytes)}</td>
+              <td class="num">{row.files}</td>
+              <td class="num">{row.evictableBytes > 0 ? humanBytes(row.evictableBytes) : '—'}</td>
+            </tr>
+          {/each}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td>合计</td>
+            <td class="num">{humanBytes(totalBytes)}</td>
+            <td class="num">{totalFiles}</td>
+            <td class="num">{totalEvictable > 0 ? humanBytes(totalEvictable) : '—'}</td>
+          </tr>
+        </tfoot>
+      </table>
+    {/if}
+    {#if occError && occ.length > 0}<p class="field-note err-text">{occError}</p>{/if}
   </section>
 </div>
 

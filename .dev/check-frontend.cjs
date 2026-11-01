@@ -2268,6 +2268,51 @@ check(
   'the layout does not carry themePack, or the pet page never applies it',
 );
 
+// --- 存储：不设容量上限，只把占用显示出来 --------------------------------------------
+//
+// 2026-11-01 的教训：宿主的"每插件 64 MiB"上限没有拦住任何事，它逼每个需要空间的插件自己发明
+// 淘汰策略，qq 插件的策略先删掉用户 318 张表情（458 MiB）、再删掉 318 条识图换来的记录。
+// 删掉上限之后的替代品是"量出来给人看"（internal/plugins/occupancy.go）——这两条把它钉住：
+//
+//   1. 没有那个常量了（有人写回来就会红，因为下一句的"可清理清单"会立刻变得可疑）；
+//   2. 清理只可能发生在插件自己标成 evictable 的目录上，而且 `CleanPluginFolder` 必须拒绝
+//      其他一切——尤其是 user-data。
+const pluginsPageSrc = fs.readFileSync(path.join(root, 'tools/plugin-market/cc/src/pages/Plugins.svelte'), 'utf8');
+const occupancyGo = fs.readFileSync(path.join(root, 'internal/plugins/occupancy.go'), 'utf8');
+check(
+  'no per-plugin capacity ceiling: storage is unlimited and occupancy is DISPLAYED',
+  // The constant itself must be gone. A `MaxPluginDataBytes` that comes back would mean somebody
+  // re-added the gate that cost the user their sticker library.
+  !/MaxPluginDataBytes/.test(fs.readFileSync(path.join(root, 'internal/plugins/privatestore.go'), 'utf8')) &&
+    /GradeEvictable/.test(occupancyGo) &&
+    /GradeUserData/.test(occupancyGo) &&
+    // The host must measure and hand it to the UI…
+    /func \(m \*Market\) Occupancy\(\)/.test(
+      fs.readFileSync(path.join(root, 'tools/plugin-market/market.go'), 'utf8'),
+    ) &&
+    /occupancy\[selected\.ID\]/.test(pluginsPageSrc) &&
+    /occ-table|插件占用/.test(ccPrefsPage),
+  'a per-plugin ceiling came back, or nothing displays what plugins occupy any more',
+);
+check(
+  'only a folder the PLUGIN graded evictable can be cleaned, and the user confirms it',
+  // Three separate halves, because each fails on its own: the page must not offer a button for
+  // user-data, the page must ask first, and the HOST must refuse anything not graded evictable
+  // (a stale page, or a hand-crafted binding call, is the case the third half is for).
+  /folder\.grade === 'evictable'/.test(pluginsPageSrc) &&
+    /confirm\(/.test(pluginsPageSrc) &&
+    /grade\.Grade != plugins\.GradeEvictable/.test(
+      fs.readFileSync(path.join(root, 'tools/plugin-market/market.go'), 'utf8'),
+    ) &&
+    // …and the manual a plugin author reads must not tell them to evict on a budget. Checked on
+    // the WHOLE document except the retirement notice itself: §7.3 is titled "已退休，不要再用",
+    // so matching the name there is correct - what must not come back is a section that tells a
+    // plugin to delete things when a threshold is crossed.
+    !/收到就删掉|该删多少|按最旧优先删到预算/.test(
+      fs.readFileSync(path.join(root, 'market/docs/plugin-dev.md'), 'utf8'),
+    ),
+  'a clean button appeared for user data, or the host would clean a folder the plugin did not offer',
+);
 // --- 桌宠那一页与控制中心用同一套令牌 ------------------------------------------------
 //
 // 两个窗口是同一件产品的两面，而且现在用的是**同一侧**：参考稿的浅色。它们必须同意"强调色、

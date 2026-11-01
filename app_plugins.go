@@ -382,7 +382,7 @@ var pluginMethods = map[string]pluginMethod{
 	// sees it used (see pluginMethod.also).
 	"net.fetch":      {perm: plugins.PermNetFetch, also: []string{plugins.PermNetCredentials}, run: pluginNetFetch},
 	"storage.get":    {perm: plugins.PermStorage, run: pluginPrivateStore(plugins.StorageGet)},
-	"storage.set":    {perm: plugins.PermStorage, run: pluginPrivateStoreWithPressure(plugins.StorageSet)},
+	"storage.set":    {perm: plugins.PermStorage, run: pluginPrivateStore(plugins.StorageSet)},
 	"storage.remove": {perm: plugins.PermStorage, run: pluginPrivateStore(plugins.StorageRemove)},
 	// Where the caller's own private directory is. A plugin that starts a downloader has
 	// to tell it where to write, and a chat protocol side has to be able to read the
@@ -1062,56 +1062,18 @@ func pluginPrivateStore(run func(dir string, payload []byte) (any, error)) func(
 		return run(dir, payload)
 	}
 }
-// pluginPrivateStoreWithPressure is pluginPrivateStore plus the `storage.pressure` latch.
+// noteOverBudget is GONE, and so is storage.pressure (2026-11-01).
 //
-// Only the WRITE path gets it: a read cannot take a plugin closer to the ceiling, and the latch's
-// whole value is that it is rare. The usage is measured AFTER the write succeeded, so the number
-// the plugin receives is the number on disk.
-func pluginPrivateStoreWithPressure(run func(dir string, payload []byte) (any, error)) func(*App, string, []byte) (any, error) {
-	inner := pluginPrivateStore(run)
-	return func(a *App, id string, payload []byte) (any, error) {
-		out, err := inner(a, id, payload)
-		if err != nil {
-			return nil, err
-		}
-		if dir, dirErr := a.pluginManager().PrivateDir(id); dirErr == nil {
-			used := plugins.PluginDataBytes(dir)
-			a.noteStoragePressure(id, used, plugins.MaxPluginDataBytes)
-			a.noteOverBudget(id, used, plugins.MaxPluginDataBytes)
-		}
-		return out, nil
-	}
-}
-
-// noteOverBudget says ONCE that a plugin is living beyond the ceiling - and then keeps letting it
-// write.
+// Both existed to police a per-plugin ceiling (MaxPluginDataBytes, 64 MiB). The ceiling is
+// deleted: see internal/plugins/occupancy.go's header for the whole story, but the short version
+// is that the ceiling did not stop plugins from taking room - it made every plugin that genuinely
+// needed room invent an eviction policy, and the policies destroyed user data (318 of the user's
+// stickers, then the recognition records that had been paid for).
 //
-// The alternative was refusing, and it took exactly one day of real data to show why that is
-// wrong: the qq plugin's directory held 497 MiB before the cap existed, so refusing meant the bot
-// could not save a 129-byte ledger. A host that cannot delete the data has no business making the
-// plugin unusable; what it CAN do is say the number out loud, once, and keep naming it in the
-// diagnostics report (settingsapi_diagnostics.go's pluginProblems).
-func (a *App) noteOverBudget(id string, used, limit int64) {
-	a.pluginHost.pressureMu.Lock()
-	if used <= limit {
-		delete(a.pluginHost.overCap, id)
-		a.pluginHost.pressureMu.Unlock()
-		return
-	}
-	if a.pluginHost.overCap == nil {
-		a.pluginHost.overCap = map[string]bool{}
-	}
-	already := a.pluginHost.overCap[id]
-	a.pluginHost.overCap[id] = true
-	a.pluginHost.pressureMu.Unlock()
-	if already {
-		return
-	}
-	a.log.Pluginf(logging.LevelWarn, "plugin", id,
-		"私有目录已经用了 %d 字节，超过上限 %d：宿主照常允许写入（拒绝只会让插件连状态都存不下），但也不会替你删——用 storage.list / storage.remove 清理，或看控制中心诊断报告里的占用",
-		used, limit)
-}
-
+// The replacement is a number the USER can see: the control center's plugin page shows each
+// plugin's occupancy, broken down by folder and graded by the plugin itself. Storage writes are
+// never refused for being too big (only for being one blob over MaxStorageValue, which is a
+// shape rule and not a capacity one).
 // pluginSurfaceShow opens the plugin's floating surface.
 //
 // It calls the SAME function the OpenPluginSurface binding does rather than
@@ -1471,16 +1433,9 @@ func pluginAudioImport(a *App, id string, payload []byte) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The per-plugin ceiling covers audio too: `maxAudioBytes` bounds one file, and without
-	// this a plugin could take the disk one acceptable clip at a time.
-	replacing := int64(0)
-	if info, statErr := os.Stat(filepath.Join(dir, in.Name+".wav")); statErr == nil {
-		replacing = info.Size()
-	}
-	if used := plugins.PluginDataBytes(filepath.Dir(dir)) - replacing; used+int64(len(raw)) > plugins.MaxPluginDataBytes {
-		return nil, fmt.Errorf("插件的私有目录已经用了 %d 字节，这段音频 %d 字节会超过上限 %d（先删掉不用的素材）",
-			used, len(raw), plugins.MaxPluginDataBytes)
-	}
+	// `maxAudioBytes` bounds ONE clip (a shape rule: a plugin is not a 录音棚). There is no
+	// per-plugin ceiling any more - see internal/plugins/occupancy.go. Audio is counted and
+	// DISPLAYED on the plugin page like everything else, and never deleted by the host.
 	path := filepath.Join(dir, in.Name+".wav")
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
@@ -1490,8 +1445,6 @@ func pluginAudioImport(a *App, id string, payload []byte) (any, error) {
 		os.Remove(tmp)
 		return nil, err
 	}
-	// Audio counts against the same ceiling, so it gets the same warning (see noteStoragePressure).
-	a.noteStoragePressure(id, plugins.PluginDataBytes(filepath.Dir(dir)), plugins.MaxPluginDataBytes)
 	return map[string]any{"name": in.Name, "bytes": len(raw)}, nil
 }
 
@@ -1535,16 +1488,9 @@ func pluginAudioSave(a *App, id string, payload []byte) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The per-plugin ceiling covers audio too: `maxAudioBytes` bounds one file, and without
-	// this a plugin could take the disk one acceptable clip at a time.
-	replacing := int64(0)
-	if info, statErr := os.Stat(filepath.Join(dir, in.Name+".wav")); statErr == nil {
-		replacing = info.Size()
-	}
-	if used := plugins.PluginDataBytes(filepath.Dir(dir)) - replacing; used+int64(len(raw)) > plugins.MaxPluginDataBytes {
-		return nil, fmt.Errorf("插件的私有目录已经用了 %d 字节，这段音频 %d 字节会超过上限 %d（先删掉不用的素材）",
-			used, len(raw), plugins.MaxPluginDataBytes)
-	}
+	// `maxAudioBytes` bounds ONE clip (a shape rule: a plugin is not a 录音棚). There is no
+	// per-plugin ceiling any more - see internal/plugins/occupancy.go. Audio is counted and
+	// DISPLAYED on the plugin page like everything else, and never deleted by the host.
 	path := filepath.Join(dir, in.Name+".wav")
 	// Written via a temporary file and renamed, so a crash mid-write cannot leave
 	// a truncated clip that plays as noise - the same reasoning plugin usage and
@@ -1557,8 +1503,6 @@ func pluginAudioSave(a *App, id string, payload []byte) (any, error) {
 		os.Remove(tmp)
 		return nil, err
 	}
-	// Audio counts against the same ceiling, so it gets the same warning (see noteStoragePressure).
-	a.noteStoragePressure(id, plugins.PluginDataBytes(filepath.Dir(dir)), plugins.MaxPluginDataBytes)
 	return map[string]any{"name": in.Name, "bytes": len(raw)}, nil
 }
 
@@ -1814,43 +1758,15 @@ func pluginShareRemove(a *App, id string, payload []byte) (any, error) {
 	return plugins.ShareRemove(a.pluginManager(), id, payload)
 }
 
-// noteStoragePressure emits `storage.pressure` the first time a plugin's private directory crosses
-// the warning line, and clears the latch when it falls back below it.
+// `storage.pressure` is GONE (2026-11-01), together with the ceiling it warned about.
 //
-// # WHY AN EVENT INSTEAD OF A LINE IN THE REFUSAL
+// A warning that says "you are at 80% of a limit that no longer exists" cannot be honest, and one
+// that says "you are at 80% of a limit you could always exceed" is worse than silence: it invites
+// the plugin to delete something. That invitation is what cost the user 318 stickers - the qq
+// plugin answered it by trimming `media/`, which was the user's library.
 //
-// The refusal (checkStorageBudget) arrives when it is already too late to be cheap: the write is
-// gone and the plugin has to choose between losing data and losing the user's trust. An event at
-// 80% lets a plugin drop old takes or trim a cache while nothing is broken. It fires ONCE per
-// crossing on purpose - a plugin sitting at 81% writes often, and an event per write would be the
-// same noise as the polling this project spent a day removing.
-//
-// Called after a SUCCESSFUL write, so the number it reports is the number on disk.
-func (a *App) noteStoragePressure(id string, used, limit int64) bool {
-	if used < plugins.PluginDataPressureAt(limit) {
-		a.pluginHost.pressureMu.Lock()
-		delete(a.pluginHost.pressured, id)
-		a.pluginHost.pressureMu.Unlock()
-		return false
-	}
-	a.pluginHost.pressureMu.Lock()
-	if a.pluginHost.pressured[id] {
-		a.pluginHost.pressureMu.Unlock()
-		return false
-	}
-	if a.pluginHost.pressured == nil {
-		a.pluginHost.pressured = map[string]bool{}
-	}
-	a.pluginHost.pressured[id] = true
-	a.pluginHost.pressureMu.Unlock()
-	a.emitPluginEvent(id, "storage.pressure", map[string]any{
-		"used":  used,
-		"limit": limit,
-		"at":    time.Now().Format(time.RFC3339),
-	})
-	return true
-}
-
+// What replaces it is the occupancy view (internal/plugins/occupancy.go): the host measures and
+// DISPLAYS, the plugin grades its own folders, and only a user click deletes anything.
 // pluginLog writes one line from the plugin into the host's log.
 //
 // # WHY A METHOD AND NOT console.error

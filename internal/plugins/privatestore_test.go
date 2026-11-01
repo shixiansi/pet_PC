@@ -11,6 +11,7 @@ package plugins
 import (
 	"encoding/json"
 	"os"
+	"strconv"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -346,86 +347,42 @@ func TestFirstFileInPathOnlyBlamesFiles(t *testing.T) {
 	}
 }
 
-// TestStorageBudgetRefusesTwoDifferentMistakes pins both bounds and the reason they are two.
+// TestStorageSetHasNoTotalCeiling is the 2026-11-01 change, and it is the important one.
 //
-// One value too big is a plugin using a key as a blob store; the whole directory too big is a
-// plugin using the user's disk as its own. The messages differ because the fixes differ.
-func TestStorageBudgetRefusesTwoDifferentMistakes(t *testing.T) {
-	// One value over the single-value cap: refused, and the message names that cap. This is the
-	// only "you may not write this" that never depends on how full the plugin already is.
-	if err := checkStorageBudget(t.TempDir(), MaxStorageValue+1, 0); err == nil ||
-		!strings.Contains(err.Error(), "单值上限") {
-		t.Fatalf("error = %v, want the single-value refusal", err)
-	}
-
-	// A plugin UNDER the cap may not cross it: that is the gate that keeps a plugin from
-	// BECOMING oversized.
-	under := t.TempDir()
-	seed := filepath.Join(under, "big")
-	if err := os.WriteFile(seed, nil, 0o644); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	if err := os.Truncate(seed, MaxPluginDataBytes-10); err != nil {
-		t.Fatalf("truncate: %v", err)
-	}
-	if err := checkStorageBudget(under, 1024, 0); err == nil ||
-		!strings.Contains(err.Error(), "会超过上限") {
-		t.Fatalf("error = %v, want the crossing refusal", err)
-	}
-
-	// A plugin ALREADY OVER the cap keeps working (2026-10-31: the qq plugin held 497 MiB before
-	// the cap existed, and refusing meant its 129-byte ledger could not be saved).
-	over := t.TempDir()
-	overSeed := filepath.Join(over, "huge")
-	if err := os.WriteFile(overSeed, nil, 0o644); err != nil {
-		t.Fatalf("seed over: %v", err)
-	}
-	if err := os.Truncate(overSeed, MaxPluginDataBytes+4096); err != nil {
-		t.Fatalf("truncate over: %v", err)
-	}
-	if err := checkStorageBudget(over, 1024, 0); err != nil {
-		t.Fatalf("a plugin already over the cap must keep working: %v", err)
-	}
-
-	// Overwriting a large value with a smaller one is allowed: `replacing` is subtracted, so a
-	// plugin that keeps one big cache can still update it.
-	if err := checkStorageBudget(under, 10, MaxPluginDataBytes-10); err != nil {
-		t.Fatalf("replacing a large value must be allowed: %v", err)
-	}
-
-	// And a small write into a small directory passes.
-	if err := checkStorageBudget(t.TempDir(), 1024, 0); err != nil {
-		t.Fatalf("a small write must pass: %v", err)
-	}
-}
-// TestStorageSetRefusesAnOversizedValue is the same bound through the real method, because the
-// gate is only worth anything if it runs before the write.
-func TestStorageSetRefusesAnOversizedValue(t *testing.T) {
+// There USED to be a second gate here: the whole private directory over 64 MiB (and, before that,
+// "crossing it is refused while already-over keeps working"). Both are gone, because the ceiling
+// did not stop plugins from taking room - it made every plugin that genuinely needed room invent
+// an eviction policy, and the qq plugin's policy deleted 318 of the user's stickers and then 318
+// recognition records. The user's rule: **whatever a plugin stores is not limited; what is needed
+// is a display of what is stored.**
+//
+// The single-value cap stays, and this test shows why it is a different thing: it is about the
+// SHAPE of one value, it never fires for a library (one image is one key), and it is the only
+// refusal left.
+func TestStorageSetHasNoTotalCeiling(t *testing.T) {
 	dir := t.TempDir()
-	huge := strings.Repeat("x", MaxStorageValue+1)
-	payload, err := json.Marshal(map[string]any{"key": "blob", "value": huge})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
+	// 90 files of 900 KiB each: ~79 MiB, comfortably past the deleted 64 MiB ceiling.
+	chunk := strings.Repeat("x", 900<<10)
+	for i := 0; i < 90; i++ {
+		key := "media/stickers/bytes/" + strconv.Itoa(i)
+		payload, err := json.Marshal(map[string]any{"key": key, "value": chunk})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if _, err := StorageSet(dir, payload); err != nil {
+			t.Fatalf("写入第 %d 个文件被拒：%v（总量不该再有上限）", i, err)
+		}
 	}
-	if _, err := StorageSet(dir, payload); err == nil {
-		t.Fatal("an oversized value must be refused")
-	}
-	if _, err := os.Stat(filepath.Join(dir, "blob")); !os.IsNotExist(err) {
-		t.Fatal("the refusal wrote the file anyway")
-	}
-	// A value at the cap is fine.
-	ok := strings.Repeat("y", MaxStorageValue)
-	payload, _ = json.Marshal(map[string]any{"key": "blob", "value": ok})
-	if _, err := StorageSet(dir, payload); err != nil {
-		t.Fatalf("a value at the cap must be accepted: %v", err)
+	if used := PluginDataBytes(dir); used < 64<<20 {
+		t.Fatalf("目录只有 %d 字节，这个测试没有真的越过旧上限", used)
 	}
 }
-
-// TestStorageUsageReportsTheBudget pins the answer a plugin needs AFTER storage.pressure.
+// TestStorageUsageReportsWhatIsStored pins the answer the OCCUPANCY view needs.
 //
-// `storage.stat` is one key and the pressure event is a threshold; neither answers "how much do I
-// have to delete?". The numbers come from the same walk the refusals use, or a plugin would be
-// budgeting against a different number than the one that refuses it.
+// It used to report "used / limit" - a quota, so a plugin could decide what to delete before the
+// host started refusing. Both halves of that are gone (no ceiling, no pressure event). What it
+// answers now is what a user-facing display needs: how much, how many files, and a per-folder
+// breakdown so a plugin can attach its own labels. `limit: -1` means "the host does not cap this".
 func TestStorageUsageReportsTheBudget(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "a"), []byte("12345"), 0o644); err != nil {
@@ -449,8 +406,16 @@ func TestStorageUsageReportsTheBudget(t *testing.T) {
 	if got["used"] != int64(8) {
 		t.Fatalf("used = %v, want 8 (5 + 3, nested files included)", got["used"])
 	}
-	if got["limit"] != int64(MaxPluginDataBytes) {
-		t.Fatalf("limit = %v, want %d", got["limit"], MaxPluginDataBytes)
+	if got["limit"] != int64(-1) {
+		t.Fatalf("limit = %v，want -1（宿主不再设上限）", got["limit"])
+	}
+	// `folders` is the breakdown the occupancy view is built from: first path segment → bytes.
+	folders, ok := got["folders"].(map[string]any)
+	if !ok {
+		t.Fatalf("folders = %#v, want an object", got["folders"])
+	}
+	if folders[""] != int64(5) && folders["nested"] != int64(3) {
+		t.Fatalf("folders = %v，want 根目录 5 + nested 3", folders)
 	}
 
 	// An empty directory is 0, not an error: a plugin may ask this BEFORE it has written anything.

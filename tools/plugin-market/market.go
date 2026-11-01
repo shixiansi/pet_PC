@@ -560,6 +560,86 @@ func (m *Market) ThemePacksProblem() string {
 	return m.packs.Problem()
 }
 
+// Occupancy answers how much space every installed plugin takes, broken down by folder and
+// graded by the plugin itself.
+//
+// # WHY THIS REPLACED A LIMIT
+//
+// The pet used to cap each plugin's private directory at 64 MiB and refuse writes past it. That
+// cap did not prevent anything - it forced every plugin that needed room to invent an eviction
+// policy, and the qq plugin's policy deleted 318 of the user's stickers (458 MiB) and then, on
+// the second try, 318 recognition records. See internal/plugins/occupancy.go for the whole
+// argument.
+//
+// A number the user can read and act on is worth more than a threshold the program enforces
+// behind their back. This is that number: bytes, files, per-folder breakdown, and a grade the
+// plugin itself supplied. `evictableBytes` is what a "clean" button may touch - and even then the
+// click is the user's (see CleanPluginFolder).
+func (m *Market) Occupancy() ([]plugins.PluginOccupancy, error) {
+	rows := m.manager.Plugins()
+	out := make([]plugins.PluginOccupancy, 0, len(rows))
+	for _, row := range rows {
+		dir, err := m.manager.PrivateDir(row.ID)
+		if err != nil || dir == "" {
+			continue
+		}
+		name := row.ID
+		if row.Manifest != nil && row.Manifest.Name != "" {
+			name = row.Manifest.Name
+		}
+		hints := plugins.ReadOccupancyHints(dir)
+		out = append(out, plugins.MeasureOccupancy(dir, row.ID, name, hints))
+	}
+	return out, nil
+}
+
+// CleanPluginFolder deletes the files of ONE folder the plugin graded `evictable`.
+//
+// # THE SAFETY RULES, IN ORDER
+//
+//  1. The folder must be in the plugin's own `occupancy/hints` as `evictable`. A folder the plugin
+//     did not grade EVICTABLE is refused BY NAME - including `user-data`, which is the one thing
+//     that must never be removed by a button ("clean up" and "delete the user's pictures" are not
+//     the same verb).
+//  2. The path is re-validated through the same key rules `storage.remove` uses, so a crafted
+//     folder name cannot walk out of the private directory.
+//  3. Nothing is deleted unless the user clicked: this binding exists for a button on the plugin
+//     page, and `storage` being granted does not imply the user wants their library emptied.
+//
+// It answers with what it freed so the page can say so.
+func (m *Market) CleanPluginFolder(id, folder string) (map[string]any, error) {
+	dir, err := m.manager.PrivateDir(id)
+	if err != nil {
+		return nil, err
+	}
+	rel, err := plugins.StorageKeyPath(folder)
+	if err != nil {
+		return nil, fmt.Errorf("文件夹名不合法：%v", err)
+	}
+	hints := plugins.ReadOccupancyHints(dir)
+	grade, ok := hints[folder]
+	if !ok || grade.Grade != plugins.GradeEvictable {
+		return nil, fmt.Errorf("%s 不是可清理的目录（只有插件自己声明为可清理的才能清；用户数据一律不动）", folder)
+	}
+	full := filepath.Join(dir, rel)
+	// Re-check containment: StorageKeyPath already rejected `..`, and this is belt-and-braces on
+	// the one path where a click reaches the filesystem.
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+	absFull, err := filepath.Abs(full)
+	if err != nil || !strings.HasPrefix(absFull, absDir+string(filepath.Separator)) {
+		return nil, fmt.Errorf("目录不在这个插件的私有目录里：%s", folder)
+	}
+	before := plugins.PluginDataBytes(absFull)
+	if err := os.RemoveAll(absFull); err != nil {
+		return nil, err
+	}
+	m.log.Infof("market", "按用户操作清空了 %s 的 %s（%d 字节）", id, folder, before)
+	return map[string]any{"ok": true, "freed": before}, nil
+}
+
 // ThemeStore lists what the market source offers as theme packs.
 //
 // One struct rather than (rows, note, error): Wails maps (result, error) onto the JS promise, so a
