@@ -13,8 +13,8 @@ import (
 	"PetPC/internal/desktop"
 	"PetPC/internal/logging"
 	"PetPC/internal/plugins"
-	"PetPC/internal/themepacks"
 	"PetPC/internal/store"
+	"PetPC/internal/themepacks"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -46,6 +46,26 @@ type App struct {
 	calls *logging.Throttle
 	// callsMu guards the lazy construction above (PluginRequest runs on plugin goroutines).
 	callsMu sync.Mutex
+
+	// usageMu serialises the read-modify-write of a plugin's llm-usage counter:
+	// llm.chat's attempt accounting, its token accounting, and llm.usage's read.
+	//
+	// It exists because that counter had NO mutex at all. Two llm.chat calls in flight
+	// both read N and both write N+1, and one update disappears. Tokens are the likelier
+	// victim: an attempt is written BEFORE the request goes out (milliseconds) while its
+	// tokens are written AFTER the last stream frame (tens of seconds), so two
+	// overlapping questions lose a whole round's usage - the very number llm.usage
+	// exists to report.
+	//
+	// One global mutex rather than one per plugin: writes happen a few times a minute, so
+	// contention is zero, while per-plugin would mean a map of mutexes plus lifecycle
+	// management paid for a hotspot that does not exist. It also keeps "a refused call
+	// still counts as an attempt" from turning into half an attempt under concurrency.
+	//
+	// It does NOT make the counter consistent against the CLOCK: a reader can still see
+	// "attempt counted, tokens not arrived yet" for a request that is still in flight.
+	// That is time order, not a race, and plugin-dev.md §6.6 says so.
+	usageMu sync.Mutex
 
 	mu      sync.Mutex
 	hwnd    desktop.Window // native window handle, resolved after startup
@@ -298,13 +318,13 @@ func (a *App) startup(ctx context.Context) {
 		// Settings are edited in the control center; this is how this process finds out.
 		// See app_plugin_configwatch.go for why the plugin must not poll for it.
 		a.startPluginConfigWatch()
-	// The programs plugins started do not notice a disable or an update on their own,
-	// and a plugin's frame cannot reap them (it is torn down with the update). The host
-	// is the only party that outlives both.
-	a.startPluginChildReaper()
-	// The private-directory watch: a plugin's helper script writes files, and the plugin has no
-	// way to notice except polling. See app_plugin_storagewatch.go.
-	a.startPluginStorageWatch()
+		// The programs plugins started do not notice a disable or an update on their own,
+		// and a plugin's frame cannot reap them (it is torn down with the update). The host
+		// is the only party that outlives both.
+		a.startPluginChildReaper()
+		// The private-directory watch: a plugin's helper script writes files, and the plugin has no
+		// way to notice except polling. See app_plugin_storagewatch.go.
+		a.startPluginStorageWatch()
 		a.restorePosition()
 		// Voice moved to a plugin, so the pet no longer prepares a player or opens
 		// the user's library - it emits facts and the plugin decides what to say.

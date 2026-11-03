@@ -359,6 +359,7 @@ func TestToolLoopStopsAtTheRoundLimit(t *testing.T) {
 		t.Errorf("the endpoint saw %d requests, want exactly maxToolRounds (%d)", stub.Hits(), maxToolRounds)
 	}
 }
+
 // reasoningOnlyScript is a model that spent its whole output budget thinking: the stream carries
 // `reasoning_content` and never a `content` delta, and it still finishes with "stop".
 //

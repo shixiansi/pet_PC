@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -133,15 +134,14 @@ type PluginEventView struct {
 // block on the network (net.fetch, llm.chat), and holding the geometry lock for
 // that long would stall a drag.
 type pluginHost struct {
-	mu      sync.Mutex
-	// pressureMu/pressured latch storage.pressure: one event per crossing, reset on the way down
-	// (see noteStoragePressure). A plugin that sits at 81% writes often; an event per write would
-	// be the same noise as the polling this project spent a day removing.
-	pressureMu sync.Mutex
-	pressured  map[string]bool
-	// overCap latches the "你已经超过上限" warning: the write is ALLOWED (see checkStorageBudget)
-	// but the user should hear it once, not on every state save.
-	overCap    map[string]bool
+	mu sync.Mutex
+	// pressureMu / pressured / overCap used to live here: the first two latched one
+	// storage.pressure event per crossing of the 80% line, the third the "you are over the cap"
+	// warning. All three went away on 2026-11-01 together with the ceiling itself — a plugin's
+	// storage has no cap any more, so there is no crossing to report and no "over" to latch.
+	// The note stays because these fields are exactly what someone will add back the moment a
+	// cap returns, and the latch is the part that is easy to forget (an event per write on a
+	// plugin sitting at 81% is the same noise as the polling this project spent a day removing).
 	manager *plugins.Manager
 	// subs maps a plugin id to the set of events it subscribed to.
 	subs map[string]map[string]bool
@@ -404,12 +404,12 @@ var pluginMethods = map[string]pluginMethod{
 	// cleared it while leaving a 24 MB file behind on each run. "Clean up your own folder"
 	// is impossible without being able to list it, short of deleting by a guessed pattern.
 	"storage.list": {perm: plugins.PermStorage, run: pluginPrivateStore(plugins.StorageList)},
-	// How much of this plugin's budget is used.
+	// How much disk this plugin is taking up.
 	//
-	// The two neighbours answer different questions: `storage.stat` is one key, and the
-	// `storage.pressure` event says "you are at 80%". Neither tells a plugin how much it has to
-	// delete - and working that out by hand means listing the folder and statting every file.
-	// Pure read, so it does not touch the pressure latch (that lives on the write path).
+	// `storage.stat` answers for one key; nothing else answers for the folder as a whole. A
+	// plugin that has to decide what to delete cannot work that out without listing the folder
+	// and statting every file by hand. Pure read — and since the ceiling went away on
+	// 2026-11-01 (storage.pressure is retired) there is no pressure latch left to disturb.
 	"storage.usage": {perm: plugins.PermStorage, run: pluginPrivateStore(plugins.StorageUsage)},
 	// Renaming one of your own files.
 	//
@@ -434,21 +434,29 @@ var pluginMethods = map[string]pluginMethod{
 	// its own directory - and asking the user to approve "let it write logs" would be a
 	// consent with nothing at stake (the precedent is pet.badge borrowing pet.surface).
 	// See pluginLog for the bounds and why the line is always attributed.
-	"plugin.log":    {perm: plugins.PermStorage, run: pluginLog},
-	"share.set":     {perm: plugins.PermPluginShare, run: pluginShareSet},
-	"share.get":     {perm: plugins.PermPluginShare, run: pluginShareGet},
-	"share.remove":  {perm: plugins.PermPluginShare, run: pluginShareRemove},
+	"plugin.log":   {perm: plugins.PermStorage, run: pluginLog},
+	"share.set":    {perm: plugins.PermPluginShare, run: pluginShareSet},
+	"share.get":    {perm: plugins.PermPluginShare, run: pluginShareGet},
+	"share.remove": {perm: plugins.PermPluginShare, run: pluginShareRemove},
 	// Asking another plugin a question: authorised here, delivered by the page (see
 	// pluginPluginCall). Gated on plugin.call, which BOTH ends must hold.
-	"plugin.call":    {perm: plugins.PermPluginCall, run: pluginPluginCall},
-		"plugins.services": {perm: plugins.PermPluginCall, run: pluginServices},
-	"surface.show":   {perm: plugins.PermPetSurface, run: pluginSurfaceShow},
-	"surface.hide":   {perm: plugins.PermPetSurface, run: pluginSurfaceHide},
-	"surface.blocks": {perm: plugins.PermPetSurface, run: pluginSurfaceBlocks},
+	"plugin.call":      {perm: plugins.PermPluginCall, run: pluginPluginCall},
+	"plugins.services": {perm: plugins.PermPluginCall, run: pluginServices},
+	"surface.show":     {perm: plugins.PermPetSurface, run: pluginSurfaceShow},
+	"surface.hide":     {perm: plugins.PermPetSurface, run: pluginSurfaceHide},
+	"surface.blocks":   {perm: plugins.PermPetSurface, run: pluginSurfaceBlocks},
 	// pet.badge draws one line of text inside the pet's own box (app_pet_badge.go). Gated by
 	// pet.surface on purpose: same authority, and no new authorisation dialog on update.
-	"pet.badge":   {perm: plugins.PermPetSurface, run: pluginBadge},
-	"llm.chat":    {perm: plugins.PermLLMChat, run: pluginLLMChat},
+	"pet.badge": {perm: plugins.PermPetSurface, run: pluginBadge},
+	"llm.chat":  {perm: plugins.PermLLMChat, run: pluginLLMChat},
+	// Today's usage for the CALLER ITSELF: how many llm.chat calls, how many tokens in
+	// and out, and its own declared token ceiling.
+	//
+	// It borrows llm.chat rather than adding a 15th permission: it is the reading half
+	// of "use my own model configuration", the same subject llm.channels.get covers
+	// (see pluginLLMUsage). It is a DATA method in internal/plugins.DataMethod (DEBUG),
+	// because a status bar pulls it on a timer and nothing here is an event.
+	"llm.usage":   {perm: plugins.PermLLMChat, run: pluginLLMUsage},
 	"llm.profile": {perm: plugins.PermLLMBorrow, run: pluginLLMProfile},
 	// Which model channels exist, with the same permission: it is the list half of
 	// llm.profile's answer, and "may I use another plugin's model" is one question.
@@ -729,44 +737,12 @@ func pluginBubbleSay(a *App, _ string, payload []byte) (any, error) {
 	return map[string]any{"ok": true}, nil
 }
 
-// netFetchHeaders is the closed set of request headers a plugin may set.
-//
-// It is a list rather than "anything the plugin wants" because a header is a way
-// to say things the allow-list does not: Host picks a virtual host, Cookie and
-// Origin carry ambient credentials, and Content-Length/Transfer-Encoding can
-// contradict the body we are about to send. The four here are what a JSON API
-// behind a token actually needs - content-type and authorization are the pair the
-// Milky and OneBot APIs require - and nothing in the list can redirect the
-// request away from the URL that was checked.
-var netFetchHeaders = map[string]bool{
-	"accept":        true,
-	"authorization": true,
-	"content-type":  true,
-	"user-agent":    true,
-}
-
-// maxPluginHeaderValue bounds one header value.
-const maxPluginHeaderValue = 1024
-
-// applyPluginRequestHeader validates and sets one header.
-//
-// Refusal rather than dropping: a plugin that asked for a header it may not have
-// and silently did not get it would build a request that fails at the far end for
-// a reason nothing in this process knows about.
-func applyPluginRequestHeader(header http.Header, name, value string) error {
-	key := strings.ToLower(strings.TrimSpace(name))
-	if !netFetchHeaders[key] {
-		return fmt.Errorf("net.fetch 不允许设置请求头 %q（只支持 accept / authorization / content-type / user-agent）", name)
-	}
-	if strings.ContainsAny(value, "\r\n") {
-		return fmt.Errorf("net.fetch 的请求头 %s 含换行", key)
-	}
-	if len(value) > maxPluginHeaderValue {
-		return fmt.Errorf("net.fetch 的请求头 %s 超过 %d 字节", key, maxPluginHeaderValue)
-	}
-	header.Set(key, value)
-	return nil
-}
+// The request-header rule used to live here as netFetchHeaders/applyPluginRequestHeader.
+// It moved to internal/plugins (FetchHeaders / ApplyFetchHeader) when the control center
+// turned out to ignore `headers` altogether: the 插件 page mounts the same documents, so a
+// plugin that authenticates or uploads from its page needs the SAME closed list in both
+// programs. Two copies of "which headers are allowed" is how "works beside the pet, fails
+// in the workshop" gets written.
 
 // pluginNetFetch performs an HTTP request against the plugin's own allow-list.
 //
@@ -790,7 +766,10 @@ func applyPluginRequestHeader(header http.Header, name, value string) error {
 // animation that only looked fine. 8 MiB covers a phone photo and a long GIF, which is the
 // widest thing a plugin here legitimately downloads, and `truncated` in the reply means the
 // next ceiling cannot be invisible either.
-const maxPluginFetchBytes = 8 << 20
+// The number itself lives in internal/plugins (MaxFetchResponseBytes) because the control
+// center serves this same method and used to cut at 1 MiB, silently. This name stays for the
+// calls below and for the test that pins the old ceiling's behaviour.
+const maxPluginFetchBytes = plugins.MaxFetchResponseBytes
 
 func pluginNetFetch(a *App, id string, payload []byte) (any, error) {
 	row, ok := a.pluginManager().Get(id)
@@ -801,12 +780,23 @@ func pluginNetFetch(a *App, id string, payload []byte) (any, error) {
 		Method string `json:"method"`
 		URL    string `json:"url"`
 		Body   string `json:"body"`
+		// BodyBase64 is the request body as BYTES: the twin of `encoding` on the
+		// response side, and the only way a plugin can hand the network a file.
+		//
+		// `Body` above is a string, and a string that came through encoding/json is
+		// LOSSY for anything that is not valid UTF-8 - every invalid byte becomes
+		// U+FFFD. A plugin uploading a picture with `Body` therefore sends a request
+		// the far end accepts and a file nobody can open. The rules (one body, never
+		// two; 16 MiB; padded or unpadded) live in plugins.RequestBody, because the
+		// control center serves this same method and two copies of the rule is how
+		// "works beside the pet, fails in the workshop" happens.
+		BodyBase64 string `json:"bodyBase64"`
 		// Encoding is "" or "text" for the decoded body, "base64" for raw bytes.
 		Encoding string `json:"encoding"`
 		// Headers are the request headers a plugin may set. It exists because a
 		// JSON API behind a bearer token cannot be called without both
 		// content-type and authorization, and the Milky/OneBot APIs are exactly
-		// that. The names are checked against a closed list (netFetchHeaders); a
+		// that. The names are checked against a closed list (plugins.FetchHeaders); a
 		// plugin cannot invent one - and `cookie`/`referer` are NOT on that list,
 		// because those are filled by the host (see Credentials below).
 		Headers map[string]string `json:"headers"`
@@ -867,20 +857,28 @@ func pluginNetFetch(a *App, id string, payload []byte) (any, error) {
 		return nil, fmt.Errorf("net.fetch 读取 Set-Cookie 需要 %s 权限", plugins.PermNetCredentials)
 	}
 
+	// One rule, in internal/plugins, because the control center serves net.fetch too
+	// (a plugin's page is mounted there, and "upload a picture" is exactly what a user
+	// does while looking at that page).
+	bodyBytes, err := plugins.RequestBody(in.Body, in.BodyBase64)
+	if err != nil {
+		return nil, err
+	}
 	var body io.Reader
-	if in.Body != "" {
-		body = strings.NewReader(in.Body)
+	if bodyBytes != nil {
+		// bytes.Reader, so net/http sets Content-Length itself: a multipart body sent
+		// with a chunked encoding is a shape some upload endpoints simply refuse.
+		body = bytes.NewReader(bodyBytes)
 	}
 	req, err := http.NewRequest(method, in.URL, body)
 	if err != nil {
 		return nil, err
 	}
 	// Applied BEFORE the request is sent and AFTER the host check, so a refused
-	// host never gets the credential a header may carry.
-	for name, value := range in.Headers {
-		if err := applyPluginRequestHeader(req.Header, name, value); err != nil {
-			return nil, err
-		}
+	// host never gets the credential a header may carry. The rule itself is shared
+	// with the control center (plugins.ApplyFetchHeaders).
+	if err := plugins.ApplyFetchHeaders(req.Header, in.Headers); err != nil {
+		return nil, err
 	}
 	if err := applyPluginCredentials(a, row, req, in.Credentials, in.Referer, hosts); err != nil {
 		return nil, err
@@ -1062,6 +1060,7 @@ func pluginPrivateStore(run func(dir string, payload []byte) (any, error)) func(
 		return run(dir, payload)
 	}
 }
+
 // noteOverBudget is GONE, and so is storage.pressure (2026-11-01).
 //
 // Both existed to police a per-plugin ceiling (MaxPluginDataBytes, 64 MiB). The ceiling is
@@ -1860,8 +1859,8 @@ func pluginPluginCall(a *App, id string, payload []byte) (any, error) {
 // what a caller needs to choose, and they are already public in the market catalogue.
 func pluginServices(a *App, id string, _ []byte) (any, error) {
 	type service struct {
-		ID          string   `json:"id"`
-		Name        string   `json:"name"`
+		ID   string `json:"id"`
+		Name string `json:"name"`
 		// Version is what the caller compares against its own `callTargets` floor. Without it
 		// a plugin can only find out "the method exists" and not "it answers the shape I
 		// expect" - the 2026-10-31 dashboard/todo mismatch in one sentence.
@@ -2083,26 +2082,44 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 	// own cap would not have one. The counter lives in the plugin's private
 	// directory so it travels with the plugin's settings, but the HOST is its
 	// only writer.
-	now := time.Now()
-	usage := readPluginUsage(dir, now)
+	//
+	// `usage` is the record as it stood BEFORE this attempt, which is what the two
+	// caps below are judged against. The attempt itself is recorded by the call, so
+	// that a refused call still costs one - see pluginUsageCountAttempt.
+	usage := a.pluginUsageCountAttempt(dir)
 	if usage.OverBudget(cfg.LLMDailyBudget) {
-		// The refused attempt is still counted. The budget bounds ATTEMPTS, and
-		// a caller sitting on the boundary must not be able to keep asking for
-		// free - the same rule the pet's own counter has always followed.
-		refused := usage.PlusAttempt(0, 0)
-		if err := writePluginUsage(dir, refused); err != nil {
-			a.log.Warnf("llm", "记录用量失败（每日上限会因此少算一次）：%v", err)
-		}
+		// The refused attempt is still counted (pluginUsageCountAttempt already did
+		// it). The budget bounds ATTEMPTS, and a caller sitting on the boundary must
+		// not be able to keep asking for free - the same rule the pet's own counter
+		// has always followed.
 		a.log.Pluginf(logging.LevelWarn, "llm", id, "今天已经用了 %d 次，达到每日上限 %d，这次 llm.chat 被拒绝（拒绝也算一次尝试）",
 			usage.Requests, cfg.LLMDailyBudget)
 		return nil, fmt.Errorf("已达今日请求上限（%d 次）", cfg.LLMDailyBudget)
 	}
 
-	// Counted when the request is SENT, not when it succeeds: a request that
-	// fails still cost a round trip.
-	sent := usage.PlusAttempt(0, 0)
-	if err := writePluginUsage(dir, sent); err != nil {
-		a.log.Warnf("llm", "记录用量失败（每日上限会因此少算一次）：%v", err)
+	// The TOKEN ceiling, read from the plugin's own manifest config and judged here
+	// and nowhere else (design §7).
+	//
+	// It is checked BEFORE the request and never mid-conversation, even when one round
+	// blows past the cap: refusing halfway would throw away what the model has already
+	// said, and "the next question is not let through" has the same character as the
+	// request cap above. The price is documented - ONE llm.chat can cross the line, by
+	// however much that round's history cost.
+	//
+	// 0 (or a negative number, which the manifest validator should not allow but a
+	// hand-edited settings file can) means "no token ceiling", the same convention
+	// store.LLMUsage.OverBudget uses for requests.
+	if limit := pluginConfigInt(*row.Manifest, cfgStore.Values(), "llmDailyTokens"); limit > 0 {
+		used := usage.PromptTokens + usage.CompletionTokens
+		if used >= limit {
+			a.log.Pluginf(logging.LevelWarn, "llm", id,
+				"今天已经用了 %d/%d token（in %d/out %d），达到每日 token 上限，这次 llm.chat 被拒绝（拒绝也算一次尝试）",
+				used, limit, usage.PromptTokens, usage.CompletionTokens)
+			// The numbers are in the message on purpose: a refusal that does not say
+			// how far over the user is leaves him editing the cap by guesswork.
+			return nil, fmt.Errorf("已达今日 token 上限：今日已用 %d/%d（in %d，out %d）",
+				used, limit, usage.PromptTokens, usage.CompletionTokens)
+		}
 	}
 
 	requestID := in.RequestID
@@ -2180,14 +2197,37 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 		if res.Attempts > 1 {
 			lv = logging.LevelWarn
 		}
-		tokens := "没有报用量"
+		// The server's own numbers win; an estimate is only the fallback.
+		//
+		// Both halves matter. A gateway that does not report usage (or the round after
+		// this client had to drop `stream_options` because the endpoint rejected it)
+		// used to leave the whole round at zero, which reads as a measurement in
+		// llm.usage rather than as a missing one. The estimate is deliberately one-way
+		// high and only ever used when there is nothing to be precise with
+		// (internal/llm/estimate.go).
+		//
+		// `in` comes from the ROUND, not from the user's sentence: the system prompt,
+		// the replayed history and (from round 2) the tool results are all in it, so a
+		// four-round tool conversation correctly costs four inputs.
+		in, out := 0, 0
+		estimated := false
 		if res.Usage != nil {
-			tokens = fmt.Sprintf("tokens in=%d out=%d", res.Usage.PromptTokens, res.Usage.CompletionTokens)
-			latest := readPluginUsage(dir, time.Now())
-			addReportedTokens(&latest, res.Usage.PromptTokens, res.Usage.CompletionTokens)
-			if werr := writePluginUsage(dir, latest); werr != nil {
-				a.log.Warnf("llm", "记录 token 用量失败：%v", werr)
-			}
+			in, out = res.Usage.PromptTokens, res.Usage.CompletionTokens
+		} else {
+			in, out = llm.EstimatePromptTokens(round), llm.EstimateCompletionTokens(res)
+			estimated = true
+		}
+		if in > 0 || out > 0 {
+			// Counted even when the round FAILED: the prompt was sent, which is the same
+			// position the attempt counter takes ("the budget bounds attempts, not
+			// successes").
+			a.pluginUsageAddTokens(dir, in, out)
+		}
+		tokens := fmt.Sprintf("tokens in=%d out=%d", in, out)
+		if estimated {
+			// The log has to distinguish "the server said so" from "the host guessed".
+			// Without the suffix a guess gets read as a bill during an investigation.
+			tokens += "（估算）"
 		}
 		a.log.Pluginf(lv, "llm", id,
 			"llm.chat 一轮 in %dms（尝试 %d 次）：%d 字，%s，finish=%s，工具调用 %d 个",
@@ -2284,6 +2324,35 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 	return nil, errors.New(limit)
 }
 
+// pluginConfigString reads one of a plugin's declared settings: the stored value
+// first, the manifest's declared `default` second.
+//
+// The fallback is the load-bearing half, and it is here rather than at each call site
+// because it is the rule that sinks plugins on install: without it, a plugin used
+// straight after installing would find "not configured" while its own manifest already
+// says where to send the request.
+func pluginConfigString(man plugins.Manifest, values map[string]string, key string) string {
+	if v, ok := values[key]; ok && strings.TrimSpace(v) != "" {
+		return strings.TrimSpace(v)
+	}
+	if item, ok := man.ConfigItem(key); ok {
+		return strings.TrimSpace(item.Default)
+	}
+	return ""
+}
+
+// pluginConfigInt reads a numeric setting through the same rule as pluginConfigString.
+//
+// It is a named function rather than a closure inside pluginChatConfig because the
+// token ceiling (llmDailyTokens) is read OUTSIDE the model-settings struct: that
+// ceiling is a host-side limit like llmDailyBudget, not a parameter of the request, so
+// it must not travel into store.Config. One reader means "有值用值、没值用 manifest 的
+// default" exists once, however many keys need it.
+func pluginConfigInt(man plugins.Manifest, values map[string]string, key string) int {
+	n, _ := strconv.Atoi(pluginConfigString(man, values, key))
+	return n
+}
+
 // pluginChatConfig builds the model settings for one request from the calling
 // plugin's OWN declared settings.
 //
@@ -2301,19 +2370,8 @@ func pluginLLMChat(a *App, id string, payload []byte) (any, error) {
 func pluginChatConfig(man plugins.Manifest, values map[string]string) store.Config {
 	var cfg store.Config
 
-	raw := func(key string) string {
-		if v, ok := values[key]; ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-		if item, ok := man.ConfigItem(key); ok {
-			return strings.TrimSpace(item.Default)
-		}
-		return ""
-	}
-	num := func(key string) int {
-		n, _ := strconv.Atoi(raw(key))
-		return n
-	}
+	raw := func(key string) string { return pluginConfigString(man, values, key) }
+	num := func(key string) int { return pluginConfigInt(man, values, key) }
 	flt := func(key string) float64 {
 		f, _ := strconv.ParseFloat(raw(key), 64)
 		return f
@@ -2757,6 +2815,74 @@ func (a *App) findLLMLender(exclude string, only string) *pluginChatCredential {
 	return nil
 }
 
+// pluginLLMUsage reports how much model traffic THIS plugin has spent today.
+//
+// It exists because the number was already being recorded and was unreadable from
+// every direction: the plugin could not ask (the counter is a host-private file it
+// would have to guess the name of), the user could not see it (it is JSON in
+// %LOCALAPPDATA%), and the filter that used to show it was retired with the host's
+// own chat UI. "今天用了多少 token" had no answer at all.
+//
+// # Why it borrows llm.chat instead of getting a permission of its own
+//
+// The subject is the plugin's own usage, exactly like llm.channels.get ("my own model
+// configuration") - the same side of the same line: letting a plugin use the model and
+// letting it see what it spent are two faces of one consent, and a 15th permission
+// would ask the user to distinguish two rows he cannot tell apart (the precedent is
+// pet.badge borrowing pet.surface, and memory.read borrowing storage).
+//
+// # Why the field names are converted HERE and nowhere else
+//
+// store.LLMUsage's json tags are the counter FILE's names (`date`, `promptTokens`,
+// `completionTokens`). Handing that struct to a plugin would promote the file - a
+// regenerable piece of host state whose shape nobody promised - into a contract, so
+// every future change to it would be a breaking change for plugins. `tokensIn` /
+// `tokensOut` are the words the log already uses (`tokens in=%d out=%d`), and this
+// return statement is the only place the two vocabularies meet.
+//
+// It is READ-ONLY: no file is written, nothing is counted, nothing is spent. The
+// day-rollover that readPluginUsage applies happens in memory only, so the first
+// question after midnight honestly answers "0 today" while the disk still holds
+// yesterday's record until the next llm.chat rewrites it.
+func pluginLLMUsage(a *App, id string, _ []byte) (any, error) {
+	row, ok := a.pluginManager().Get(id)
+	if !ok || row.Manifest == nil {
+		return nil, fmt.Errorf("插件 %s 未启用", id)
+	}
+	dir, err := a.pluginManager().PrivateDir(id)
+	if err != nil {
+		return nil, err
+	}
+	cfgStore, err := a.pluginConfigStore(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Under the same lock as the writers: "two numbers from two different days" is the
+	// one thing a read can return that a caller cannot interpret.
+	a.usageMu.Lock()
+	usage := readPluginUsage(dir, time.Now())
+	a.usageMu.Unlock()
+
+	return map[string]any{
+		// day is the local day these counters belong to (after rollover, so it is
+		// always today). Local rather than UTC: a user's "today" ends at his midnight,
+		// which is the same clock the caps are enforced on.
+		"day": usage.Date,
+		// requests is how many llm.chat calls there were today - ONE per call, not one
+		// per tool round (the count is taken where the request is sent). Refused calls
+		// are counted too.
+		"requests":  usage.Requests,
+		"tokensIn":  usage.PromptTokens,
+		"tokensOut": usage.CompletionTokens,
+		// budgetTokens is the plugin's own declared ceiling, 0 meaning "no ceiling".
+		// budgetRequests is deliberately absent: llmDailyBudget is already readable
+		// through config.get, and two ways to read one number would eventually
+		// disagree.
+		"budgetTokens": pluginConfigInt(*row.Manifest, cfgStore.Values(), "llmDailyTokens"),
+	}, nil
+}
+
 // pluginLLMProfile reports where this plugin's model settings would come from.
 //
 // It exists so a plugin's own UI can say "用「对话插件」的配置（deepseek-chat）"
@@ -3066,6 +3192,11 @@ func readPluginUsage(dir string, now time.Time) store.LLMUsage {
 // writePluginUsage replaces the counter in one step (temp file in the same
 // directory, then rename), so the market program - a second process that reads
 // this directory - never sees a half-written file.
+//
+// That atomicity is NOT the same thing as "no lost updates": a rename cannot tear a
+// file, but two read-modify-write cycles that both read N and both write N+1 still lose
+// one update. The mutex that prevents that is App.usageMu, and both halves are needed -
+// this note exists so the next reader does not assume the rename covers it.
 func writePluginUsage(dir string, u store.LLMUsage) error {
 	data, err := json.MarshalIndent(u, "", "  ")
 	if err != nil {
@@ -3093,14 +3224,63 @@ func writePluginUsage(dir string, u store.LLMUsage) error {
 	return os.Rename(name, path)
 }
 
-// addReportedTokens folds a server's token report into u.
+// pluginUsageCountAttempt records one llm.chat attempt and returns the counter as it
+// stood BEFORE that attempt.
 //
-// The "a zero count means the server did not report usage" rule is the one
-// store.LLMUsage.PlusAttempt applies (T75). It is repeated as two lines here
-// rather than exported a second time because the shared export exists for the
-// DAY ROLLOVER - the rule two implementations can silently disagree about - and
-// a token count of zero is unambiguous. The attempt counter is deliberately
-// untouched: this request was counted when it was sent.
+// # Why the count happens here and the checks happen at the call site
+//
+// The attempt is counted whether the call goes on to be refused or sent, which is the
+// rule the request budget has always followed. Counting it in one place therefore means
+// the counter cannot disagree with the caps about whether a refusal cost anything - and
+// the caller still gets the PRE-attempt record, which is what both caps must be judged
+// against and what the refusal message quotes ("今天已经用了 N 次").
+//
+// # Why the whole read-modify-write is under one mutex
+//
+// Without it, two overlapping calls both read N and both write N+1: one attempt
+// disappears. See App.usageMu - tokens are the likelier victim, because they are
+// written tens of seconds after the attempt.
+func (a *App) pluginUsageCountAttempt(dir string) store.LLMUsage {
+	a.usageMu.Lock()
+	defer a.usageMu.Unlock()
+	before := readPluginUsage(dir, time.Now())
+	if err := writePluginUsage(dir, before.PlusAttempt(0, 0)); err != nil {
+		a.log.Warnf("llm", "记录用量失败（每日上限会因此少算一次）：%v", err)
+	}
+	return before
+}
+
+// pluginUsageAddTokens folds one round's token report into the plugin's counter.
+//
+// The read is inside the lock and FRESH on purpose: another question may have been
+// counted while this request was in flight, so writing back a record read before the
+// request would silently erase that one's attempt. Tokens arrive at the END of a
+// stream, which is what makes this ordering hazard real rather than theoretical.
+func (a *App) pluginUsageAddTokens(dir string, promptTokens, completionTokens int) {
+	a.usageMu.Lock()
+	defer a.usageMu.Unlock()
+	latest := readPluginUsage(dir, time.Now())
+	addReportedTokens(&latest, promptTokens, completionTokens)
+	if err := writePluginUsage(dir, latest); err != nil {
+		a.log.Warnf("llm", "记录 token 用量失败：%v", err)
+	}
+}
+
+// addReportedTokens folds a token report into u.
+//
+// The report is the SERVER's when the server gave one, and the estimate from
+// internal/llm/estimate.go when it gave none, so the counter mixes precise and
+// estimated values. Two counters were considered and rejected: the price is one more
+// write per round, and the reward is a boolean none of the questions this number
+// answers needs (a day total cannot say which of its rounds were precise). What
+// distinguishes them is the log line, which marks an estimated round with（估算）.
+//
+// The "a zero count means there is nothing to add" rule is the one
+// store.LLMUsage.PlusAttempt applies (T75). It is repeated as two lines here rather
+// than exported a second time because the shared export exists for the DAY ROLLOVER -
+// the rule two implementations can silently disagree about - and a token count of zero
+// is unambiguous. The attempt counter is deliberately untouched: this request was
+// counted when it was sent.
 func addReportedTokens(u *store.LLMUsage, promptTokens, completionTokens int) {
 	if promptTokens > 0 {
 		u.PromptTokens += promptTokens

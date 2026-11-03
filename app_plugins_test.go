@@ -9,16 +9,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
-	"os/exec"
 	"time"
 
 	"PetPC/internal/plugins"
@@ -442,6 +443,7 @@ func TestTodosCapabilitiesAreGone(t *testing.T) {
 		}
 	}
 }
+
 // --- T42-T44: storage ------------------------------------------------------
 
 // TestStorageRoundTrip covers T42 and T43: a value is written inside the
@@ -640,6 +642,154 @@ func TestNetFetchReadsLargeBodiesAndSaysWhenItTruncated(t *testing.T) {
 	}
 	if size, truncated := read("/huge"); size != maxPluginFetchBytes || !truncated {
 		t.Fatalf("over-cap body = %d bytes, truncated=%v; want %d, true", size, truncated, maxPluginFetchBytes)
+	}
+}
+
+// TestNetFetchSendsTheBinaryBodyIntact is the request-side twin of the test above.
+//
+// A plugin that uploads a file has no way to say it with `body`: a string that came
+// through encoding/json is lossy for anything that is not valid UTF-8, so the picture
+// would arrive as U+FFFD and be saved as a corrupt file - looking exactly like success.
+// `bodyBase64` is the fix, and the assertion therefore has to be BYTE equality on the
+// far side, with a body that is deliberately invalid UTF-8 in the middle (a PNG header
+// plus 0x00 / 0xFF), not a length check.
+func TestNetFetchSendsTheBinaryBodyIntact(t *testing.T) {
+	// A real multipart shape, because that is the only reason a plugin needs this: the
+	// body is assembled in the page (boundary, headers, file bytes, closing boundary).
+	png := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01, 0xff, 0xfe, 0x80}
+	body := append([]byte("--petpc\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.png\"\r\nContent-Type: image/png\r\n\r\n"), png...)
+	body = append(body, []byte("\r\n--petpc--\r\n")...)
+
+	type captured struct {
+		method string
+		ctype  string
+		length int64
+		body   []byte
+	}
+	var seen captured
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		seen = captured{method: r.Method, ctype: r.Header.Get("Content-Type"), length: r.ContentLength, body: raw}
+		_, _ = w.Write([]byte(`{"src":"https://img.example/file/a.png"}`))
+	}))
+	defer srv.Close()
+
+	a := pluginApp(t)
+	id := installSampleWith(t, a, map[string]any{
+		"permissions": []string{"net.fetch"},
+		"netHosts":    []string{strings.TrimPrefix(srv.URL, "http://")},
+	})
+	payload, err := json.Marshal(map[string]any{
+		"method":     "POST",
+		"url":        srv.URL + "/upload",
+		"bodyBase64": base64.StdEncoding.EncodeToString(body),
+		"headers":    map[string]string{"content-type": "multipart/form-data; boundary=petpc"},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	out, err := a.PluginRequest(id, "net.fetch", string(payload))
+	if err != nil {
+		t.Fatalf("net.fetch with a binary body: %v", err)
+	}
+
+	if seen.method != http.MethodPost {
+		t.Fatalf("method = %q", seen.method)
+	}
+	if !bytes.Equal(seen.body, body) {
+		t.Fatalf("the body arrived as %q, want %q", seen.body, body)
+	}
+	if seen.ctype != "multipart/form-data; boundary=petpc" {
+		t.Fatalf("content-type = %q", seen.ctype)
+	}
+	// A multipart upload sent with chunked encoding is refused by some endpoints, so the
+	// length is part of the contract rather than an implementation detail.
+	if seen.length != int64(len(body)) {
+		t.Fatalf("content-length = %d, want %d", seen.length, len(body))
+	}
+	// And the reply is still the reply: the field changes the request, not the answer.
+	if !strings.Contains(out, "img.example/file/a.png") {
+		t.Fatalf("reply = %s", out)
+	}
+}
+
+// TestNetFetchRefusesTwoBodiesOrBadBase64BeforeSending keeps the request rule unguessable:
+// "which body did it send" and "was that meant to be base64" are answered with an error and
+// ZERO requests, not with a request whose far end has to explain.
+func TestNetFetchRefusesTwoBodiesOrBadBase64BeforeSending(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	a := pluginApp(t)
+	id := installSampleWith(t, a, map[string]any{
+		"permissions": []string{"net.fetch"},
+		"netHosts":    []string{strings.TrimPrefix(srv.URL, "http://")},
+	})
+
+	cases := []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{
+			name:    "both bodies",
+			payload: `{"method":"POST","url":"` + srv.URL + `/x","body":"abc","bodyBase64":"YWJj"}`,
+			want:    "只能给一个",
+		},
+		{
+			name:    "not base64",
+			payload: `{"method":"POST","url":"` + srv.URL + `/x","bodyBase64":"!!!!"}`,
+			want:    "base64",
+		},
+	}
+	for _, tc := range cases {
+		if _, err := a.PluginRequest(id, "net.fetch", tc.payload); err == nil {
+			t.Fatalf("%s: must be refused", tc.name)
+		} else if !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s: error %q must mention %q", tc.name, err, tc.want)
+		}
+	}
+	if hits != 0 {
+		t.Fatalf("a refused body reached the network: hits=%d", hits)
+	}
+}
+
+// TestNetFetchCapsTheUploadBody pins the ceiling on the REQUEST side.
+//
+// It is the same order as one saved clip (audio.save) on purpose: a plugin that may keep a
+// 16 MiB file in its own directory may also send it. Without the cap the host would accept
+// a half-gigabyte JSON string and allocate it twice before finding out.
+func TestNetFetchCapsTheUploadBody(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	a := pluginApp(t)
+	id := installSampleWith(t, a, map[string]any{
+		"permissions": []string{"net.fetch"},
+		"netHosts":    []string{strings.TrimPrefix(srv.URL, "http://")},
+	})
+	tooBig := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x7f}, plugins.MaxFetchUploadBytes+1))
+	payload, err := json.Marshal(map[string]any{
+		"method": "POST", "url": srv.URL + "/x", "bodyBase64": tooBig,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if _, err := a.PluginRequest(id, "net.fetch", string(payload)); err == nil {
+		t.Fatal("a body over the cap must be refused")
+	} else if !strings.Contains(err.Error(), "上限") {
+		t.Fatalf("error %q must name the limit", err)
+	}
+	if hits != 0 {
+		t.Fatalf("an over-cap body reached the network: hits=%d", hits)
 	}
 }
 
@@ -1738,6 +1888,7 @@ func TestEventsRejectUnknownName(t *testing.T) {
 		t.Fatalf("a refused subscribe changed the set: %v", set)
 	}
 }
+
 // --- T72–T77: llm.chat ------------------------------------------------------
 
 // ssePieces is the reply the stub endpoint streams, in the order it sends it.
@@ -1769,6 +1920,19 @@ type chatStub struct {
 // newChatStub starts the endpoint; it is closed with the test.
 func newChatStub(t *testing.T) *chatStub {
 	t.Helper()
+	return newChatStubWithUsage(t, true)
+}
+
+// newChatStubNoUsage is the same endpoint MINUS the final usage frame: a gateway that
+// answers in SSE but never reports tokens (some proxies, and the retry path where this
+// client had to drop `stream_options`). It is the only way to exercise the estimate.
+func newChatStubNoUsage(t *testing.T) *chatStub {
+	t.Helper()
+	return newChatStubWithUsage(t, false)
+}
+
+func newChatStubWithUsage(t *testing.T, reportUsage bool) *chatStub {
+	t.Helper()
 	st := &chatStub{}
 	st.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req map[string]any
@@ -1792,7 +1956,11 @@ func newChatStub(t *testing.T) *chatStub {
 			})
 			write("data: " + string(body) + "\n\n")
 		}
-		write("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\n")
+		if reportUsage {
+			write("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\n")
+		} else {
+			write("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+		}
 		write("data: [DONE]\n\n")
 	}))
 	t.Cleanup(st.srv.Close)
@@ -1840,6 +2008,9 @@ func chatTestManifest() map[string]any {
 			{"key": "llmMaxTokens", "label": "回复上限", "type": "number", "default": "800"},
 			{"key": "llmTimeoutSec", "label": "超时（秒）", "type": "number", "default": "10"},
 			{"key": "llmDailyBudget", "label": "每日上限（次）", "type": "number", "default": "200"},
+			// 0 = no token ceiling, which is what every test that is not about the
+			// ceiling wants: the cap is one llm.chat away from being hit here otherwise.
+			{"key": "llmDailyTokens", "label": "每日 token 上限", "type": "number", "default": "0"},
 			{"key": "llmApiKey", "label": "API Key", "type": "secret", "secret": true},
 		},
 	}
@@ -2129,6 +2300,279 @@ func TestLLMChatStreamsToThePlugin(t *testing.T) {
 	}
 	if u.PromptTokens != 3 || u.CompletionTokens != 2 {
 		t.Errorf("tokens = %d/%d, want the reported 3/2", u.PromptTokens, u.CompletionTokens)
+	}
+}
+
+// --- llm.usage: the counter becomes readable --------------------------------
+
+// writePluginUsageOnDisk replaces the counter file by hand, which is how a test
+// simulates "the file was written yesterday" and "someone edited it".
+//
+// It writes the FILE rather than going through a method because the counter is the
+// host's own bookkeeping: a test that used an API to stage it would be asserting on a
+// projection of the thing under test.
+func writePluginUsageOnDisk(t *testing.T, a *App, id string, u store.LLMUsage) {
+	t.Helper()
+	dir, err := a.pluginManager().PrivateDir(id)
+	if err != nil {
+		t.Fatalf("PrivateDir: %v", err)
+	}
+	raw, err := json.Marshal(u)
+	if err != nil {
+		t.Fatalf("marshal usage: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "llm-usage"), raw, 0o644); err != nil {
+		t.Fatalf("write usage: %v", err)
+	}
+}
+
+// pluginUsageView is the WIRE shape of llm.usage, decoded.
+type pluginUsageView struct {
+	Day          string `json:"day"`
+	Requests     int    `json:"requests"`
+	TokensIn     int    `json:"tokensIn"`
+	TokensOut    int    `json:"tokensOut"`
+	BudgetTokens int    `json:"budgetTokens"`
+}
+
+// readLLMUsage calls the method the way a plugin does and decodes the answer.
+func readLLMUsage(t *testing.T, a *App, id string) pluginUsageView {
+	t.Helper()
+	out, err := a.PluginRequest(id, "llm.usage", "{}")
+	if err != nil {
+		t.Fatalf("llm.usage: %v", err)
+	}
+	var v pluginUsageView
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		t.Fatalf("llm.usage returned something that is not a usage record: %v (%s)", err, out)
+	}
+	return v
+}
+
+// TestUsageEstimatesWhenTheServerReportsNoUsage is the degenerate path: a gateway
+// that never reports tokens.
+//
+// Before this, the round was recorded as ZERO tokens, so llm.usage would answer
+// "1 request, 0 tokens in, 0 tokens out" - which does not read as "unknown", it reads
+// as a measurement. The assertion is deliberately weak (nonzero, and at least the
+// size of the reply) because the estimate is a ruler: a test pinned to exact numbers
+// would be asserting on the coefficients rather than on the fallback existing.
+//
+// The reverse case is TestLLMChatStreamsToThePlugin above: the server reported 3/2
+// there, and 3/2 is what must be recorded - an estimate never overrides a report.
+func TestUsageEstimatesWhenTheServerReportsNoUsage(t *testing.T) {
+	endpoint := newChatStubNoUsage(t)
+	a := pluginApp(t)
+	id := installSampleWith(t, a, chatTestManifest())
+	setPluginConfig(t, a, id, map[string]string{
+		"llmBaseUrl": endpoint.URL(),
+		"llmModel":   "test-model",
+	})
+
+	if _, err := a.PluginRequest(id, "llm.chat", `{"text":"在吗，今天怎么样"}`); err != nil {
+		t.Fatalf("llm.chat: %v", err)
+	}
+
+	u := pluginUsageOnDisk(t, a, id)
+	if u.Requests != 1 {
+		t.Errorf("requests = %d, want 1", u.Requests)
+	}
+	if u.PromptTokens <= 0 {
+		t.Errorf("prompt tokens = %d, want an estimate greater than 0: the round had a prompt", u.PromptTokens)
+	}
+	if u.CompletionTokens <= 0 {
+		t.Errorf("completion tokens = %d, want an estimate greater than 0: the server DID answer", u.CompletionTokens)
+	}
+	// The reply itself is sseFullReply, so the output side cannot be smaller than it.
+	if want := len([]rune(sseFullReply)); u.CompletionTokens < want {
+		t.Errorf("completion tokens = %d, want at least %d (the reply is that many characters)", u.CompletionTokens, want)
+	}
+}
+
+// TestUsageReportsTodaysCounters is the method's ordinary shape: after two calls
+// it reports what the host recorded, with the field names a plugin can rely on.
+//
+// The conversions are the point. The counter FILE spells them `date` / `promptTokens` /
+// `completionTokens`; the wire spells them `day` / `tokensIn` / `tokensOut`. Handing a
+// plugin the file's struct would promote host-private state to a contract.
+func TestUsageReportsTodaysCounters(t *testing.T) {
+	endpoint := newChatStub(t) // reports 3 in / 2 out per call
+	a := pluginApp(t)
+	id := installSampleWith(t, a, chatTestManifest())
+	setPluginConfig(t, a, id, map[string]string{
+		"llmBaseUrl":     endpoint.URL(),
+		"llmModel":       "test-model",
+		"llmDailyTokens": "5000",
+	})
+
+	for i := 0; i < 2; i++ {
+		if _, err := a.PluginRequest(id, "llm.chat", `{"text":"第几次"}`); err != nil {
+			t.Fatalf("llm.chat %d: %v", i+1, err)
+		}
+	}
+
+	disk := pluginUsageOnDisk(t, a, id)
+	view := readLLMUsage(t, a, id)
+	if view.Requests != 2 {
+		t.Errorf("requests = %d, want 2 (two llm.chat calls)", view.Requests)
+	}
+	if want := store.UsageDate(time.Now()); view.Day != want {
+		t.Errorf("day = %q, want %q", view.Day, want)
+	}
+	if view.TokensIn != disk.PromptTokens || view.TokensOut != disk.CompletionTokens {
+		t.Errorf("tokens = %d/%d, the counter on disk says %d/%d: the answer and the record disagree",
+			view.TokensIn, view.TokensOut, disk.PromptTokens, disk.CompletionTokens)
+	}
+	if view.TokensIn == 0 || view.TokensOut == 0 {
+		t.Errorf("tokens = %d/%d, want the reported 6/4", view.TokensIn, view.TokensOut)
+	}
+	if view.BudgetTokens != 5000 {
+		t.Errorf("budgetTokens = %d, want the plugin's own declared 5000", view.BudgetTokens)
+	}
+
+	// A plugin with no llmDailyTokens declared at all reports 0, which means "unlimited"
+	// rather than "zero allowed" - the same convention OverBudget uses.
+	setPluginConfig(t, a, id, map[string]string{"llmDailyTokens": "0"})
+	if got := readLLMUsage(t, a, id).BudgetTokens; got != 0 {
+		t.Errorf("budgetTokens = %d, want 0 for an unlimited plugin", got)
+	}
+}
+
+// TestUsageNeedsTheChatPermission pins the gate: llm.usage borrows llm.chat, and a
+// plugin that was never granted the model gets nothing to read.
+//
+// It is one assertion for two methods on purpose. "May I spend your tokens" and "how
+// many did I spend" are two faces of one consent, so a plugin that is refused the first
+// must not be able to answer the second - otherwise the usage counter is a side channel
+// that reports another conversation's size to a plugin the user did not trust with it.
+func TestUsageNeedsTheChatPermission(t *testing.T) {
+	a := pluginApp(t)
+	id := installSampleWith(t, a, map[string]any{
+		"permissions": []string{"plugin.config", "storage"},
+	})
+
+	_, err := a.PluginRequest(id, "llm.usage", "{}")
+	if err == nil {
+		t.Fatal("a plugin without llm.chat must not be able to read its usage")
+	}
+	if !strings.Contains(err.Error(), "未获权限 llm.chat") {
+		t.Fatalf("the refusal does not name the permission it is missing: %v", err)
+	}
+}
+
+// TestUsageDailyTokensStopTheNextCall covers the token ceiling: judged before the
+// request, one llm.chat away from crossing it, and lifted by setting it back to 0.
+//
+// The ceiling is deliberately NOT checked mid-conversation (a tool round can cross it):
+// refusing halfway would throw away what the model already said, and "the next question
+// is not let through" has the same character as the request cap. That is why this test
+// asserts "the SECOND call is refused" rather than "the round that crossed it failed".
+func TestUsageDailyTokensStopTheNextCall(t *testing.T) {
+	endpoint := newChatStubNoUsage(t) // estimated, i.e. generously large
+	a := pluginApp(t)
+	id := installSampleWith(t, a, chatTestManifest())
+	setPluginConfig(t, a, id, map[string]string{
+		"llmBaseUrl":     endpoint.URL(),
+		"llmModel":       "test-model",
+		"llmDailyTokens": "10",
+	})
+
+	if _, err := a.PluginRequest(id, "llm.chat", `{"text":"今天天气很好，我们出去走走吧"}`); err != nil {
+		t.Fatalf("the first call is below the ceiling and must be allowed: %v", err)
+	}
+
+	_, err := a.PluginRequest(id, "llm.chat", `{"text":"再说一句"}`)
+	if err == nil {
+		t.Fatal("the second call is over the token ceiling and must be refused")
+	}
+	for _, want := range []string{"今日已用", "/10", "in ", "out "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not name %q: %v", want, err)
+		}
+	}
+	if got := endpoint.Hits(); got != 1 {
+		t.Fatalf("the endpoint received %d requests, want 1: the refused call was sent anyway", got)
+	}
+
+	// The refused call still counted as an attempt, exactly like the request cap.
+	if u := pluginUsageOnDisk(t, a, id); u.Requests != 2 {
+		t.Errorf("requests = %d, want 2: a refusal is still an attempt", u.Requests)
+	}
+
+	// 0 = unlimited, and it takes effect on the next call without a restart.
+	setPluginConfig(t, a, id, map[string]string{"llmDailyTokens": "0"})
+	for i := 0; i < 3; i++ {
+		if _, err := a.PluginRequest(id, "llm.chat", `{"text":"不限就该放行"}`); err != nil {
+			t.Fatalf("call %d after lifting the ceiling: %v", i+1, err)
+		}
+	}
+}
+
+// TestUsageRollsOverOnANewDay covers the day boundary without touching the clock.
+//
+// The rollover happens when the counter is READ (store.LLMUsage.RolledTo), so the first
+// question after midnight answers "0 today" while the file still holds yesterday's
+// record - which is deliberate: there is no midnight job to miss, and the file is
+// rewritten by the next llm.chat. Reading it must therefore not write it.
+func TestUsageRollsOverOnANewDay(t *testing.T) {
+	a := pluginApp(t)
+	id := installSampleWith(t, a, chatTestManifest())
+	yesterday := store.UsageDate(time.Now().AddDate(0, 0, -1))
+	writePluginUsageOnDisk(t, a, id, store.LLMUsage{
+		Date: yesterday, Requests: 7, PromptTokens: 900, CompletionTokens: 100,
+	})
+
+	view := readLLMUsage(t, a, id)
+	if view.Requests != 0 || view.TokensIn != 0 || view.TokensOut != 0 {
+		t.Fatalf("yesterday's record leaked into today: %+v", view)
+	}
+	if want := store.UsageDate(time.Now()); view.Day != want {
+		t.Fatalf("day = %q, want %q (the local day, not the stored one)", view.Day, want)
+	}
+
+	// Read-only: the disk still holds the old day until the next llm.chat rewrites it.
+	// "Two implementations of when a day starts" is the thing this protects - the file
+	// keeps its own clock (store.RolledTo), it is not silently rewritten by a reader.
+	if disk := pluginUsageOnDisk(t, a, id); disk.Date != yesterday || disk.Requests != 7 {
+		t.Fatalf("llm.usage rewrote the counter: %+v", disk)
+	}
+}
+
+// TestUsageSurvivesConcurrentCalls covers the lost-update bug the counter had
+// before App.usageMu existed: two questions in flight both read N and both wrote N+1,
+// so one attempt vanished.
+//
+// Two goroutines, one counter. Without the mutex this reports 1 about half the time -
+// which is why it is worth a test rather than a comment: the symptom on a real machine
+// is "my daily count is sometimes low", the least reproducible kind of bug report.
+func TestUsageSurvivesConcurrentCalls(t *testing.T) {
+	endpoint := newChatStub(t)
+	a := pluginApp(t)
+	id := installSampleWith(t, a, chatTestManifest())
+	setPluginConfig(t, a, id, map[string]string{
+		"llmBaseUrl": endpoint.URL(),
+		"llmModel":   "test-model",
+	})
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if _, err := a.PluginRequest(id, "llm.chat", `{"text":"同时问"}`); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("llm.chat: %v", err)
+	}
+
+	if u := pluginUsageOnDisk(t, a, id); u.Requests != 2 {
+		t.Fatalf("requests = %d, want 2: a concurrent update was lost", u.Requests)
 	}
 }
 
@@ -2633,9 +3077,9 @@ func TestChangedStorageKeysIsPure(t *testing.T) {
 	}
 	cur := map[string]map[string]plugins.FileStamp{
 		"com.example.a": {
-			"outbox/system": {Mod: 1, Size: 10},  // unchanged
-			"outbox/load":   {Mod: 2, Size: 3},   // appeared
-			"outbox/dsh":    {Mod: 3, Size: 4},   // appeared
+			"outbox/system": {Mod: 1, Size: 10}, // unchanged
+			"outbox/load":   {Mod: 2, Size: 3},  // appeared
+			"outbox/dsh":    {Mod: 3, Size: 4},  // appeared
 		},
 		"com.example.b": {"outbox/x": {Mod: 1, Size: 1}}, // a whole new plugin directory
 	}
@@ -3230,7 +3674,6 @@ func TestPluginServicesReportsVersions(t *testing.T) {
 	}
 }
 
-//
 // The two kinds of child disagree about what quitting means, and getting it wrong in either
 // direction is expensive: leaving sidecars alive means one extra copy per restart (eight
 // `vision-helper.ps1` were alive at once on 2026-10-31), while killing a plugin's own program logs

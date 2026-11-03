@@ -12,9 +12,10 @@ package plugins
 //
 // So the line's LEVEL is derived from the method:
 //
-//   - **data** (`storage.*`, `share.*`, `config.*`, `memory.*`) is DEBUG. It is the plugin's own
-//     file I/O - interesting only when you are debugging "my setting did not stick", and
-//     uninteresting every second of a running timer.
+//   - **data** (`storage.*`, `share.*`, `config.*`, `memory.*`, `plugin.log`, `llm.usage`) is DEBUG.
+//     It is the plugin's own file I/O - interesting only when you are debugging "my setting did
+//     not stick", and uninteresting every second of a running timer. `llm.usage` is here for the
+//     same reason even though its subject is money: it reads a counter, it spends nothing.
 //   - **actions** (bubble, surface, audio, llm, net, ws, process, events) are INFO. These are
 //     the things a human can see or that cost money.
 //   - **failures** are WARN regardless (the callers do that).
@@ -35,7 +36,15 @@ func DataMethod(method string) bool {
 		// The plugin's own line is logged at the level IT asked for; the CALL itself is
 		// plumbing, and a plugin that logs inside a poll loop would otherwise turn the call
 		// log into a mirror of its own noise.
-		"plugin.log":
+		"plugin.log",
+		// Today's model usage for the caller. It READS the counter the host keeps for it:
+		// nothing is spent, nothing changes, and the natural caller is a status line that
+		// pulls it on a fixed rhythm. That is the same shape as share.get, one level up -
+		// and the reason it is not an action is the incident in this file's header: a
+		// status bar polling every five seconds at INFO is exactly how 9729 lines of
+		// share.get drowned 32 lines of llm.chat. What DOES cost money (llm.chat) stays an
+		// action, and it already carries its own "tokens in=… out=…" line.
+		"llm.usage":
 		return true
 	case "pet.badge":
 		// Not data plumbing, but the same kind of noise: a countdown pushes this once per second

@@ -80,6 +80,7 @@ func TestPluginChatNeverSeesTheDay(t *testing.T) {
 		t.Errorf("the model was not told the day is not visible:\n%s", got)
 	}
 }
+
 // TestLLMChatReplaysHistory pins multi-turn context: the replayed turns arrive in
 // order, before the new message, and the new message is last.
 //

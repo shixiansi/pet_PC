@@ -13,6 +13,7 @@ import (
 //  2. the manifest's `maxH` is a ceiling that cannot be exceeded, whatever the plugin asks for;
 //  3. a block that declares no `maxH` cannot grow at all, so every existing plugin keeps exactly
 //     the geometry it declares.
+//
 // The fixture mirrors the shapes that actually use `sizes`: a block anchored to the pet's head that
 // grows upwards, and a block under the pet's feet.
 //
@@ -21,7 +22,7 @@ import (
 // the band above the pet is the real ceiling.
 func sizedFixture() []plugins.Rect {
 	return []plugins.Rect{
-		{DX: -75, DY: -60, W: 308, H: 60, MaxH: 156, Radius: 16},                       // the answer block
+		{DX: -75, DY: -60, W: 308, H: 60, MaxH: 156, Radius: 16},                      // the answer block
 		{DX: -79, DY: 4, W: 308, H: 64, Radius: 16, Anchor: plugins.RectAnchorBottom}, // the input pill
 	}
 }

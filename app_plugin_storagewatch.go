@@ -46,8 +46,6 @@ import (
 // enough that a user never notices, large enough that the stat loop is free").
 const pluginStorageWatchInterval = 2 * time.Second
 
-
-
 // maxStorageEventsPerTick bounds one plugin's notifications in a single tick.
 //
 // A helper that writes a hundred files at once (an import, a log rotation) must not turn into a
@@ -148,5 +146,3 @@ func (a *App) emitChangedStorage(prev map[string]map[string]plugins.FileStamp) m
 	}
 	return cur
 }
-
-

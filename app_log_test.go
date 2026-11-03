@@ -246,6 +246,7 @@ func readPetLogAt(t *testing.T, dir string) string {
 	}
 	return string(data)
 }
+
 // TestClampLogBodySaysWhatItCut keeps a truncated line honest: a body that silently stops
 // mid-sentence reads as "the model said that much".
 func TestClampLogBodySaysWhatItCut(t *testing.T) {
@@ -262,6 +263,7 @@ func TestClampLogBodySaysWhatItCut(t *testing.T) {
 		t.Fatal("the kept prefix is not the beginning of the body")
 	}
 }
+
 // TestAnEmptyReplyThatCostTokensIsAWarning: a model that thinks and says nothing is not "完成".
 //
 // The plugin forwards the empty string wherever it was going to send the answer - a bubble, a QQ
