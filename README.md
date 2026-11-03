@@ -457,7 +457,7 @@ wails build -s          # -s 跳过前端构建，前端已在上面构建好
 这也意味着**浮层面只能长在那块固定区域里**，想要更大的界面就挂到市场窗口里，
 或者像市场那样另起一个独立程序。
 
-### `net.fetch` 的 `encoding` 与体积上限
+### `net.fetch` 的 `encoding`、`bodyBase64` 与体积上限
 
 正文默认按文本返回。要取**二进制**必须显式说 `encoding: "base64"`，因为文本形式是**有损**的：
 Go 的 JSON 编码器会把非法字节替换成 U+FFFD，一个 WAV 于是"大小看着对、播出来是噪声"。
@@ -466,6 +466,13 @@ Go 的 JSON 编码器会把非法字节替换成 U+FFFD，一个 WAV 于是"大�
 **单次响应的上限是 8 MiB**（1.12 起；之前是 1 MiB 且**静默截断**）。超限时返回
 `truncated: true`，插件据此知道"这段字节不完整"——QQ 插件的图库正是被旧上限坑过：
 317 张表情包里 156 张正好是 1 MiB 的 base64，也就是只存下了动图的前几帧。
+
+**请求体也能带字节**（`bodyBase64`，与 `body` 二选一）：`body` 只能是文本，把一张图片塞进去会在
+解码那一步变成 U+FFFD——请求照样 200，存下来的是坏文件。所以"上传一个文件"必须走 `bodyBase64`
+（上限 **16 MiB**，`Content-Length` 由宿主自己填，不用 chunked）。两个程序都支持它，也都**真的**
+应用 `headers`——2026-11-02 之前控制中心收下 `headers` 却忽略它们，症状正是"同一个插件在桌宠里
+能上传、在控制中心的插件页里不能"，而两边日志都说不清为什么。图床上传插件走的就是这条路：
+图片字节从页面直接进请求体，**不需要 `process`、不需要本机脚本**。
 
 ### 市场地址
 
@@ -555,7 +562,7 @@ Go 的 JSON 编码器会把非法字节替换成 U+FFFD，一个 WAV 于是"大�
   （本机检出：`market/docs/plugin-testkit/`）
 
 手册是**自包含**的——manifest 的每个字段与校验规则、桥接协议的每条消息、全部 14 项权限与
-43 个能力方法的 payload/返回/上限、几何与主题规则、打包与发布格式、常见故障对照，都在里面，
+44 个能力方法的 payload/返回/上限、几何与主题规则、打包与发布格式、常见故障对照，都在里面，
 不要求读者拿到桌宠源码；那个 40 行的示例插件是逐字跑过的。工具是**一个文件**，拷进任何插件仓
 就能跑：manifest 的每条规则、包里的文件在不在、"没申请权限就调能力 / 用了 `localStorage` /
 样式里画到盒子外的 `box-shadow`"这些红线、以及**把文档真的跑一遍**（握手、请求 `id`、
@@ -979,6 +986,14 @@ QQ 插件默认**借用对话插件的模型配置与密钥**（`llm.borrow` + �
 `llmDailyBudget` 拒绝超出的调用（失败也计数），而插件没声明这一项时上限是 0，也就是不限；QQ 插件
 1.12 起声明了它（默认 300 次，一次大批导入会吃掉很多次）。设成 0 就是明确"不限"。
 
+同一个文件里还记 **token**（in 与 out）：服务端报了用量就用它报的，没报（不认
+`stream_options` 的网关）就按字符估算，估算一律偏高——所以含图的请求只有量级意义。插件要显示
+这两个数不必再去 `storage.get` 猜文件格式：`llm.usage` 就返回
+`{day, requests, tokensIn, tokensOut, budgetTokens}`（只读、不花钱，借 `llm.chat` 的授权，
+所以不会为此多问你一句）。想在**token** 上也有上限，让插件在自己的 manifest 里声明
+`llmDailyTokens`（`0` = 不限）：超了宿主会拒绝并写明「今日已用 X/Y」，一次调用有可能越界
+（发之前只判一次，中途不打断——那会把模型已经说出口的话丢掉），下一次才被拦。
+
 **它自己挑的那张不受 `stickerChance` 限制**，只受每群冷却约束；`stickerChance` 管的是
 "按情绪标签随机"那条兜底路径。
 
@@ -1091,11 +1106,15 @@ Go 侧结构体 + JSON 文件持久化，原子写入（临时文件 + rename）
 
 还有**第二种**同样表现（勾选着、值也在、开机就是不启动）的原因：任务管理器「启动」页签关闭自启时**不会删掉 Run 值**，而是在 `Explorer\StartupApproved\Run` 里写一个 12 字节的 blob，首字节 `0x03` 表示禁用（`0x02`/`0x06` 表示启用；这个映射用真实开机数据核对过：OneDrive 是 `0x03` 且确实没启动，ctfmon/Steam 是 `0x02` 且启动了）。所以 `AutostartEnabled` 必须同时检查"值存在"**和**"没有被标记禁用"，`RepairAutostart`/`SetAutostart` 会清掉这个禁用记录。
 
-`RepairAutostart` **只**修 `\\` 这种畸形值，不会因为"值和当前 exe 不一致"就改写 —— 它在每次 `GetState` 都会跑，若无条件对齐当前 exe，任何另一个副本（测试二进制、第二份安装、别的目录的构建）都会悄悄劫持用户的自启项。开发期间 `go test ./...` 就真的把真实 Run 值改成了临时 `PetPC.test.exe`。要换指向只能通过设置界面显式开关。
+**第三种**，同一个症状（勾选着、值也在、开机就是不启动），2026-11 修掉：值是写对了格式、也真被资源管理器启动了，但**它指向的是控制中心**（`PetPCPluginMarket.exe`）。开关长在控制中心的「外观与启动」页，而宿主侧的 `SetAutostart` 用 `os.Executable()` 取路径 —— 谁调用它就是谁，于是登录时起来的是控制中心，桌宠永远不出现（开发期一旦换了构建目录，连那个也起不来）。现在这条路径是显式的：**`desktop.SetAutostartFor(exe, on)` 由调用方给出要自启的程序，控制中心先在自己旁边找到 `PetPC.exe` 再登记它**（`petExecutableCandidates`，与桌宠找控制中心的那张候选表互为镜像）；`SetAutostartFor` 收到控制中心的路径会直接报错而不是写进注册表，`AutostartEnabled` 也不把这种值算成"已开启"，`RepairAutostart` 会把已经写错的值改回桌宠。**`SetAutostart(enable)` 只剩桌宠自己用**；另一个程序自启另一个程序，从来不是"开机自启桌宠"。
+
+两件相关的事：`autostart` 是 `config.json` 的**运行时键**（`store.SaveSettings` 会把这个键从 `settings.json` 里删掉），所以在控制中心"顺手存一下这个偏好"是无效的 —— 注册表就是这项设置本身，控制中心的复选框状态也直接问 `desktop.AutostartEnabled()`，而不是读那份由桌宠维护的镜像。
+
+`RepairAutostart` **只**修 `\\` 这种畸形值和不指向桌宠的控制中心条目，不会因为"值和当前 exe 不一致"就改写 —— 它在每次 `GetState` 都会跑，若无条件对齐当前 exe，任何另一个副本（测试二进制、第二份安装、别的目录的构建）都会悄悄劫持用户的自启项。开发期间 `go test ./...` 就真的把真实 Run 值改成了临时 `PetPC.test.exe`。要换指向只能通过设置界面显式开关。
 
 测试**绝不能**读写真实值 `PetPC`：`autostart_windows_test.go` 全部走 scratch 值名 `PetPC-test-do-not-use`，并用 `TestSuiteDoesNotTouchRealEntry` / `TestAutostartTestsLeaveRealEntryAlone` 守住这条线（早期版本真的因为跑测试把自启关掉了）。
 
-读取时以**注册表为准**而不是配置文件 —— 用户可能在任务管理器里自己关掉自启，这样设置界面不会显示错误状态。
+读取时以**注册表为准**而不是配置文件 —— 用户可能在任务管理器里自己关掉自启，这样设置界面不会显示错误状态。两个程序都这么读（桌宠的 `GetState`、控制中心的 `MainSettings`），因为 `config.json` 里那份只是桌宠维护的镜像，桌宠不跑就是旧的。
 
 ### 5. 拖动与点击的区分
 
@@ -1559,7 +1578,7 @@ internal/plugins/            插件宿主：manifest 校验、已装索引、zip
 - **贴边**：首次启动停在 `x=1762`（= 1920 − 150 − 8），垂直居中；拖动到屏幕中段后松手，吸附到左边缘 `x=8`。
 - **点击待办不影响图片**：连续勾选 3 个待办并开关面板，`renderPet` 给 `<img>` 赋值的次数为 **1**（仅首次加载）。
 - **数据层**：26 项断言全部通过（增删改查、排序、统计、跨重启持久化、缩放钳制、图片类型校验）。
-- **开机自启**：17 个测试（`internal/desktop/autostart_windows_test.go`）覆盖引号格式、Task Manager 禁用标记、修复路径，以及"测试不许碰真实注册表值"。关键断言：`TestAutostartCommandIsWindowsQuoted` 要求存储值**不含** `\\`；`TestRepairAutostartRewritesBrokenEntry` 要求旧版本写坏的值被改回来；`TestRepairAutostartDoesNotHijackAnotherInstall` 要求指向别处的合法值**不被**改写；`TestSuiteDoesNotTouchRealEntry` 要求整个测试套件跑完真实 `PetPC` 值原封不动。
+- **开机自启**：23 个测试（`internal/desktop/autostart_windows_test.go`）覆盖引号格式、Task Manager 禁用标记、修复路径，以及"测试不许碰真实注册表值"。关键断言：`TestAutostartCommandIsWindowsQuoted` 要求存储值**不含** `\\`；`TestRepairAutostartRewritesBrokenEntry` 要求旧版本写坏的值被改回来；`TestRepairAutostartDoesNotHijackAnotherInstall` 要求指向别的**桌宠安装**的合法值**不被**改写；`TestSetAutostartStoresTheGivenExecutable` 要求写进去的是调用方给的可执行文件（不是"谁在问就写谁"）；`TestSetAutostartForRefusesTheControlCenter` / `TestAutostartUsableRejectsControlCenterEntry` / `TestRepairAutostartRewritesControlCenterEntry` 把"值指向控制中心"这条新路径钉住（拒绝写入、不算已开启、并会被改回桌宠）；`TestSuiteDoesNotTouchRealEntry` 要求整个测试套件跑完真实 `PetPC` 值原封不动。控制中心那一侧另有三条：`TestPetExecutableCandidates*` 与 `TestFirstExistingFilePicksTheFirstHit`（`tools/plugin-market`）。
 - **容错**：BOM、截断 JSON、错误类型、空文件、文件缺失 5 种情况均能正常启动。
 - **宿主已经没有番茄钟可测**：`app_pomodoro.go`、`internal/pomodoro/`、`internal/store/pomodoro.go`
   与 `pomodoro_*_test.go` 全部删除——状态机与它的 25 条规格用例搬进了番茄钟插件
