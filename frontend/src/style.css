@@ -533,26 +533,55 @@ body {
 
 /* --- pet menu ------------------------------------------------------------ */
 
-/* The grid inside the bubble card (a right-click on the pet opens it).
+/* The menu card (a right-click on the pet opens it).
  *
  * It is a CHILD of #bubble, so the card's own rules decide the frame: the same
  * background, the same radius, the same "nothing may overflow" contract. What
- * this block owns is only the arrangement of nine cells.
+ * this block owns is only the arrangement of the cells.
  *
- * The rows are `1fr`, not a pixel height. Go fixes the card's height
- * (bubbleHeightMenu) and the window is cropped to exactly that, so the grid has
- * to FILL whatever it is given rather than declare a size of its own - a grid
- * that came up short would leave a band of the card empty, and one that ran over
- * would be clipped by the region and look torn. */
+ * THREE layers, and the reason it is three rather than one bigger grid: Go fixes
+ * the card's height (bubbleHeightMenu, and a test freezes it), so a tenth grid cell
+ * in the same 3x3 block would have to steal height from the other nine. The bottom
+ * strip is therefore its own row that the action grid never competes with:
+ *
+ *   #menu-grid   the actions (the cell count varies - it is a denylist, see
+ *                store.Config.MenuHidden)
+ *   #menu-prefs  the switches, same grid, only one of the two is ever visible
+ *   #menu-wide   bottom strip: 设置 / 完成 - always present, because it is the only
+ *                way back to the switches (Go marks it fixed)
+ *
+ * The rows are `1fr`, not a pixel height: the card's height belongs to Go and the
+ * window is cropped to exactly that, so the grid has to FILL whatever it is given
+ * rather than declare a size of its own - a grid that came up short would leave a
+ * band of the card empty, and one that ran over would be clipped by the region and
+ * look torn (AGENTS.md 3.2). */
 .bubble-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.menu-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  grid-auto-rows: 1fr;
+  grid-auto-rows: minmax(0, 1fr);
   gap: 6px;
   flex: 1 1 auto;
   /* A grid item's default minimum is its content, which would let a long label
    * push a row taller than the card. The rows are the card's to decide. */
   min-height: 0;
+}
+
+/* The bottom strip. It takes only the height it needs and never grows: the nine
+ * cells are what the user is looking at. */
+.menu-wide {
+  flex: 0 0 auto;
+  flex-direction: row;
+  gap: 6px;
+  min-height: 26px;
+  padding: 3px 8px;
 }
 
 .menu-cell {
@@ -603,6 +632,31 @@ body {
   border-color: rgba(248, 113, 113, 0.5);
   border-color: color-mix(in srgb, var(--danger) 50%, transparent);
   outline: none;
+}
+
+/* A switch that is OFF (the 设置 page). It stays clickable - clicking is how the
+ * user turns it back on - so it is dimmed rather than hidden. Dimming the whole
+ * cell would take the label with it (the label is the only thing that says WHICH
+ * cell this is), hence the icon and the state text carry the change. */
+.menu-cell.off {
+  color: var(--text-dim);
+  border-color: var(--line, currentColor);
+  border-style: dashed;
+}
+
+.menu-cell.off .menu-ico {
+  opacity: 0.4;
+}
+
+/* 「开 / 关」那一行小字。只在开关格里出现；动作格里没有它。 */
+.menu-state {
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-dim);
+}
+
+.menu-cell.off .menu-state {
+  color: var(--text-dim);
 }
 
 .menu-ico {

@@ -1372,6 +1372,10 @@ func (a *App) GetState() (State, error) {
 	// The badge's numbers come from the todo plugin's own published list, computed here so
 	// the page never has to parse another plugin's data.
 	dueSoon, overdue, openCount := reminderCounts(a.sharedTodoList(), time.Now())
+	// 归一化放在**这里**而不是函数开头：上面那段读注册表之后会在需要时把 cfg 换掉
+	// （UpdateConfig 回写），放在开头的那一次就被那次替换吃掉了——2026-11-03 的用例
+	// 正是这么红的。规则只有一条：谁最后交出 cfg，谁负责归一。
+	cfg.MenuHidden = NormalisePetMenuHidden(cfg.MenuHidden)
 	return State{
 		Config:         cfg,
 		TodoBadge:      store.Stats{Open: openCount, Overdue: overdue, DueSoon: dueSoon},

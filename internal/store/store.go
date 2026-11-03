@@ -91,6 +91,22 @@ type Config struct {
 	// editor or an IDE. Opting in is the only polite default.
 	GlobalHotkeys bool `json:"globalHotkeys"`
 
+	// MenuHidden lists the pet-menu cells the user switched off on the menu's own
+	// 设置 page.
+	//
+	// It stores CELL IDS, not indexes: the grid is markup whose order changes, while
+	// `pomodoro` means the same thing in a saved file two versions later. Ids the
+	// host does not know (an older file, a cell that has since been removed) are
+	// dropped on read, and the "must stay on" cells (设置 / 退出) are dropped too -
+	// the enforcement lives in NormalisePetMenuHidden, not in the page, because a
+	// hand-edited settings.json must not be able to hide the page's own way in.
+	//
+	// It is a DENYLIST rather than an allowlist on purpose: a cell added in a later
+	// version is then visible by default. An allowlist would silently hide every new
+	// action from anyone who once visited this page - and they would have no way to
+	// know something was missing.
+	MenuHidden []string `json:"menuHidden,omitempty"`
+
 	// --- todo reminders (docs/reminder-pomodoro.md 5.5) ---
 
 	// ReminderOnStartup decides whether a launch enables reminders.

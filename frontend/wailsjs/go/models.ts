@@ -243,6 +243,22 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class PetMenuPrefs {
+	    id: string;
+	    label: string;
+	    fixed: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new PetMenuPrefs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.label = source["label"];
+	        this.fixed = source["fixed"];
+	    }
+	}
 	
 	
 	export class PluginView {
@@ -417,6 +433,7 @@ export namespace store {
 	    autostart: boolean;
 	    marketBaseUrl: string;
 	    globalHotkeys: boolean;
+	    menuHidden?: string[];
 	    reminderOnStartup: boolean;
 	    reminderEnabled: boolean;
 	    reminderIntervalMin: number;
@@ -454,6 +471,7 @@ export namespace store {
 	        this.autostart = source["autostart"];
 	        this.marketBaseUrl = source["marketBaseUrl"];
 	        this.globalHotkeys = source["globalHotkeys"];
+	        this.menuHidden = source["menuHidden"];
 	        this.reminderOnStartup = source["reminderOnStartup"];
 	        this.reminderEnabled = source["reminderEnabled"];
 	        this.reminderIntervalMin = source["reminderIntervalMin"];

@@ -39,6 +39,8 @@ export function PetBadge():Promise<string>;
 
 export function PetImageURL():Promise<string>;
 
+export function PetMenuCells():Promise<Array<main.PetMenuPrefs>>;
+
 export function PluginHostInfo():Promise<plugins.HostInfo>;
 
 export function PluginMarketCandidates():Promise<Array<string>>;
@@ -68,6 +70,8 @@ export function SetAutostart(arg1:boolean):Promise<main.State>;
 export function SetBubbleHover(arg1:boolean):Promise<void>;
 
 export function SetCardTheme(arg1:string):Promise<main.State>;
+
+export function SetPetMenuHidden(arg1:Array<string>):Promise<main.State>;
 
 export function SetPluginSurfaceBlocks(arg1:string,arg2:Array<number>,arg3:boolean,arg4:Record<number, number>):Promise<main.Layout>;
 

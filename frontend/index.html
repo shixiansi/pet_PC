@@ -97,6 +97,7 @@
            and an installed font. Strokes are `currentColor`, so a cell's hover
            colour takes the icon with it. -->
       <div id="bubble-menu" class="bubble-menu hidden">
+        <div id="menu-grid" class="menu-grid">
         <button type="button" class="menu-cell" data-menu="todos" title="待办与日程">
           <svg class="menu-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <rect x="3" y="4.5" width="18" height="16.5" rx="2.5" />
@@ -163,6 +164,28 @@
             <path d="M12 2.5v9.5" />
           </svg>
           <span class="menu-label">退出</span>
+        </button>
+        </div>
+
+        <!-- 设置模式：这一格是**开关页**，由 main.js 按宿主给的 PetMenuCells() 生成——
+             一份 id 表，两处用（这里的开关、以及 Go 侧"哪些不许关"）。标签与是否可关
+             都不许在这份 HTML 里再写一遍：写两遍就会有一天只改了一处。
+
+             为什么单独一层而不是把 9 格拆成 12 格：卡片高度是 Go 里钉死的常量
+             （bubbleHeightMenu，还有用例守着），多一行就要改它，而那笔账不值得付。 -->
+        <div id="menu-prefs" class="menu-grid hidden"></div>
+
+        <!-- 底部这一格：动作模式下是「设置」，开关模式下是「完成」。
+             它在两种模式下都在，因为它是**回到开关页的唯一入口**（Go 的
+             petMenuCells 把它标成 fixed，settings.json 里也关不掉）。 -->
+        <button type="button" class="menu-cell menu-wide" id="menu-wide" data-menu="settings"
+                title="设置右键菜单显示哪些格子">
+          <svg class="menu-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M3 7h9M17 7h4M3 17h4M11 17h10" />
+            <circle cx="15" cy="7" r="2.2" />
+            <circle cx="7.5" cy="17" r="2.2" />
+          </svg>
+          <span class="menu-label" id="menu-wide-label">设置</span>
         </button>
       </div>
       <div id="bubble-actions" class="bubble-actions">

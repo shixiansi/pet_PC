@@ -958,6 +958,7 @@ export namespace store {
 	    autostart: boolean;
 	    marketBaseUrl: string;
 	    globalHotkeys: boolean;
+	    menuHidden?: string[];
 	    reminderOnStartup: boolean;
 	    reminderEnabled: boolean;
 	    reminderIntervalMin: number;
@@ -995,6 +996,7 @@ export namespace store {
 	        this.autostart = source["autostart"];
 	        this.marketBaseUrl = source["marketBaseUrl"];
 	        this.globalHotkeys = source["globalHotkeys"];
+	        this.menuHidden = source["menuHidden"];
 	        this.reminderOnStartup = source["reminderOnStartup"];
 	        this.reminderEnabled = source["reminderEnabled"];
 	        this.reminderIntervalMin = source["reminderIntervalMin"];

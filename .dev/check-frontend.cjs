@@ -432,6 +432,47 @@ check(
     /BubbleView\{Kind: BubbleMenu\}/.test(goPetMenu),
   'the pet menu is not wired end to end (page -> binding -> BubbleMenu card -> grid -> action map)',
 );
+
+// 菜单里哪些格子能关，判据在 Go（app_pet_menu.go 的 petMenuCells），页面从
+// App.PetMenuCells() 问它。这里做两件事：
+//
+//   1. Go 那张表里的每个 id，index.html 里都有一格（data-menu），一个不多一个不少——
+//      "表里加了、swagger 页面忘了加"是这条功能最可能的形状，而它在页面上表现为
+//      "开关页里有一行，点开关却什么都没变"；
+//   2. 页面确实走这条路：设置模式、委托监听、存盘绑定都在。
+//
+// 比对是**逐个 id**、按顺序：顺序决定开关页的行序，也决定 settings.json 里那份数组的
+// 顺序（同一套选择存出同一份字节）。
+const goMenuCells = [...goPetMenu.matchAll(/\{"([a-z]+)", "([^"]+)", (true|false)\},/g)].map((m) => ({
+  id: m[1],
+  label: m[2],
+  fixed: m[3] === 'true',
+}));
+const htmlMenuCells = [...html.matchAll(/data-menu="([a-z]+)"/g)].map((m) => m[1]);
+check(
+  'every switchable menu cell is on both sides: petMenuCells in Go and data-menu in index.html',
+  // 比对**集合**而不是顺序：底部那一条（设置）排在 markup 的最后、而 Go 的表里它是
+  // 「不许关」的两个之一，两边的自然顺序本来就不同。真正要钉的是"没有哪一格只活在
+  // 一边"——那会让开关页里出现一行点了没反应的开关。
+  goMenuCells.length >= 10 &&
+    [...goMenuCells.map((c) => c.id)].sort().join(',') === [...htmlMenuCells].sort().join(',') &&
+    // 两个「只能开不能关」的必须是它们，而不是别的格子。
+    goMenuCells.filter((c) => c.fixed).map((c) => c.id).join(',') === 'settings,quit',
+  'the Go table and the markup disagree (ids or order), or the fixed set is not settings+quit',
+);
+check(
+  'the menu\'s 设置 page asks the host for the cells and saves the switches',
+  /App\.PetMenuCells\?\.\(\)/.test(mainJs) &&
+    /App\.SetPetMenuHidden\(next\)/.test(mainJs) &&
+    /els\.menuPrefs\?\.addEventListener\('click'/.test(mainJs) &&
+    /function setMenuMode\(mode\)/.test(mainJs) &&
+    htmlIds.has('menu-grid') &&
+    htmlIds.has('menu-prefs') &&
+    htmlIds.has('menu-wide') &&
+    /func \(a \*App\) SetPetMenuHidden\(hidden \[\]string\) \(State, error\) \{/.test(goPetMenu) &&
+    /func \(a \*App\) PetMenuCells\(\) \[\]PetMenuPrefs \{/.test(goPetMenu),
+  'the switch page is not wired end to end (cells <- binding, toggle -> SetPetMenuHidden)',
+);
 // ...and the tray no longer lends it out. A leftover forward would be a second way
 // for the pet to ask for the tray's list, i.e. the bug this change fixed.
 //
@@ -460,9 +501,12 @@ const menuMapStart = mainJs.indexOf('const PET_MENU_ACTIONS = {');
 const menuMap = mainJs.slice(menuMapStart, mainJs.indexOf('\n};', menuMapStart));
 check(
   'every menu cell has an action, and every action a cell',
-  menuCells.length === 9 &&
+  // 10 = 九格 + 底部那一条（data-menu="settings"）。动作表里多出**一个**键：`done`，
+  // 那是同一个按钮在开关模式下的身份（data-menu 在两种模式之间切换）——所以
+  // 动作表 = 格子数 + 1，这不是漏了一个格子，而是一个格子有两个身份。
+  menuCells.length === 10 &&
     menuCells.every((name) => new RegExp(`\\n\\s{2}${name}: \\(\\)`).test(menuMap)) &&
-    (menuMap.match(/\n {2}[a-z]+: \(\)/g) || []).length === menuCells.length,
+    (menuMap.match(/\n {2}[a-z]+: \(\)/g) || []).length === menuCells.length + 1,
   'a menu cell and PET_MENU_ACTIONS disagree: ' + JSON.stringify(menuCells),
 );
 // 主题那一格：菜单里点它 → ToggleCardTheme → 重新应用 layout → <html data-theme> 变。四段缺一段
@@ -518,12 +562,18 @@ check(
 // The grid fills the card Go sizes - the rows are fractions, not a pixel height of
 // their own. A grid that declared its own height would either come up short (a band
 // of empty card) or run over (clipped by the region, which reads as a torn edge).
+//
+// 2026-11-03：卡片里现在有三层（动作格 / 开关页 / 底部那一条），所以这一条要盯的是
+// `.menu-grid`，外加两条新的：外层是 flex 列（不是 grid），底部那一条**不许**是 1fr
+// ——它要是抢了格子的高度，九个格子就会矮到装不下图标+文字。
 check(
   'the menu grid fills the card it is drawn in',
-  /\.bubble-menu\s*\{[\s\S]{0,400}?display: grid;/.test(css) &&
-    /\.bubble-menu\s*\{[\s\S]{0,400}?grid-template-columns: repeat\(3, 1fr\);/.test(css) &&
-    /\.bubble-menu\s*\{[\s\S]{0,400}?grid-auto-rows: 1fr;/.test(css) &&
-    !/\.bubble-menu\s*\{[\s\S]{0,400}?height: \d+px/.test(css),
+  /\.menu-grid\s*\{[\s\S]{0,400}?display: grid;/.test(css) &&
+    /\.menu-grid\s*\{[\s\S]{0,400}?grid-template-columns: repeat\(3, 1fr\);/.test(css) &&
+    /\.menu-grid\s*\{[\s\S]{0,400}?grid-auto-rows: minmax\(0, 1fr\);/.test(css) &&
+    /\.bubble-menu\s*\{[\s\S]{0,400}?display: flex;/.test(css) &&
+    /\.menu-wide\s*\{[\s\S]{0,200}?flex: 0 0 auto;/.test(css) &&
+    !/\.menu-grid\s*\{[\s\S]{0,400}?height: \d+px/.test(css),
   'the menu grid declares a size of its own instead of filling the bubble box',
 );
 

@@ -41,6 +41,13 @@ if (!bundleJs || !bundleCss) {
 }
 console.log(`harness using built bundle ${bundleJs} + ${bundleCss}`);
 
+// 右键菜单的格子表：权威在 Go（app_pet_menu.go 的 petMenuCells），这里读同一份文件。
+// 页面拿到的是它，所以开关页的标签与"能不能关"都不会与真宿主分叉。
+const petMenuCells = [...fs
+  .readFileSync(path.join(root, 'app_pet_menu.go'), 'utf8')
+  .matchAll(/\{"([a-z]+)", "([^"]+)", (true|false)\},/g)]
+  .map((m) => ({ id: m[1], label: m[2], fixed: m[3] === 'true' }));
+
 // The page is assembled once, in order, rather than by chained replacements: the
 // checks script has to be injected AFTER the markup is substituted (or it is
 // swallowed by it) and the bundle's own script tag is already inside the markup
@@ -60,6 +67,10 @@ ${markup}
   // window.runtime.EventsOn/EventsEmit, so this is the entire surface the
   // frontend talks to.
   window.__calls = [];
+  // 右键菜单的格子表：**从 Go 源码里读**，不在这里编一份。
+  // 一份编出来的表会与真宿主分叉，而分叉的夹具比没有更坏——这个功能唯一的失败模式
+  // 就是"开关页里有这一行，点开关却什么都没变"。
+  window.__petMenuCells = ${JSON.stringify(petMenuCells)};
   function bind(name) {
     return function (...args) {
       window.__calls.push({ name, args });
@@ -76,6 +87,9 @@ ${markup}
       // scenario does not answer this call", which is what the null below already means.
       const handler = window.__handlers ? window.__handlers[name] : null;
       try {
+        // PetMenuCells 的默认答案来自 window.__petMenuCells（从 app_pet_menu.go 读来的），
+        // 和真宿主同一份表；场景可以覆盖它，但不需要为了这个功能再加一段。
+        if (!handler && name === 'PetMenuCells') return Promise.resolve(window.__petMenuCells);
         return Promise.resolve(handler ? handler(...args) : null);
       } catch (err) {
         return Promise.reject(err);
@@ -108,6 +122,7 @@ ${markup}
     'SetCardTheme', 'SetReminderEnabled', 'SetScale', 'ToggleCardTheme',
     'SetSnapToEdge', 'ShowPet', 'ShowPetForUser',
     'SnapNow', 'StartDrag',
+    'PetMenuCells', 'SetPetMenuHidden',
 
     'WindowReady',
   ];
@@ -1363,6 +1378,67 @@ const checksJs = `
     ok('a layout with no surface hides the mount point and removes its frames',
       surfaceMount.classList.contains('hidden') && leftovers === 0,
       'frames left: ' + leftovers);
+
+    // --- the pet menu's 设置 page (2026-11-03) -------------------------------
+    //
+    // 这一段是这个功能里**只有真引擎才看得见**的那一半：卡片高度被 Go 钉死在 226px
+    // （bubbleHeightMenu，还有用例守着），而里面现在有三层——九个动作格、开关页、
+    // 底部那一条。jsdom 里 getBoundingClientRect 恒为 0，所以"格子被挤成 0 高""开关页
+    // 长出卡片外"这两件事在 jsdom 那套用例里是看不见的，只在这里看得见。
+    const petEl = document.getElementById('pet');
+    petEl.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await sleep(140);
+    const menuCard = document.getElementById('bubble-menu');
+    const wide = document.getElementById('menu-wide');
+    ok('the menu card opens with the action grid and the bottom strip',
+      menuCard && !menuCard.classList.contains('hidden') && wide && wide.offsetHeight > 0,
+      'menu card or the bottom strip is missing');
+
+    const actionCells = [...document.querySelectorAll('#menu-grid .menu-cell')];
+    const cardBottom = menuCard.getBoundingClientRect().bottom;
+    ok('all nine action cells keep a real box inside the frozen 226px card',
+      actionCells.length === 9 &&
+        actionCells.every((c) => c.offsetWidth > 20 && c.offsetHeight > 20) &&
+        actionCells.every((c) => c.getBoundingClientRect().bottom <= cardBottom + 0.5),
+      actionCells.map((c) => c.dataset.menu + ':' + c.offsetWidth + 'x' + c.offsetHeight).join(' '));
+
+    wide.click();
+    await sleep(160);
+    const prefs = document.getElementById('menu-prefs');
+    const rows = [...prefs.querySelectorAll('[data-toggle]')];
+    ok('the 设置 cell turns the same card into the switch page',
+      !prefs.classList.contains('hidden') &&
+        document.getElementById('menu-grid').classList.contains('hidden') &&
+        wide.textContent.includes('完成'),
+      'the switch page did not open');
+
+    ok('every cell has a switch row with a real box, and the two fixed ones cannot be clicked',
+      rows.length === window.__petMenuCells.length &&
+        rows.every((r) => r.offsetHeight > 20) &&
+        rows.filter((r) => r.disabled).map((r) => r.dataset.toggle).join(',') === 'settings,quit',
+      rows.map((r) => r.dataset.toggle + ':' + r.offsetHeight).join(' '));
+
+    ok('no switch row spills out of the card the window is cropped to',
+      rows.every((r) => r.getBoundingClientRect().bottom <= cardBottom + 0.5),
+      'a switch row sits outside the card');
+
+    window.__calls.length = 0;
+    prefs.querySelector('[data-toggle="theme"]').click();
+    await sleep(160);
+    const savedPrefs = window.__calls.filter((c) => c.name === 'SetPetMenuHidden');
+    ok('clicking a switch saves the denylist through the host binding',
+      savedPrefs.length === 1 && JSON.stringify(savedPrefs[0].args[0]) === '["theme"]',
+      JSON.stringify(savedPrefs));
+    const themeCellNow = document.querySelector('#menu-grid [data-menu="theme"]');
+    ok('the cell it turned off is hidden in the action grid right away',
+      themeCellNow.classList.contains('hidden'),
+      'still visible; row says ' +
+        prefs.querySelector('[data-toggle="theme"] .menu-state').textContent +
+        '; grid class ' + themeCellNow.className + '; saved ' +
+        JSON.stringify(savedPrefs[0] && savedPrefs[0].args));
+
+    wide.click();
+    await sleep(120);
 
     return log;
   }

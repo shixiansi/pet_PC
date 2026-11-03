@@ -74,6 +74,10 @@ export function PetImageURL() {
   return window['go']['main']['App']['PetImageURL']();
 }
 
+export function PetMenuCells() {
+  return window['go']['main']['App']['PetMenuCells']();
+}
+
 export function PluginHostInfo() {
   return window['go']['main']['App']['PluginHostInfo']();
 }
@@ -132,6 +136,10 @@ export function SetBubbleHover(arg1) {
 
 export function SetCardTheme(arg1) {
   return window['go']['main']['App']['SetCardTheme'](arg1);
+}
+
+export function SetPetMenuHidden(arg1) {
+  return window['go']['main']['App']['SetPetMenuHidden'](arg1);
 }
 
 export function SetPluginSurfaceBlocks(arg1, arg2, arg3, arg4) {
