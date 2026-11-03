@@ -284,13 +284,22 @@ func assertRefusal(t *testing.T, a *App, err error, wants string) {
 // TestOpenPluginSurfaceRefusedWithoutPermission pins the refusal ORDER: the
 // permission is checked before the geometry, so a plugin that cannot show a
 // surface is told that rather than being told its rectangle was wrong.
+//
+// The manifest has to DECLARE pet.surface to be installed at all (validateSurface pairs the
+// two, because a card nobody authorised cannot be opened), so the un-granted state is reached
+// the way a user reaches it: install, then take the permission back. The rectangle is
+// deliberately outside the window, so if the geometry were checked first this test would see
+// "窗口之外" instead of the permission refusal.
 func TestOpenPluginSurfaceRefusedWithoutPermission(t *testing.T) {
 	a := pluginApp(t)
 	id := installTestPlugin(t, a, map[string]any{
-		"permissions": []string{"llm.chat"},
+		"permissions": []string{"llm.chat", "pet.surface"},
 		"surface":     []map[string]any{{"dx": 4000, "dy": 4000, "w": 1, "h": 1, "radius": 0}},
 	})
 	managerSetEnabled(t, a, id, true)
+	if _, err := a.pluginManager().GrantPermissions(id, []string{"llm.chat"}); err != nil {
+		t.Fatalf("GrantPermissions: %v", err)
+	}
 	_, err := a.OpenPluginSurface(id)
 	if err == nil {
 		t.Fatal("must be refused")

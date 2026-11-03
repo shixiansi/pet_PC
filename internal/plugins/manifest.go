@@ -251,10 +251,10 @@ const PanelSlotPomodoro = "pomodoro"
 // Rect is one declared plugin surface rectangle, in CSS pixels relative to the
 // pet's top-left corner.
 type Rect struct {
-	DX     float64 `json:"dx"`
-	DY     float64 `json:"dy"`
-	W      float64 `json:"w"`
-	H      float64 `json:"h"`
+	DX float64 `json:"dx"`
+	DY float64 `json:"dy"`
+	W  float64 `json:"w"`
+	H  float64 `json:"h"`
 	// MaxH is how tall this block may GROW; 0 means "cannot grow".
 	//
 	// A surface block is sized by the manifest, because the window region is cropped to the
@@ -329,7 +329,7 @@ const (
 	// HostWhitelist field comment: the runtime merges them, so this is a shape limit, not a
 	// security one.
 	maxHostWhitelists = 4
-	maxConfigLabel = 64
+	maxConfigLabel    = 64
 	// maxAssets bounds the extra files a package may carry. The voice plugin is
 	// the motivating case: five built-in clips. 32 leaves room for a plugin that
 	// ships a whole set per language without letting a manifest turn the package
@@ -1155,13 +1155,31 @@ func (m Manifest) validateEntry() error {
 	return nil
 }
 
-// validateSurface bounds the declared rectangles.
+// validateSurface bounds the declared rectangles, and pairs them with the permission that
+// makes them openable.
 //
 // The bounds are wide but finite on purpose: the geometry function clamps them
 // into the window anyway, but a manifest claiming a 10-metre rectangle is a
 // packaging bug, and refusing it here says so where the author can see it
 // rather than silently drawing a full-window panel.
+//
+// # WHY surface NEEDS pet.surface
+//
+// Same reason body does (validateBody): the install dialog's row for `pet.surface` is
+// "在桌宠身上或旁边显示你自己的界面", and a card beside the pet is exactly that. But here the
+// pairing is also load-bearing for something duller - OpenPluginSurface refuses to open a
+// surface whose plugin was not granted pet.surface (app_plugin_surface.go). So a manifest
+// that declared rectangles without the permission used to PASS validation (`surface` counts
+// as a "somewhere to appear") and ship a card no click could ever open: the declaration was
+// there, the geometry was reserved, and the only way to find out was to install it and press
+// the button. 2026-11-03 that is precisely what a new plugin did - declared a 300×150 card
+// with a permission list of storage/config/llm.chat/pet.bubble. One rule, one install-time
+// sentence, and the author reads it instead of a user discovering an empty slot.
 func (m Manifest) validateSurface() error {
+	if len(m.Surface) > 0 && !m.HasPermission(PermPetSurface) {
+		return fmt.Errorf("%s 声明了 surface（宠物旁边的浮层面）却未申请 %s 权限：安装时那句「在桌宠身上或旁边显示你自己的界面」必须被勾上，否则这张卡片打不开",
+			ManifestName, PermPetSurface)
+	}
 	if len(m.Surface) > maxSurfaceRects {
 		return fmt.Errorf("%s 字段 surface 最多 %d 块矩形，收到 %d", ManifestName, maxSurfaceRects, len(m.Surface))
 	}

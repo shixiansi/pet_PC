@@ -202,9 +202,12 @@ func TestManifestEntryRules(t *testing.T) {
 		})
 	}
 	// A surface alone (no panel) is a legitimate plugin: the two are alternatives.
+	// It carries pet.surface because a surface the user never authorised cannot be opened
+	// (validateSurface pairs the two, see TestManifestSurfaceRequiresThePermission).
 	if _, err := ParseManifest(manifestJSON(t, map[string]any{
-		"panel":   false,
-		"surface": []map[string]any{{"dx": 10, "dy": 10, "w": 100, "h": 100, "radius": 4}},
+		"panel":       false,
+		"permissions": []string{"pet.surface"},
+		"surface":     []map[string]any{{"dx": 10, "dy": 10, "w": 100, "h": 100, "radius": 4}},
 	})); err != nil {
 		t.Fatalf("a surface-only plugin must parse: %v", err)
 	}
@@ -347,7 +350,12 @@ func TestManifestSurfaceBounds(t *testing.T) {
 	}
 	for _, tc := range bad {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseManifest(manifestJSON(t, map[string]any{"surface": []map[string]any{tc.rect}}))
+			// pet.surface is included so the rect rules are what gets tested, not the pairing
+			// rule that runs before them.
+			_, err := ParseManifest(manifestJSON(t, map[string]any{
+				"permissions": []string{"pet.surface"},
+				"surface":     []map[string]any{tc.rect},
+			}))
 			if err == nil {
 				t.Fatal("expected a rejection")
 			}
@@ -358,17 +366,68 @@ func TestManifestSurfaceBounds(t *testing.T) {
 	}
 
 	eight := []map[string]any{rect, rect, rect, rect, rect, rect, rect, rect}
-	if _, err := ParseManifest(manifestJSON(t, map[string]any{"surface": eight})); err != nil {
+	if _, err := ParseManifest(manifestJSON(t, map[string]any{
+		"permissions": []string{"pet.surface"},
+		"surface":     eight,
+	})); err != nil {
 		t.Fatalf("eight rectangles must parse: %v", err)
 	}
 
 	nine := []map[string]any{rect, rect, rect, rect, rect, rect, rect, rect, rect}
-	_, err := ParseManifest(manifestJSON(t, map[string]any{"surface": nine}))
+	_, err := ParseManifest(manifestJSON(t, map[string]any{
+		"permissions": []string{"pet.surface"},
+		"surface":     nine,
+	}))
 	if err == nil {
 		t.Fatal("nine rectangles must be rejected")
 	}
 	if !strings.Contains(err.Error(), "8") || !strings.Contains(err.Error(), "surface") {
 		t.Fatalf("error %q must name surface and the limit 8", err)
+	}
+}
+
+// TestManifestSurfaceRequiresThePermission covers the pairing rule: rectangles without
+// `pet.surface` are a declaration the user never authorised, so the host would refuse to
+// open them (OpenPluginSurface checks the grant) while the manifest claimed a mount point.
+// That is the shape of "silently dead UI" this repo keeps paying for - a card that exists in
+// the manifest, reserves window region, and cannot be opened by any click.
+func TestManifestSurfaceRequiresThePermission(t *testing.T) {
+	rects := []map[string]any{{"dx": 10, "dy": 10, "w": 300, "h": 150, "radius": 14}}
+
+	// With the permission the dialog words: legal, and the rectangles survive.
+	m, err := ParseManifest(manifestJSON(t, map[string]any{
+		"panel":       false,
+		"permissions": []string{"pet.surface"},
+		"surface":     rects,
+	}))
+	if err != nil {
+		t.Fatalf("surface with pet.surface must parse: %v", err)
+	}
+	if len(m.Surface) != 1 || m.Surface[0].W != 300 {
+		t.Fatalf("surface not preserved: %+v", m.Surface)
+	}
+
+	// Without it: refused, and the message names both the field and the permission so an
+	// author can fix it without reading the host.
+	_, err = ParseManifest(manifestJSON(t, map[string]any{
+		"panel":       true,
+		"permissions": []string{"storage"},
+		"surface":     rects,
+	}))
+	if err == nil {
+		t.Fatal("surface without pet.surface must be rejected")
+	}
+	if !strings.Contains(err.Error(), "surface") || !strings.Contains(err.Error(), PermPetSurface) {
+		t.Fatalf("error %q must name surface and %s", err, PermPetSurface)
+	}
+
+	// No rectangles at all: the rule stays out of the way (panel-only plugins never ask).
+	if _, err := ParseManifest(manifestJSON(t, map[string]any{
+		"panel":       true,
+		"permissions": []string{"storage"},
+		"surface":     nil,
+	})); err != nil {
+		t.Fatalf("a manifest without surface must parse: %v", err)
 	}
 }
 
@@ -478,8 +537,9 @@ func TestParseManifestRejectsNonJSON(t *testing.T) {
 // exempt a block from the width/height rule.
 func TestManifestEllipseFlag(t *testing.T) {
 	m, err := ParseManifest(manifestJSON(t, map[string]any{
-		"panel":   false,
-		"surface": []map[string]any{{"dx": 10, "dy": 10, "w": 34, "h": 20, "ellipse": true}},
+		"panel":       false,
+		"permissions": []string{"pet.surface"},
+		"surface":     []map[string]any{{"dx": 10, "dy": 10, "w": 34, "h": 20, "ellipse": true}},
 	}))
 	if err != nil {
 		t.Fatalf("an ellipse block must parse: %v", err)
@@ -489,8 +549,9 @@ func TestManifestEllipseFlag(t *testing.T) {
 	}
 
 	_, err = ParseManifest(manifestJSON(t, map[string]any{
-		"panel":   false,
-		"surface": []map[string]any{{"dx": 10, "dy": 10, "w": 0, "h": 20, "ellipse": true}},
+		"panel":       false,
+		"permissions": []string{"pet.surface"},
+		"surface":     []map[string]any{{"dx": 10, "dy": 10, "w": 0, "h": 20, "ellipse": true}},
 	}))
 	if err == nil {
 		t.Fatal("an ellipse with w=0 must be rejected")
