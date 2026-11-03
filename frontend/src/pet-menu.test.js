@@ -19,7 +19,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { mountApp, layout, bubbleView, callsTo, baseState, petMenuCellsFromGo } from './test-harness.js';
+import { mountApp, layout, bubbleView, callsTo, baseState } from './test-harness.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -31,14 +31,7 @@ const indexHtml = readFileSync(path.join(root, 'index.html'), 'utf8');
 // 主题切换。格子数必须还是 9 —— 菜单的高度是 Go 里一个常量（bubbleHeightMenu）。
 const CELLS = ['todos', 'chat', 'pomodoro', 'remind', 'plugins', 'theme', 'snap', 'hide', 'quit'];
 
-/**
- * 底部那一条（设置 / 完成）。
- *
- * 它不在 3×3 里：卡片高度是 Go 里钉死的常量（bubbleHeightMenu），第十个格子只能从那九个
- * 那里抢高度。所以"设置"是**换一层**而不是加一格——同一张卡片、同一个高度，底部多一条
- * 只占它自己那点高度的按钮。
- */
-const WIDE = 'settings';
+
 
 const $ = (id) => document.getElementById(id);
 const isHidden = (id) => $(id).classList.contains('hidden');
@@ -126,16 +119,16 @@ describe('pet menu: the markup', () => {
       indexHtml.indexOf('<!-- Plugin floating surface'),
     );
     const found = [...body.matchAll(/data-menu="([a-z]+)"/g)].map((m) => m[1]);
-    // 九格动作 + 底部那一条（设置）。顺序就是绘制顺序。
-    expect(found).toEqual([...CELLS, WIDE]);
+    expect(found).toEqual(CELLS);
     // One <svg> and one label per cell: a cell with no picture is not the grid this
     // menu is, and a cell with no word is a button nobody can name.
-    const cells = CELLS.length + 1;
-    expect((body.match(/class="menu-ico"/g) || []).length).toBe(cells);
-    expect((body.match(/class="menu-label"/g) || []).length).toBe(cells);
-    expect((body.match(/<button type="button" class="menu-cell/g) || []).length).toBe(cells);
-    // 开关页是空的：它由 main.js 按 PET_MENU_ITEMS 生成，标签只写一份。
-    expect(body).toContain('id="menu-prefs"');
+    expect((body.match(/class="menu-ico"/g) || []).length).toBe(CELLS.length);
+    expect((body.match(/class="menu-label"/g) || []).length).toBe(CELLS.length);
+    expect((body.match(/<button type="button" class="menu-cell/g) || []).length).toBe(CELLS.length);
+    // 九格，没有第二条：卡片高度是 Go 的常量，而"设置"住在控制中心里（2026-11-03 试过塞进
+    // 这张卡片，反馈是显示效果不好）。
+    expect(body).not.toContain('menu-prefs');
+    expect(body).not.toContain('menu-wide');
   });
 });
 
@@ -389,136 +382,52 @@ describe('pet menu: it can take the slot back from a bubble', () => {
   });
 });
 
+
 /**
- * 设置页：右键菜单里哪些格子显示。
+ * 哪些格子显示：住在这张页上的只有"照着 State 藏"这一件事。
  *
- * 三件事在这里被钉住，因为它们是这个功能唯一会真出错的地方：
- *
- *   1. 它是一层**模式**，不是第十个格子（卡片高度是 Go 的常量，加一格要从九格那里抢）；
- *   2. 「只能开不能关」的判据在宿主，页面只是不去提供那个开关——所以一个手改过的
- *      settings.json 藏不掉「设置」与「退出」；
- *   3. 每一次点击都立刻生效（本地先落、再让宿主对齐），因为一个点了要等一次往返的开关
- *      读起来就是"没反应"。
+ * 判据（哪些格子存在、哪一格不许关）在 `internal/petmenu`，由 Go 在 GetState 里已经归一化
+ * 过一遍。所以这一页**不复制**那些规则——复制一份就会有一天两份规则说出不同的话，而那
+ * 时候没人分得清哪一份才作数。用户改这件事的地方是控制中心的「开始」页。
  */
-describe('pet menu: the switches (设置)', () => {
+describe('pet menu: the cells the user switched off', () => {
   beforeEach(resetPage);
 
-  /** 打开菜单，并点进设置页。 */
-  async function openPrefs(extra = {}) {
-    const mounted = await mountApp(extra);
-    showMenu(mounted.emit);
-    await tick();
-    await clickCell('settings');
-    return mounted;
-  }
-
-  const prefsRows = () => [...$('menu-prefs').querySelectorAll('[data-toggle]')];
-  const wideLabel = () => $('menu-wide-label').textContent;
-
-  it('「设置」把同一张卡片换成开关页，格子藏起来，底部那一条变成「完成」', async () => {
-    await openPrefs();
-    // 同一张卡片：外层还是那一块（Go 只裁一次），换的是里面的那一层。
-    expect(isHidden('bubble-menu')).toBe(false);
-    expect(isHidden('menu-grid')).toBe(true);
-    expect(isHidden('menu-prefs')).toBe(false);
-    expect(wideLabel()).toBe('完成');
-    expect($('menu-wide').dataset.menu).toBe('done');
-
-    await clickCell('done');
-    expect(isHidden('menu-grid')).toBe(false);
-    expect(isHidden('menu-prefs')).toBe(true);
-    expect(wideLabel()).toBe('设置');
-  });
-
-  it('每次重新打开都落在动作模式', async () => {
-    const { emit } = await openPrefs();
-    // 停在开关页时把卡片收起，再右键一次：菜单是"选一件事做"的卡片，不该记得
-    // 上一次停在哪一层（用户也没有别的地方看那九个格子）。
-    emit('pet:layout', layout({ bubble: null }));
-    await tick();
-    showMenu(emit);
-    await tick();
-    expect(isHidden('menu-grid')).toBe(false);
-    expect(isHidden('menu-prefs')).toBe(true);
-    expect(wideLabel()).toBe('设置');
-  });
-
-  it('一行一个格子；「设置」与「退出」写着「固定」且点不动', async () => {
-    await openPrefs();
-    const rows = prefsRows();
-    // 行与顺序都来自宿主那张表（app_pet_menu.go 的 petMenuCells），不是这一页编的——
-    // 所以这条断言等于"页面上有的格子，宿主都认识；宿主认识的，页面上都有"。
-    expect(rows.map((row) => row.dataset.toggle)).toEqual(petMenuCellsFromGo().map((c) => c.id));
-    expect(rows.map((row) => row.dataset.toggle)).toContain('settings');
-    expect(rows.map((row) => row.dataset.toggle)).toContain('quit');
-    for (const row of rows) {
-      const label = row.querySelector('.menu-label');
-      const stateText = row.querySelector('.menu-state');
-      expect(label, '每个开关都要有名字').toBeTruthy();
-      expect(stateText, '每个开关都要说它现在是开还是关').toBeTruthy();
-      const fixed = row.dataset.toggle === 'settings' || row.dataset.toggle === 'quit';
-      expect(row.disabled).toBe(fixed);
-      expect(stateText.textContent).toBe(fixed ? '固定' : '开');
-    }
-  });
-
-  it('关掉一格：立刻藏起来，并按菜单顺序存给宿主', async () => {
-    const { calls } = await openPrefs();
-    const row = $('menu-prefs').querySelector('[data-toggle="theme"]');
-    row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    await tick();
-
-    const saved = callsTo(calls, 'SetPetMenuHidden');
-    expect(saved.length).toBe(1);
-    // 顺序就是菜单顺序：同一个选择永远生成同一份文件，diff 里只出现真正改了的那一行。
-    expect(saved[0].args[0]).toEqual(['theme']);
-    // 本地先落：不用等宿主那一趟往返。
-    expect($('menu-grid').querySelector('[data-menu="theme"]').classList.contains('hidden')).toBe(
-      true,
-    );
-    expect(row.querySelector('.menu-state').textContent).toBe('关');
-  });
-
-  it('再点一次就开回来（denylist 里删掉）', async () => {
-    const { calls } = await openPrefs({ state: baseState({ config: { menuHidden: ['theme', 'snap'] } }) });
-    const row = $('menu-prefs').querySelector('[data-toggle="theme"]');
-    row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    await tick();
-    expect(callsTo(calls, 'SetPetMenuHidden')[0].args[0]).toEqual(['snap']);
-  });
-
-  it('State 里的 menuHidden 决定哪些格子显示，开关页那一行写「关」', async () => {
+  it('State 里点名的格子被藏起来，其余照旧', async () => {
     const { emit } = await mountApp({
       state: baseState({ config: { menuHidden: ['theme', 'hide'] } }),
     });
     showMenu(emit);
     await tick();
-    const grid = $('menu-grid');
-    expect(grid.querySelector('[data-menu="theme"]').classList.contains('hidden')).toBe(true);
-    expect(grid.querySelector('[data-menu="hide"]').classList.contains('hidden')).toBe(true);
-    expect(grid.querySelector('[data-menu="todos"]').classList.contains('hidden')).toBe(false);
-
-    await clickCell('settings');
-    expect($('menu-prefs').querySelector('[data-toggle="theme"] .menu-state').textContent).toBe('关');
-    expect($('menu-prefs').querySelector('[data-toggle="todos"] .menu-state').textContent).toBe('开');
-  });
-
-  it('手改过的 settings.json 藏不掉「设置」与「退出」', async () => {
-    // Go 侧的 NormalisePetMenuHidden 已经会把它们丢掉（那是真正的边界，settings.json 是
-    // 一个用户能直接编辑的纯文件）。页面这一层再挡一次：两处都拦才叫"只能开不能关"——
-    // 只有一处时，另一处的一个手滑就是"用户把回家的路关了"。
-    const { emit } = await mountApp({
-      state: baseState({ config: { menuHidden: ['settings', 'quit'] } }),
-    });
-    showMenu(emit);
-    await tick();
-    const grid = $('menu-grid');
-    for (const id of CELLS) {
+    const menu = $('bubble-menu');
+    expect(menu.querySelector('[data-menu="theme"]').classList.contains('hidden')).toBe(true);
+    expect(menu.querySelector('[data-menu="hide"]').classList.contains('hidden')).toBe(true);
+    for (const id of ['todos', 'chat', 'pomodoro', 'remind', 'plugins', 'snap', 'quit']) {
       expect(
-        grid.querySelector(`[data-menu="${id}"]`).classList.contains('hidden'),
+        menu.querySelector(`[data-menu="${id}"]`).classList.contains('hidden'),
         `${id} 不该被藏`,
       ).toBe(false);
     }
-    expect($('menu-wide').classList.contains('hidden')).toBe(false);
+  });
+
+  it('没有任何开关时九格都在（默认就是全显示）', async () => {
+    const { emit } = await mountApp();
+    showMenu(emit);
+    await tick();
+    const cells = [...$('bubble-menu').querySelectorAll('[data-menu]')];
+    expect(cells.length).toBe(9);
+    expect(cells.every((c) => !c.classList.contains('hidden'))).toBe(true);
+  });
+
+  it('藏掉几格之后，剩下的格子照样能点（委托监听器没被破坏）', async () => {
+    const { calls, emit } = await mountApp({
+      state: baseState({ config: { menuHidden: ['theme', 'snap'] } }),
+    });
+    showMenu(emit);
+    await tick();
+    await clickCell('todos');
+    // 「日程」走的是"谁占了 todos 那个槽"的解析，没有插件时回退成打开控制中心——
+    // 总之它必须发出去一次调用，而不是因为隔壁少了格子就静默不动。
+    expect(calls.length).toBeGreaterThan(0);
   });
 });

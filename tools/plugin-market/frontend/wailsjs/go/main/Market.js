@@ -62,6 +62,10 @@ export function PermissionLabels() {
   return window['go']['main']['Market']['PermissionLabels']();
 }
 
+export function PetMenuCells() {
+  return window['go']['main']['Market']['PetMenuCells']();
+}
+
 export function PluginHostInfo() {
   return window['go']['main']['Market']['PluginHostInfo']();
 }
@@ -116,6 +120,10 @@ export function SetEnabled(arg1, arg2) {
 
 export function SetGlobalHotkeys(arg1) {
   return window['go']['main']['Market']['SetGlobalHotkeys'](arg1);
+}
+
+export function SetPetMenuHidden(arg1) {
+  return window['go']['main']['Market']['SetPetMenuHidden'](arg1);
 }
 
 export function SetPetScale(arg1) {

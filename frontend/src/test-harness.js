@@ -58,7 +58,6 @@ function installBridge(handlers = {}) {
     'PluginMarketPath', 'PluginRequest', 'PluginsInstalled', 'Quit', 'Ready', 'RemindNow', 'ResetPetImage', 'ResetToDefaultPosition', 'SaveHotkeySettings', 'SaveReminderSettings', 'SetAutostart', 'SetBubbleHover',
     'SetCardTheme', 'SetReminderEnabled', 'SetScale', 'ToggleCardTheme',
     'SetSnapToEdge', 'ShowPet', 'ShowPetForUser', 'SnapNow', 'StartDrag', 
-    'PetMenuCells', 'SetPetMenuHidden',
     'WindowReady',
   ];
   const app = {};
@@ -110,9 +109,6 @@ export async function mountApp({ handlers = {}, state = null } = {}) {
     // A test almost always wants the app to see a real snapshot; without one the
     // renderers bail out early and every assertion would be vacuous.
     GetState: () => state || baseState(),
-    // 菜单的格子表来自 Go（见 petMenuCellsFromGo）：夹具不自己编一份，否则"测试里配
-    // 得了、真机上少一格"这件事永远不会被发现——权限表与方法表都这样栽过。
-    PetMenuCells: () => petMenuCellsFromGo(),
     ...handlers,
   };
   const { calls, emit } = installBridge(bridgeHandlers);
@@ -230,24 +226,4 @@ export function bubbleView(kind, over = {}) {
 /** The calls of one binding, in order. */
 export function callsTo(calls, name) {
   return calls.filter((c) => c.name === name);
-}
-
-/**
- * 右键菜单的格子表——**从 Go 源码里读**，不在夹具里再写一份。
- *
- * `app_pet_menu.go` 的 `petMenuCells` 是这张表的唯一权威（它同时决定 settings.json 里
- * 能存什么：NormalisedPetMenuHidden 会把 fixed 的那些丢掉）。夹具如果自己编一份，
- * 就会出现"测试里能配、真机上少一格"的谎——本项目在权限表（15 项）和方法表（44 个）
- * 上各吃过一次，两次都是靠"另写一份的夹具"藏住的。
- *
- * 那张表是一段字面量，正则读得出来；`app_pet_menu_test.go` 与
- * `.dev/check-frontend.cjs` 读的是同一份文件。
- */
-export function petMenuCellsFromGo() {
-  const src = readFileSync(path.join(root, '..', 'app_pet_menu.go'), 'utf8');
-  const cells = [];
-  for (const m of src.matchAll(/\{"([a-z]+)", "([^"]+)", (true|false)\},/g)) {
-    cells.push({ id: m[1], label: m[2], fixed: m[3] === 'true' });
-  }
-  return cells;
 }

@@ -429,6 +429,27 @@ export namespace net {
 
 }
 
+export namespace petmenu {
+	
+	export class Cell {
+	    id: string;
+	    label: string;
+	    fixed: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Cell(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.label = source["label"];
+	        this.fixed = source["fixed"];
+	    }
+	}
+
+}
+
 export namespace pkix {
 	
 	export class AttributeTypeAndValue {

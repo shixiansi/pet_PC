@@ -77,12 +77,6 @@ const els = {
   // per action, with its icon and its label) and wired by delegation in wire();
   // what each one DOES lives in PET_MENU_ACTIONS.
   bubbleMenu: $('bubble-menu'),
-  // 菜单的两层：动作格 / 开关格。二者互斥显示（同一张卡片，同一份高度），
-  // 底部那一条在两种模式下都在，只是文字从「设置」变成「完成」。
-  menuGrid: $('menu-grid'),
-  menuPrefs: $('menu-prefs'),
-  menuWide: $('menu-wide'),
-  menuWideLabel: $('menu-wide-label'),
   // 那一格主题按钮的标签。只有它在页面生命周期里会变（写着"点下去会变成什么"），所以它
   // 需要单独的引用；其余格子的文字是静态的。
   menuThemeLabel: $('menu-theme-label'),
@@ -497,11 +491,7 @@ function renderBubble(b) {
     // The grid is the whole card - no heading, no list, no buttons - and Go sized
     // the box for exactly that (bubbleHeightMenu). Everything else has just been
     // reset, so this branch only has to reveal the grid.
-    //
-    // 每次都从动作模式开始：菜单是"选一件事做"的卡片，上一次停在开关页不该让下一次
-    // 右键也落在开关页上（那是两个不同的意图，而用户没有别的地方看格子）。
-    setMenuMode('actions');
-    applyMenuPrefs();
+    applyMenuHidden();
     els.bubbleMenu.classList.remove('hidden');
     return;
   }
@@ -814,178 +804,22 @@ const PET_MENU_ACTIONS = {
   hide: () => App.HidePetForUser().then(applyState),
 
   quit: () => App.Quit(),
-
-  // 设置: turns the grid into the switch list (设置模式). It is a MODE on the same
-  // card, not another surface: the card is already cropped to a fixed box and the
-  // window region is exactly it, so a second card would be a second crop. See
-  // setMenuMode for why the switches are not simply more cells.
-  settings: () => setMenuMode('prefs'),
-
-  // 完成: back to the actions. The same cell, relabelled - one cell, two labels,
-  // because the bottom strip exists for exactly one of them at a time.
-  done: () => setMenuMode('actions'),
 };
 
 /**
- * 菜单里有哪些格子，以及哪些「只能开不能关」——**问宿主**，不在这页里再写一份。
+ * 藏掉用户关掉的格子（控制中心「开始」页那一组开关写进 settings.json 的 menuHidden）。
  *
- * `App.PetMenuCells()` 是 `app_pet_menu.go` 的 `petMenuCells`，也就是判 settings.json
- * 能存什么的那张表。标签与"能不能关"都从那里来，于是"两处写、一处忘改"这件事没有
- * 落脚点：页面没有第二份表。
- *
- * 拿不到（宿主比这一页旧，或者这是个只装了假桥的测试环境）时是**空的**，开关页显示
- * 一行说明——那时候这个功能确实不存在，假装它存在会让用户点一个没有回应的开关。
+ * 判据只有一份：`internal/petmenu`。Go 在 GetState 里已经归一化过一遍（未知 id、以及
+ * 「不许关」的那一格都被剔掉了），所以这一页只管照着 State 藏——**不要**在这儿再复制一份
+ * "哪些不能关"：那会变成第二份真理，而两份规则迟早会说出不同的话。
  */
-let menuCells = [];
-let menuCellsAsked = false;
-/**
- * 本地镜像：用户刚点的那一下的结果，在宿主的 State 回来之前先用它。
- *
- * 为什么要一份镜像：`State` 可能还没到（老宿主、或者这一页刚从上一份快照里起来），
- * 而那不该让开关看起来"点了没反应"——**按钮的第一条要求是它看起来动了**。State 一到
- * 就把镜像清掉，因为宿主的答案永远是权威（它已经归一化过、也落过盘）。
- */
-let menuHiddenLocal = null;
-
-/** 用户关掉了哪些格子。本地镜像优先，其次是 State.config（Go 侧已经归一过一遍）。 */
-function hiddenMenuIds() {
-  const list = menuHiddenLocal ?? state?.config?.menuHidden;
-  return new Set(Array.isArray(list) ? list.filter((id) => typeof id === 'string') : []);
-}
-
-/** fixed 的 id 集合：即便文件里写着它们，它们也不该被藏。 */
-function fixedMenuIds() {
-  return new Set(menuCells.filter((cell) => cell.fixed).map((cell) => cell.id));
-}
-
-/**
- * 把 State 里的开关列表落到 DOM 上。
- *
- * 两个方向都在这里，因为它们必须同时成立：格子藏起来、开关页里那一行显示「关」。
- * 分成两处写就会有一天只改了一处——藏起来了但开关页说它开着，或者反过来。
- */
-function applyMenuPrefs() {
-  const hidden = hiddenMenuIds();
-  const fixed = fixedMenuIds();
-  // 动作格：藏掉用户关掉的。fixed 的格子不在 hidden 里（Go 保证），但这里仍要过一遍，
-  // 因为一个手改过的 settings.json 不该能让「设置」消失——那是回家的路。
-  for (const cell of els.menuGrid?.querySelectorAll('[data-menu]') || []) {
-    const id = cell.dataset.menu;
-    // 底部那一条不是动作格的一员，它永远在（见 setMenuMode）。
-    if (id === 'settings' || id === 'done' || fixed.has(id)) {
-      cell.classList.remove('hidden');
-      continue;
-    }
-    cell.classList.toggle('hidden', hidden.has(id));
-  }
-  // 开关页：每行的「开 / 关」与压暗。
-  for (const row of els.menuPrefs?.querySelectorAll('[data-toggle]') || []) {
-    const id = row.dataset.toggle;
-    const off = hidden.has(id) && !fixed.has(id);
-    row.classList.toggle('off', off);
-    const stateText = row.querySelector('.menu-state');
-    if (stateText) {
-      stateText.textContent = fixed.has(id) ? '固定' : off ? '关' : '开';
-    }
+function applyMenuHidden() {
+  const list = state?.config?.menuHidden;
+  const hidden = new Set(Array.isArray(list) ? list.filter((id) => typeof id === "string") : []);
+  for (const cell of els.bubbleMenu?.querySelectorAll("[data-menu]") || []) {
+    cell.classList.toggle("hidden", hidden.has(cell.dataset.menu));
   }
 }
-
-/**
- * 建开关页（只建一次）。标签来自宿主，所以这里没有任何一句中文是这一页替宿主说的。
- *
- * fixed 的格子照样列出来，但点不动：用户看得见"这一格永远在"，比它干脆不出现好——
- * 不出现会让人以为是漏了。
- */
-function buildMenuPrefs() {
-  if (!els.menuPrefs || els.menuPrefs.childElementCount > 0) return;
-  if (!Array.isArray(menuCells) || menuCells.length === 0) {
-    const note = document.createElement('p');
-    note.className = 'menu-state';
-    note.textContent = '这一版宿主还不能配置菜单';
-    els.menuPrefs.append(note);
-    return;
-  }
-  for (const item of menuCells) {
-    const cell = document.createElement('button');
-    cell.type = 'button';
-    cell.className = 'menu-cell';
-    cell.dataset.toggle = item.id;
-    if (item.fixed) cell.disabled = true;
-    const label = document.createElement('span');
-    label.className = 'menu-label';
-    label.textContent = item.label;
-    const stateText = document.createElement('span');
-    stateText.className = 'menu-state';
-    stateText.textContent = item.fixed ? '固定' : '开';
-    cell.append(label, stateText);
-    els.menuPrefs.append(cell);
-  }
-}
-
-/**
- * 问一次宿主的格子表（启动时一次就够：它是编译期常量）。
- *
- * 必须在**启动**时问、而不是第一次点「设置」时问：动作格的显示判断要用到 fixed 那几个
- * id（一个手改过的 settings.json 不该能让「设置」消失），而那条判断每次状态推送都会跑。
- * 等到用户点开开关页才拿表，等于这段时间里"哪些格子不许关"这件事是不知道的。
- */
-function loadMenuCells() {
-  if (menuCellsAsked) return;
-  menuCellsAsked = true;
-  // 老宿主没有这个绑定：`?.` 之后拿到 undefined，表留空，开关页显示一行说明。
-  // 动作格不受影响——藏不藏由 State 决定，而 State 一直在。
-  Promise.resolve(App.PetMenuCells?.())
-    .then((cells) => {
-      menuCells = Array.isArray(cells) ? cells : [];
-      buildMenuPrefs();
-      applyMenuPrefs();
-    })
-    .catch(() => {
-      menuCells = [];
-    });
-}
-
-/**
- * 切模式：动作格 ⇄ 开关页。
- *
- * 为什么是「一层换一层」而不是把开关做成第 10 个格子：卡片高度是 Go 里钉死的常量
- * （bubbleHeightMenu，还有用例守着它），第十个格子只能从另外九个那里抢高度。换一层
- * 则不占额外空间，而且两种模式本来就该一样大——用户点「设置」的时候不该看见卡片变高。
- */
-function setMenuMode(mode) {
-  const prefs = mode === 'prefs';
-  els.menuGrid?.classList.toggle('hidden', prefs);
-  els.menuPrefs?.classList.toggle('hidden', !prefs);
-  if (els.menuWide) els.menuWide.dataset.menu = prefs ? 'done' : 'settings';
-  if (els.menuWideLabel) els.menuWideLabel.textContent = prefs ? '完成' : '设置';
-  if (!prefs) return;
-  loadMenuCells();
-  buildMenuPrefs();
-  applyMenuPrefs();
-}
-
-
-/** 开关页里点一行：把这一格加进 / 移出 denylist，然后交给宿主存。 */
-function toggleMenuItem(id) {
-  const item = menuCells.find((candidate) => candidate.id === id);
-  if (!item || item.fixed) return;
-  const hidden = hiddenMenuIds();
-  if (hidden.has(id)) hidden.delete(id);
-  else hidden.add(id);
-  // 按宿主那张表的顺序发出去（Go 的归一化也是这个顺序）——存下来的文件因此不随点击
-  // 次序变化，diff 里只出现真正改了的那一行。
-  const next = menuCells.filter((candidate) => hidden.has(candidate.id)).map((candidate) => candidate.id);
-  // 先本地生效再问宿主：一个要等一次往返的开关，点下去会有一瞬间"没反应"。宿主回的
-  // State 到了就把镜像清掉、以它为准（它已经归一化过、也落过盘）；失败时 State 里的
-  // 旧值会把这一下复原。
-  menuHiddenLocal = next;
-  applyMenuPrefs();
-  App.SetPetMenuHidden(next)
-    .then(applyState)
-    .catch(fail);
-}
-
-
 
 /**
  * Runs one cell's action and surfaces a rejection like every other control does.
@@ -1009,14 +843,12 @@ function runPetMenuAction(name) {
 function applyState(next) {
   if (!next) return;
   state = next;
-  // 宿主的答案到了：本地镜像完成使命，往后以 State 为准。
-  menuHiddenLocal = null;
   renderPet();
   renderBadge();
   renderBackgroundPlugins();
-  // 菜单的开关列表就住在 State.config 里，所以它跟着每一次状态推送一起下来：
-  // 没有第二个"读一次菜单设置"的绑定，也就没有第二处会过期的地方。
-  applyMenuPrefs();
+  // 菜单的开关列表就住在 State.config 里，所以它跟着每一次状态推送一起下来：没有第二个
+  // "读一次菜单设置"的绑定，也就没有第二处会过期的地方。
+  applyMenuHidden();
   // Surface any data files that had to be reset, once per session.
   if (next.warnings?.length && !applyState._warned) {
     applyState._warned = true;
@@ -1040,10 +872,6 @@ async function refresh() {
   try {
     applyState(await App.GetState());
     applyLayout(await App.GetLayout());
-    // 右键菜单的格子表（哪些格子存在、哪些不许关）。一次就够：它是宿主的编译期常量。
-    // 在这里问而不是第一次点「设置」时问，因为**动作格**的显示判断每次状态推送都要用到
-    // 它（一个手改过的 settings.json 不该能让「设置」消失）。
-    loadMenuCells();
     // The plugin's line on the pet is separate state (a string, not part of State), so it is
     // read here rather than folded into applyState - a reload in the middle of a countdown must
     // not come back with a blank pet. Deliberately not awaited inside the try: an older binary
@@ -1256,14 +1084,6 @@ function wire() {
     const cell = e.target.closest('[data-menu]');
     if (!cell) return;
     runPetMenuAction(cell.dataset.menu);
-  });
-
-  // 开关页的点击。挂在 #menu-prefs 上而不是 #bubble-menu 上：两根线各管一件事
-  // （动作 / 开关），而"一格一个动作"那条规则仍然只有一条委托监听器。
-  els.menuPrefs?.addEventListener('click', (e) => {
-    const cell = e.target.closest('[data-toggle]');
-    if (!cell || cell.disabled) return;
-    toggleMenuItem(cell.dataset.toggle);
   });
 
   // A page-drawn menu cannot see the click that dismisses it: the window is cropped

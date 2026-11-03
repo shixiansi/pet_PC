@@ -31,7 +31,7 @@
  */
 import * as host from '../../../frontend/wailsjs/go/main/Market';
 import { EventsOn } from '../../../frontend/wailsjs/runtime/runtime';
-import { desktop, main, plugins, store } from '../../../frontend/wailsjs/go/models';
+import { desktop, main, petmenu, plugins, store } from '../../../frontend/wailsjs/go/models';
 
 const DEV = import.meta.env.DEV;
 
@@ -250,6 +250,8 @@ const FAKE_CONFIG: Config = store.Config.createFrom({
   llmProactive: false,
   llmProactiveMinGapMin: 60,
   llmDailyBudget: 200,
+  // 右键菜单里被关掉的格子：开发桩从空的开始（默认九格全显示）。
+  menuHidden: [],
 });
 
 // A dev-only delay so a "读取中" state is actually observable instead of flashing past.
@@ -798,3 +800,28 @@ export type FolderOccupancy = plugins.FolderOccupancy;
 export const Occupancy = (): Promise<PluginOccupancy[]> => (DEV ? later([]) : host.Occupancy());
 export const CleanPluginFolder = (id: string, folder: string): Promise<Record<string, any>> =>
   DEV ? later({ ok: true, freed: 0 }) : host.CleanPluginFolder(id, folder);
+// --- 桌宠右键菜单显示哪些格子（2026-11-03）-----------------------------------
+//
+// 这组开关 2026-11-03 从右键菜单里搬到这里：那张卡片的高度是宿主钉死的常量（226px），
+// 往里塞一层开关页的第一反馈是"显示效果不好"。而"桌宠长什么样"本来就是「开始」页的事，
+// 菜单也是它的一部分。
+//
+// 表（九格、哪一格不许关）来自 internal/petmenu，和桌宠那一侧共用一份；这一页只画行。
+export type PetMenuCell = petmenu.Cell;
+export const PetMenuCells = (): Promise<PetMenuCell[]> => (DEV ? later(FAKE_MENU_CELLS) : host.PetMenuCells());
+export const SetPetMenuHidden = (hidden: string[]): Promise<Config> =>
+  DEV ? savedConfig({ menuHidden: hidden }) : host.SetPetMenuHidden(hidden);
+
+// 开发桩：九格，与 internal/petmenu.Cells() 同形同序。**这不是第二份真理**——它只在 dev
+// 服务器里用，而且 .dev/check-frontend.cjs 会比它和 Go 那张表的 id 集合。
+const FAKE_MENU_CELLS: PetMenuCell[] = [
+  { id: 'todos', label: '日程', fixed: false },
+  { id: 'chat', label: '对话', fixed: false },
+  { id: 'pomodoro', label: '番茄钟', fixed: false },
+  { id: 'remind', label: '提醒', fixed: false },
+  { id: 'plugins', label: '控制中心', fixed: false },
+  { id: 'theme', label: '主题', fixed: false },
+  { id: 'snap', label: '归位', fixed: false },
+  { id: 'hide', label: '隐藏', fixed: false },
+  { id: 'quit', label: '退出', fixed: true },
+].map((c) => petmenu.Cell.createFrom(c));

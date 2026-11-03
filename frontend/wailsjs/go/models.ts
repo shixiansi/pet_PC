@@ -243,22 +243,6 @@ export namespace main {
 		    return a;
 		}
 	}
-	export class PetMenuPrefs {
-	    id: string;
-	    label: string;
-	    fixed: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new PetMenuPrefs(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.label = source["label"];
-	        this.fixed = source["fixed"];
-	    }
-	}
 	
 	
 	export class PluginView {

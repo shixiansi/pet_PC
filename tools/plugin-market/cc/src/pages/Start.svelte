@@ -11,8 +11,10 @@
     HotkeyLabels,
     ChoosePetImage,
     ResetPetImage,
+    PetMenuCells,
+    SetPetMenuHidden,
   } from '../lib/bridge';
-  import type { Config, HotkeyView } from '../lib/bridge';
+  import type { Config, HotkeyView, PetMenuCell } from '../lib/bridge';
 
   // `cfg` is the generated store.Config: this page names the fields the host sends, and a
   // typo is a compile error rather than an `undefined` on screen. It used to read
@@ -20,6 +22,9 @@
   let cfg = $state<Config | null>(null);
   let scale = $state(1);
   let hotkeys = $state<HotkeyView | null>(null);
+  // 右键菜单的九格（id / 标签 / 是否固定）。表在 internal/petmenu，和桌宠那一侧共用一份，
+  // 所以这一页没有第二份"哪些格子存在"。
+  let menuCells = $state<PetMenuCell[]>([]);
   let loaded = $state(false);
   let error = $state('');
 
@@ -28,6 +33,7 @@
       cfg = await MainSettings();
       scale = cfg.petScale;
       hotkeys = await HotkeyLabels();
+      menuCells = (await PetMenuCells()) ?? [];
     } catch (e) {
       error = String(e);
     } finally {
@@ -45,6 +51,21 @@
       // clamped one the pet will actually use, not the one the slider was dragging to.
       if (next) scale = next.petScale;
     });
+  }
+
+  /** 这一格现在显示吗（menuHidden 是 denylist，宿主已经归一过一遍）。 */
+  const menuShown = (id: string) => !((cfg?.menuHidden ?? []) as string[]).includes(id);
+
+  /**
+   * 一格的开关。存的是"被关掉的那些"，顺序按宿主那张表（petmenu.Normalise 同序）——
+   * 这样同一套选择永远写出同一份 settings.json，diff 里只出现真正改了的那一行。
+   */
+  async function toggleMenuCell(id: string, on: boolean) {
+    const hidden = new Set<string>((cfg?.menuHidden ?? []) as string[]);
+    if (on) hidden.delete(id);
+    else hidden.add(id);
+    const next = menuCells.filter((cell) => hidden.has(cell.id)).map((cell) => cell.id);
+    await save(() => SetPetMenuHidden(next));
   }
 
   async function save(run: () => Promise<Config>): Promise<Config | null> {
@@ -130,6 +151,29 @@
     {/if}
     <p class="hint">
       开机启动会写 HKCU 的 Run 项。这三项都是即时生效的：桌宠每秒看一次设置文件，快捷键会当场重新登记。
+    </p>
+  {/if}
+</Card>
+
+<Card title="右键菜单">
+  {#if !menuCells.length}
+    <p class="hint">读取中…</p>
+  {:else}
+    {#each menuCells as cell (cell.id)}
+      <label class="switch">
+        <input
+          type="checkbox"
+          checked={menuShown(cell.id)}
+          disabled={cell.fixed}
+          onchange={(e) => toggleMenuCell(cell.id, (e.currentTarget as HTMLInputElement).checked)}
+        />
+        <span>{cell.label}{cell.fixed ? '（固定，不能关）' : ''}</span>
+      </label>
+    {/each}
+    <p class="hint">
+      关掉的格子不会出现在桌宠的右键菜单里 —— 归位、主题这类一年用一次的格子可以收起来。
+      「退出」永远是开的：它是桌宠那一侧唯一的退出口。改这些开关的地方是这一页（托盘菜单
+      一直开得出来），所以没有别的格子需要固定。改完桌宠下一次右键就是新的。
     </p>
   {/if}
 </Card>

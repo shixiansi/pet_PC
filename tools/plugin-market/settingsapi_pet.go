@@ -9,6 +9,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"PetPC/internal/desktop"
+	"PetPC/internal/petmenu"
 	"PetPC/internal/store"
 )
 
@@ -239,4 +240,30 @@ func (m *Market) SetReminderDisplay(items, autoHideSec int) (store.Config, error
 		c.ReminderMaxItems = items
 		c.ReminderAutoHideSec = autoHideSec
 	})
+}
+
+// --- 桌宠右键菜单显示哪些格子（2026-11-03）-------------------------------------
+//
+// 「开始」页那一组开关：桌宠的右键菜单有九格，用户可以把不常用的关掉（归位、主题这种）。
+//
+// 表与规则都在 internal/petmenu，两个程序共用一份——桌宠按它判"哪些不能关"，这一页按它画
+// 行。**不要**在这个文件里再写一份标签表：两套规则必然分叉，而分叉的那套会让用户在一个
+// 窗口里能关掉某格、在另一个窗口里关不掉。
+//
+// 为什么设置在这里而不是在右键菜单里：那一张卡片的高度是宿主钉死的常量（226px），
+// 2026-11-03 试过在底部塞一条「设置」、把九格换成开关页，第一反馈是"显示效果不好"。而
+// "桌宠长什么样"本来就是这一页的事，菜单也是它的一部分。
+
+// PetMenuCells 是菜单的九格（id / 标签 / 是否固定），给这一页画开关行用。
+func (m *Market) PetMenuCells() []petmenu.Cell {
+	return petmenu.Cells()
+}
+
+// SetPetMenuHidden 存"用户关掉了哪些格子"，并把保存后的 config 回给页面。
+//
+// 归一化在写入时做一遍（未知 id、固定那一格丢掉），读的时候桌宠那一侧还会再做一遍：
+// settings.json 是用户手能改的纯文件，只拦一处就是留个洞。
+func (m *Market) SetPetMenuHidden(hidden []string) (store.Config, error) {
+	clean := petmenu.Normalise(hidden)
+	return store.SaveSettings(m.dataDir, func(c *store.Config) { c.MenuHidden = clean })
 }

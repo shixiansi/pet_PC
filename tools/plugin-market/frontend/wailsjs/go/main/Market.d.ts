@@ -4,6 +4,7 @@ import {plugins} from '../models';
 import {store} from '../models';
 import {main} from '../models';
 import {desktop} from '../models';
+import {petmenu} from '../models';
 import {http} from '../models';
 import {themepacks} from '../models';
 
@@ -37,6 +38,8 @@ export function Occupancy():Promise<Array<plugins.PluginOccupancy>>;
 
 export function PermissionLabels():Promise<Array<main.LabelPair>>;
 
+export function PetMenuCells():Promise<Array<petmenu.Cell>>;
+
 export function PluginHostInfo():Promise<plugins.HostInfo>;
 
 export function PluginMarketPath():Promise<string|boolean>;
@@ -64,6 +67,8 @@ export function SetAutostart(arg1:boolean):Promise<store.Config>;
 export function SetEnabled(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetGlobalHotkeys(arg1:boolean):Promise<store.Config>;
+
+export function SetPetMenuHidden(arg1:Array<string>):Promise<store.Config>;
 
 export function SetPetScale(arg1:number):Promise<store.Config>;
 
