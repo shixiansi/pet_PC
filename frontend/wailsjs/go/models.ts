@@ -408,8 +408,8 @@ export namespace store {
 	    }
 	}
 	export class Config {
-	    petImageFile?: string;
-	    originalPath?: string;
+	    petImageFile: string;
+	    originalPath: string;
 	    petScale: number;
 	    position?: Position;
 	    snapToEdge: boolean;
@@ -417,7 +417,7 @@ export namespace store {
 	    autostart: boolean;
 	    marketBaseUrl: string;
 	    globalHotkeys: boolean;
-	    menuHidden?: string[];
+	    menuHidden: string[];
 	    reminderOnStartup: boolean;
 	    reminderEnabled: boolean;
 	    reminderIntervalMin: number;

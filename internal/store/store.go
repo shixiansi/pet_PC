@@ -49,10 +49,17 @@ type Position struct {
 type Config struct {
 	// PetImageFile is the file name (not path) of the user's picture inside the
 	// data directory. Empty means "use the bundled default pet".
-	PetImageFile string `json:"petImageFile,omitempty"`
+	//
+	// **NO `omitempty`**，和 MenuHidden 同一条理由（见那里）：清空是一个真实的操作
+	// （「恢复默认图片」），而 `omitempty` 会让这个键从 settings.json 里消失；readJSON 是
+	// 解码到**已有结构**上，键不在就等于"没人碰过它"，内存里那个文件名留在原地。文件已经
+	// 被 ClearPetImage 删了，所以画面看起来是对的——直到重启，那个不存在的文件名又回到
+	// 设置页，写着「当前：pet-image.png」。
+	PetImageFile string `json:"petImageFile"`
 	// OriginalPath is kept only so the settings panel can show where the
-	// picture came from.
-	OriginalPath string `json:"originalPath,omitempty"`
+	// picture came from. Same tag rule as PetImageFile: it is cleared together
+	// with it, and a cleared field has to be written or the reload keeps the old one.
+	OriginalPath string `json:"originalPath"`
 
 	// PetScale multiplies the base pet size.
 	PetScale float64 `json:"petScale"`
@@ -91,21 +98,31 @@ type Config struct {
 	// editor or an IDE. Opting in is the only polite default.
 	GlobalHotkeys bool `json:"globalHotkeys"`
 
-	// MenuHidden lists the pet-menu cells the user switched off on the menu's own
-	// 设置 page.
+	// MenuHidden lists the pet-menu cells the user switched off.
+	//
+	// 它住在控制中心「开始」页的「右键菜单」卡片里（2026-11-03 从右键菜单本身搬过去的：
+	// 那张卡片的高度是钉死的 226px，塞一层开关页的反馈是"显示效果不好"）。
 	//
 	// It stores CELL IDS, not indexes: the grid is markup whose order changes, while
 	// `pomodoro` means the same thing in a saved file two versions later. Ids the
 	// host does not know (an older file, a cell that has since been removed) are
-	// dropped on read, and the "must stay on" cells (设置 / 退出) are dropped too -
-	// the enforcement lives in NormalisePetMenuHidden, not in the page, because a
+	// dropped on read, and the "must stay on" cells (控制中心 / 退出) are dropped
+	// too - the enforcement lives in petmenu.Normalise, not in the page, because a
 	// hand-edited settings.json must not be able to hide the page's own way in.
 	//
 	// It is a DENYLIST rather than an allowlist on purpose: a cell added in a later
 	// version is then visible by default. An allowlist would silently hide every new
 	// action from anyone who once visited this page - and they would have no way to
 	// know something was missing.
-	MenuHidden []string `json:"menuHidden,omitempty"`
+	//
+	// **NO `omitempty`**, and that is a bug fix rather than a style choice
+	// (2026-11-03): 清空 denylist 会把「提醒」这类格子放回来，而 `omitempty` 让这个键
+	// 从 settings.json 里整条消失。Store 的懒重读是"把文件解码到**已有结构**上"，
+	// 文件里没有这个键 → 内存里那份旧值原地不动 → 控制中心显示"开着"（它写空后读回的
+	// 是自己刚写的空），而桌宠那一帧还藏着那一格。用户看到的就是"关了再开、那一格再也没
+	// 有回来"以及"退出重开又出现了"（重启从零构造，没有旧值可留）。
+	// 空数组必须写出来：`[]` 与"键不存在"在解码到已有结构上之后不是一回事。
+	MenuHidden []string `json:"menuHidden"`
 
 	// --- todo reminders (docs/reminder-pomodoro.md 5.5) ---
 

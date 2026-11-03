@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"PetPC/internal/desktop"
+	"PetPC/internal/petmenu"
 	"PetPC/internal/store"
 )
 
@@ -34,6 +35,13 @@ func (m *Market) MainSettings() (store.Config, error) {
 	// predicate is desktop.AutostartEnabled, the same one the pet reads: it also rejects
 	// an entry that names the control center, so a ticked box means "the pet will start".
 	cfg.Autostart = desktop.AutostartEnabled()
+	// 右键菜单的 denylist 必须**读**的时候也归一化一次，和桌宠的 GetState 同一条规则。
+	//
+	// 为什么不能只在写的时候过：settings.json 是用户能手改的纯文件，也可能是旧版本写下的
+	// （那时「控制中心」还不是 fixed）。不归一化的话，这一页会把 "plugins" / "quit" 当成
+	// "被关掉了"，于是那两行显示成**未勾选、又因为 fixed 点不动**——用户看到的就是两个
+	// 灰掉的空框，而桌宠那一侧因为归一化过、照样画着它们。同一份文件两个结论。
+	cfg.MenuHidden = petmenu.Normalise(cfg.MenuHidden)
 	return cfg, nil
 }
 
