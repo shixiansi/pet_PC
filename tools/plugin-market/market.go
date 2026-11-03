@@ -11,8 +11,8 @@ import (
 
 	"PetPC/internal/logging"
 	"PetPC/internal/plugins"
-	"PetPC/internal/themepacks"
 	"PetPC/internal/store"
+	"PetPC/internal/themepacks"
 )
 
 // Market is the struct bound to the frontend.
@@ -538,7 +538,6 @@ func normalizeTheme(name string) string {
 	}
 	return themeDark
 }
-
 
 // Themes answers with every palette pack the user may pick: the compiled-in ones first, then
 // whatever is installed in `themes/<id>/`.

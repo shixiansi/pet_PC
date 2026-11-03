@@ -11,8 +11,8 @@ package plugins
 import (
 	"encoding/json"
 	"os"
-	"strconv"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -377,6 +377,7 @@ func TestStorageSetHasNoTotalCeiling(t *testing.T) {
 		t.Fatalf("目录只有 %d 字节，这个测试没有真的越过旧上限", used)
 	}
 }
+
 // TestStorageUsageReportsWhatIsStored pins the answer the OCCUPANCY view needs.
 //
 // It used to report "used / limit" - a quota, so a plugin could decide what to delete before the

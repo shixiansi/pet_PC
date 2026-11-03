@@ -441,6 +441,7 @@ func TestBuiltinSampleAgreesWithTheMarketCatalogue(t *testing.T) {
 		}
 	}
 }
+
 // TestEveryPublishedManifestParses is the "we never publish a manifest we refuse" guard.
 //
 // The failure it exists for, hit for real on 2026-11-01: the market shipped web-dashboard with

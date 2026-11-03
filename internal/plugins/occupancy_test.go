@@ -3,8 +3,8 @@ package plugins
 import (
 	"encoding/json"
 	"os"
-	"strconv"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 

@@ -45,9 +45,9 @@ func TestPrivateDirStampsSkipsConfigAndUsesStorageKeys(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	for name, body := range map[string]string{
-		"state/x":          "abc",
-		"outbox/system":    "12",
-		ConfigFileName:     "{}",
+		"state/x":       "abc",
+		"outbox/system": "12",
+		ConfigFileName:  "{}",
 	} {
 		full := filepath.Join(dir, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {

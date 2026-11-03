@@ -149,7 +149,7 @@ func TestSetAutostartRoundTrip(t *testing.T) {
 			t.Fatal("a scratch value already existed")
 		}
 
-		if err := setAutostart(testValueName, true); err != nil {
+		if err := setAutostart(testValueName, ExecutablePath(), true); err != nil {
 			t.Fatalf("setAutostart(true): %v", err)
 		}
 		if !autostartEnabled(testValueName) {
@@ -172,14 +172,14 @@ func TestSetAutostartRoundTrip(t *testing.T) {
 		}
 
 		// Enabling again must be idempotent.
-		if err := setAutostart(testValueName, true); err != nil {
+		if err := setAutostart(testValueName, ExecutablePath(), true); err != nil {
 			t.Fatalf("setAutostart(true) again: %v", err)
 		}
 		if again, _ := read(); again != want {
 			t.Errorf("second enable changed the value to %s", again)
 		}
 
-		if err := setAutostart(testValueName, false); err != nil {
+		if err := setAutostart(testValueName, ExecutablePath(), false); err != nil {
 			t.Fatalf("setAutostart(false): %v", err)
 		}
 		if autostartEnabled(testValueName) {
@@ -190,7 +190,7 @@ func TestSetAutostartRoundTrip(t *testing.T) {
 		}
 
 		// Disabling when already absent must not error.
-		if err := setAutostart(testValueName, false); err != nil {
+		if err := setAutostart(testValueName, ExecutablePath(), false); err != nil {
 			t.Errorf("disable is not idempotent: %v", err)
 		}
 	})
@@ -304,6 +304,156 @@ func TestIsGoEscapedPath(t *testing.T) {
 	}
 }
 
+// TestSetAutostartStoresTheGivenExecutable pins the fix for the bug that made
+// 开机自启 fail with the box ticked: the stored command is the executable the
+// CALLER named, not "whatever process is asking".
+//
+// The control center owns the switch, and the old code resolved os.Executable()
+// inside the writer - so the Run entry named PetPCPluginMarket.exe, Windows
+// started the control center at logon, and no pet ever appeared. An entry that
+// starts the wrong program is indistinguishable from a missing one.
+func TestSetAutostartStoresTheGivenExecutable(t *testing.T) {
+	withScratchValue(t, func() {
+		other := `C:\Some\Pet\Install\PetPC.exe`
+		if err := setAutostart(testValueName, other, true); err != nil {
+			t.Fatalf("setAutostart(true): %v", err)
+		}
+		want, err := autostartCommand(other)
+		if err != nil {
+			t.Fatalf("autostartCommand: %v", err)
+		}
+		if got, _ := autostartEntryCommand(testValueName); got != want {
+			t.Errorf("stored value = %s, want %s (the caller's executable)", got, want)
+		}
+		self, err := autostartCommand(ExecutablePath())
+		if err != nil {
+			t.Fatalf("autostartCommand: %v", err)
+		}
+		if got, _ := autostartEntryCommand(testValueName); got == self {
+			t.Error("the stored value is this process's own path; that is the bug this test exists for")
+		}
+	})
+}
+
+// TestSetAutostartForRefusesTheControlCenter makes the mistake unrepeatable:
+// asking to register the control center is an error, and nothing is written.
+//
+// It runs against the real value name on purpose - the refusal happens before any
+// registry access - so it also proves that the pet's own entry cannot be touched
+// by the wrong call.
+func TestSetAutostartForRefusesTheControlCenter(t *testing.T) {
+	before := detailAutostart(autostartValueName)
+
+	err := SetAutostartFor(`C:\PetPC\PetPCPluginMarket.exe`, true)
+	if err == nil {
+		t.Fatal("SetAutostartFor registered the control center instead of refusing")
+	}
+	if !strings.Contains(err.Error(), "桌宠") {
+		t.Errorf("error %q does not tell the caller what the entry must name", err)
+	}
+	if after := detailAutostart(autostartValueName); before != after {
+		t.Errorf("the real entry changed despite the refusal:\n  before = %s\n  after  = %s", before, after)
+	}
+}
+
+// TestIsControlCenterEntry documents which stored commands are recognised as the
+// control center, since that predicate is what lets the repair rewrite an entry
+// without reopening the hijack door.
+func TestIsControlCenterEntry(t *testing.T) {
+	mine := []string{
+		`"C:\Users\me\PetPC\PetPCPluginMarket.exe"`,
+		`C:\Users\me\PetPC\PetPCPluginMarket.exe`,
+		`"C:\Users\me\PetPC\PetPCPluginMarket.exe" --flag`,
+		`C:\Users\me\PetPC\PetPCPluginMarket.exe --flag`,
+		"  " + `"C:\PetPCPluginMarket.exe"`,
+		`C:\Users\me\PetPC\petpcpluginmarket.EXE`,
+	}
+	for _, s := range mine {
+		if !isControlCenterEntry(s) {
+			t.Errorf("isControlCenterEntry(%s) = false, want true", s)
+		}
+	}
+
+	notMine := []string{
+		`"F:\pet_pc\build\bin\PetPC.exe"`,
+		`C:\Program Files\PetPC\PetPC.exe`,
+		`"C:\Some\Other\Install\PetPC.exe" --minimized`,
+		``,
+		// A path that merely contains the name is not the program.
+		`C:\Users\me\PetPCPluginMarket.exe.old\PetPC.exe`,
+	}
+	for _, s := range notMine {
+		if isControlCenterEntry(s) {
+			t.Errorf("isControlCenterEntry(%s) = true, want false", s)
+		}
+	}
+}
+
+// TestAutostartUsableRejectsControlCenterEntry is the read-side half: an entry
+// naming the control center exists, is not marked disabled, and still must not
+// count as "on", because the pet does not start at logon.
+func TestAutostartUsableRejectsControlCenterEntry(t *testing.T) {
+	withScratchValue(t, func() {
+		k, err := registry.OpenKey(registry.CURRENT_USER, runKeyPath, registry.QUERY_VALUE|registry.SET_VALUE)
+		if err != nil {
+			t.Fatalf("open Run key: %v", err)
+		}
+		defer k.Close()
+		if err := k.SetStringValue(testValueName, `"C:\PetPC\PetPCPluginMarket.exe"`); err != nil {
+			t.Fatalf("seed control-center value: %v", err)
+		}
+
+		// The old lie, stated explicitly: the value exists and Explorer has no
+		// "disabled" record for it, so the checkbox used to read "on".
+		if !autostartEnabled(testValueName) {
+			t.Fatal("precondition failed: the seeded value should exist")
+		}
+		if startupApprovedDisabled(testValueName) {
+			t.Fatal("precondition failed: the seeded value should not be marked disabled")
+		}
+
+		if autostartUsable(testValueName) {
+			t.Error("an entry naming the control center must not count as auto-start being on")
+		}
+	})
+}
+
+// TestRepairAutostartRewritesControlCenterEntry is the healing half: the next
+// GetState (or launch) repoints a control-center entry at the pet, so a user who
+// suffered the bug does not have to discover the switch and toggle it twice.
+func TestRepairAutostartRewritesControlCenterEntry(t *testing.T) {
+	withScratchValue(t, func() {
+		k, err := registry.OpenKey(registry.CURRENT_USER, runKeyPath, registry.QUERY_VALUE|registry.SET_VALUE)
+		if err != nil {
+			t.Fatalf("open Run key: %v", err)
+		}
+		defer k.Close()
+		if err := k.SetStringValue(testValueName, `"C:\PetPC\PetPCPluginMarket.exe"`); err != nil {
+			t.Fatalf("seed control-center value: %v", err)
+		}
+
+		if !repairAutostart(testValueName) {
+			t.Fatal("repairAutostart did not report repairing a control-center entry")
+		}
+		want, err := autostartCommand(ExecutablePath())
+		if err != nil {
+			t.Fatalf("autostartCommand: %v", err)
+		}
+		got, _ := autostartEntryCommand(testValueName)
+		if got != want {
+			t.Errorf("repaired value = %s, want %s", got, want)
+		}
+		if isControlCenterEntry(got) {
+			t.Error("the repaired entry still names the control center")
+		}
+
+		// And the repaired entry is usable again, which is the point.
+		if !autostartUsable(testValueName) {
+			t.Error("the repaired entry does not read as usable")
+		}
+	})
+}
+
 // TestRepairAutostartIgnoresMissingEntry makes sure the read path does not
 // create an auto-start entry for a user who switched it off.
 func TestRepairAutostartIgnoresMissingEntry(t *testing.T) {
@@ -325,11 +475,11 @@ func TestAutostartTestsLeaveRealEntryAlone(t *testing.T) {
 
 	// Exercise every write path through the scratch value.
 	withScratchValue(t, func() {
-		_ = setAutostart(testValueName, true)
-		_ = setAutostart(testValueName, true)
+		_ = setAutostart(testValueName, ExecutablePath(), true)
+		_ = setAutostart(testValueName, ExecutablePath(), true)
 		_ = repairAutostart(testValueName)
-		_ = setAutostart(testValueName, false)
-		_ = setAutostart(testValueName, false)
+		_ = setAutostart(testValueName, ExecutablePath(), false)
+		_ = setAutostart(testValueName, ExecutablePath(), false)
 	})
 
 	if after := detailAutostart(autostartValueName); before != after {
@@ -355,12 +505,12 @@ func TestSuiteDoesNotTouchRealEntry(t *testing.T) {
 
 	// Every write path the other tests use, driven through the scratch name.
 	withScratchValue(t, func() {
-		_ = setAutostart(testValueName, true)
+		_ = setAutostart(testValueName, ExecutablePath(), true)
 		_ = repairAutostart(testValueName)
 		_ = autostartEnabled(testValueName)
 		_ = startupApprovedDisabled(testValueName)
 		_ = clearStartupApproved(testValueName)
-		_ = setAutostart(testValueName, false)
+		_ = setAutostart(testValueName, ExecutablePath(), false)
 	})
 
 	if after := detailAutostart(autostartValueName); before != after {
@@ -468,7 +618,7 @@ func TestClearStartupApprovedRemovesRecord(t *testing.T) {
 func TestSetAutostartClearsDisabledRecord(t *testing.T) {
 	withScratchValue(t, func() {
 		// A Run value that is present and correct, but marked disabled.
-		if err := setAutostart(testValueName, true); err != nil {
+		if err := setAutostart(testValueName, ExecutablePath(), true); err != nil {
 			t.Fatalf("setAutostart(true): %v", err)
 		}
 		setScratchApproved(t, true)
@@ -477,7 +627,7 @@ func TestSetAutostartClearsDisabledRecord(t *testing.T) {
 		}
 
 		// Re-enabling through the app must clear it.
-		if err := setAutostart(testValueName, true); err != nil {
+		if err := setAutostart(testValueName, ExecutablePath(), true); err != nil {
 			t.Fatalf("setAutostart(true) again: %v", err)
 		}
 		if startupApprovedDisabled(testValueName) {
@@ -490,7 +640,7 @@ func TestSetAutostartClearsDisabledRecord(t *testing.T) {
 // able to heal a disabled record for a user who never reopens the setting.
 func TestRepairAutostartClearsDisabledRecord(t *testing.T) {
 	withScratchValue(t, func() {
-		if err := setAutostart(testValueName, true); err != nil {
+		if err := setAutostart(testValueName, ExecutablePath(), true); err != nil {
 			t.Fatalf("setAutostart(true): %v", err)
 		}
 		setScratchApproved(t, true)

@@ -63,7 +63,6 @@ type Config struct {
 	// EdgeMargin is the gap left between the pet and the screen edge.
 	EdgeMargin int `json:"edgeMargin"`
 
-
 	// Autostart mirrors the Windows registry state; it is persisted so the
 	// settings panel can render before the registry is read.
 	Autostart bool `json:"autostart"`
@@ -240,7 +239,6 @@ func DefaultConfig() Config {
 		PetScale:   DefaultScale,
 		SnapToEdge: true,
 		EdgeMargin: DefaultEdgeGap,
-
 
 		// The global shortcuts are off until asked for: see the field's comment.
 		GlobalHotkeys: false,

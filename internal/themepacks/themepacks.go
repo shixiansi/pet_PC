@@ -66,7 +66,7 @@ var Builtin = map[string]Palette{
 			"text": "#0d2018", "text-dim": "#4e6b5a", "text-faint": "#526d5d",
 			"accent": "#047857", "accent-strong": "#047857", "accent-hover": "#036249",
 			"accent-soft": "#ecfdf5", "accent-dim": "#6ee7b7",
-			"ring": "rgba(4, 120, 87, 0.28)",
+			"ring":    "rgba(4, 120, 87, 0.28)",
 			"warning": "#a34a08",
 		},
 		Dark: map[string]string{

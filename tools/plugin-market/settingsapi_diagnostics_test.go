@@ -156,8 +156,8 @@ func TestDiagnosticsNamesWhatIsMissingPerPlugin(t *testing.T) {
 	}
 	lines := strings.Join(pluginProblems(m, row, map[string]bool{"com.example.thing": true}), "\n")
 	for _, want := range []string{
-		"缺授权：plugin.call、pet.bubble",   // the two nobody ticked, named
-		"辅助脚本不在：helper.ps1",           // the sidecar the package does not carry
+		"缺授权：plugin.call、pet.bubble", // the two nobody ticked, named
+		"辅助脚本不在：helper.ps1",          // the sidecar the package does not carry
 		"callTargets 指向没装的插件：com.example.absent/stats",
 	} {
 		if !strings.Contains(lines, want) {

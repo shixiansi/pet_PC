@@ -128,6 +128,11 @@ func RepairAutostart() bool { return false }
 
 // SetAutostart only supports disabling off Windows, which is a no-op.
 func SetAutostart(enable bool) error {
+	return SetAutostartFor("", enable)
+}
+
+// SetAutostartFor is the same stub: there is no Run key to point at exe.
+func SetAutostartFor(_ string, enable bool) error {
 	if enable {
 		return fmt.Errorf("auto-start: %w", errUnsupported)
 	}

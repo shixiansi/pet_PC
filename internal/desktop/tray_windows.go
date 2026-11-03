@@ -106,9 +106,9 @@ const (
 	// 1006 used to be the pomodoro on/off toggle. The number is deliberately NOT
 	// reused: a stale menu id in a running instance would then silently mean a
 	// different command.
-	trayCmdShowPet     = 1007
-	trayCmdHidePet     = 1008
-	trayCmdOpenMarket  = 1009
+	trayCmdShowPet    = 1007
+	trayCmdHidePet    = 1008
+	trayCmdOpenMarket = 1009
 )
 
 // Exported command IDs so the app can map a menu choice to an action.

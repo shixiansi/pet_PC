@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-01T08:51:22Z",
+  "updatedAt": "2026-11-03T05:34:59Z",
   "plugins": [
     {
       "id": "com.shixiansi.plugin-bilibili",
@@ -22,6 +22,17 @@
       "permissions": ["llm.chat", "llm.borrow", "pet.surface", "plugin.config", "storage"],
       "download": "dist/com.shixiansi.plugin-chat-1.8.0.zip",
       "sha256": "6948669e550b4bcc3e2eb909c21c6f3735962d52f28907494468b3d6634d1a8d"
+    },
+    {
+      "id": "com.shixiansi.plugin-imgbed",
+      "name": "图床上传",
+      "version": "0.1.0",
+      "author": "shixiansi",
+      "description": "把一张图扔进插件页，拿回一条能直接贴出去的链接。默认连 Sanyue ImgHub / CloudFlare-ImgBed（https://imgcloud.shipixiv.de5.net），拖进来、粘贴或选文件都行，也可以在桌宠那边没有窗口的情况下被别的插件用 plugin.call 问 upload（data URL，≤40KB）。上传走 net.fetch 的字节请求体，不需要 process 权限、不需要本机脚本。",
+      "permissions": ["net.fetch", "storage", "plugin.config", "plugin.call"],
+      "netHosts": ["imgcloud.shipixiv.de5.net"],
+      "download": "dist/com.shixiansi.plugin-imgbed-0.1.0.zip",
+      "sha256": "5b2ab8d3f88377e7a69c0b66e70230dd6aabbaec36ff3fc5a1d757f582a8e589"
     },
     {
       "id": "com.shixiansi.plugin-llmchannel",

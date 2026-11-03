@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -33,17 +35,78 @@ func (m *Market) SetSnapToEdge(on bool) (store.Config, error) {
 	return store.SaveSettings(m.dataDir, func(c *store.Config) { c.SnapToEdge = on })
 }
 
-// SetAutostart writes the per-user Run entry AND the preference, in that order.
+// petExeName is the pet's executable: the program the Run entry must name.
+const petExeName = "PetPC.exe"
+
+// petExecutableCandidates lists where the pet may be, most preferred first.
 //
-// The order is the whole point: if the registry write fails, the preference must not be
-// saved, or `settings.json` would claim the pet starts with Windows while it does not - and
-// the user would have no way to see the lie. The pet's own SetAutostart does the same thing
-// for the same reason.
+// It mirrors app_plugin_market.go's PluginMarketCandidates in the other direction: the
+// two programs are copied side by side by tools\build-all.ps1, and each also knows how to
+// find the other's build output while running from its own build tree. A separate, pure
+// enumeration rather than a loop inside petExecutablePath so the search order itself is
+// testable - "the release puts one of them somewhere else and the switch can never work"
+// is invisible until a user hits it.
+func petExecutableCandidates(self string) []string {
+	dir := filepath.Dir(self)
+	return []string{
+		// Beside the control center: the release layout, and where build-all puts both.
+		filepath.Join(dir, petExeName),
+		// The pet's build output, for a control center started from its own build
+		// tree (tools\plugin-market\build\bin) in the repository.
+		filepath.Join(dir, "..", "..", "..", "..", "build", "bin", petExeName),
+	}
+}
+
+// petExecutablePath returns the pet's location, and whether it was found.
+func petExecutablePath() (string, bool) {
+	self, err := os.Executable()
+	if err != nil {
+		return "", false
+	}
+	return firstExistingFile(petExecutableCandidates(self))
+}
+
+// firstExistingFile returns the first candidate that is a file that exists.
+func firstExistingFile(candidates []string) (string, bool) {
+	for _, p := range candidates {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+// SetAutostart switches the pet's auto-start on or off.
+//
+// THE POINT OF THIS METHOD: the Run entry must name the PET, so the pet's path is
+// resolved here and passed in explicitly (desktop.SetAutostartFor). It used to call
+// desktop.SetAutostart, which resolves os.Executable() - and when the control center
+// calls it, that is the control center. Windows then started the wrong program at logon,
+// which looks exactly like auto-start being broken: no pet, ever.
+//
+// Why the registry and not a saved preference (the settings split says settings.json
+// belongs to this program)? Because `autostart` is a RUNTIME key of config.json: the
+// pet writes it as a mirror of the registry, and store.SaveSettings strips it out of the
+// preferences file. Saving it here wrote nothing - so the old code wrote the wrong
+// executable AND updated nothing. The registry is what Windows reads at logon, so it is
+// the only honest place for this switch to write.
 func (m *Market) SetAutostart(on bool) (store.Config, error) {
-	if err := desktop.SetAutostart(on); err != nil {
+	if !on {
+		// Disabling needs no path, and must work with no pet binary in sight: a user
+		// whose install is half-deleted still has to be able to switch this off.
+		if err := desktop.SetAutostart(false); err != nil {
+			return store.Config{}, fmt.Errorf("删除开机启动项失败：%w", err)
+		}
+		return m.MainSettings()
+	}
+	pet, ok := petExecutablePath()
+	if !ok {
+		return store.Config{}, fmt.Errorf("找不到桌宠程序（%s），而开机自启必须指向它：请把两个程序放在同一个目录里，或者用 tools\\build-all.ps1 重新构建", petExeName)
+	}
+	if err := desktop.SetAutostartFor(pet, true); err != nil {
 		return store.Config{}, fmt.Errorf("写入开机启动项失败：%w", err)
 	}
-	return store.SaveSettings(m.dataDir, func(c *store.Config) { c.Autostart = on })
+	return m.MainSettings()
 }
 
 // SetGlobalHotkeys switches the global shortcuts on or off.

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"PetPC/internal/desktop"
 	"PetPC/internal/store"
 )
 
@@ -26,7 +27,14 @@ func (m *Market) MainSettings() (store.Config, error) {
 	if err != nil {
 		return store.Config{}, fmt.Errorf("读取设置失败：%w", err)
 	}
-	return s.Config(), nil
+	cfg := s.Config()
+	// `autostart` is answered by the REGISTRY, not by config.json. config.json's copy is
+	// the pet's mirror of that entry, so it is stale whenever the pet is not running -
+	// and stale here means the switch would show a state Windows does not have. The
+	// predicate is desktop.AutostartEnabled, the same one the pet reads: it also rejects
+	// an entry that names the control center, so a ticked box means "the pet will start".
+	cfg.Autostart = desktop.AutostartEnabled()
+	return cfg, nil
 }
 
 // SetPetScale changes how big the pet is drawn.

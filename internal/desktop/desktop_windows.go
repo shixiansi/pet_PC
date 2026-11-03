@@ -32,6 +32,17 @@ const (
 	// autostartValueName is the value written into the Run key.
 	autostartValueName = "PetPC"
 
+	// controlCenterExeName is the sibling program's executable: the control center,
+	// whose 「外观与启动」 page owns the auto-start switch.
+	//
+	// The name lives HERE, in the package that owns the Run entry, because "the entry
+	// names the control center" is a specific defect that has to be recognised,
+	// refused and repaired: until 2026-11 SetAutostart resolved os.Executable, so the
+	// switch registered whichever program called it - and the caller is the control
+	// center. The user-visible result is exactly the symptom README §4 describes for a
+	// malformed value: the box is ticked, a value exists, and no pet appears at logon.
+	controlCenterExeName = "PetPCPluginMarket.exe"
+
 	// startupApprovedKeyPath is where Explorer and Task Manager record whether a
 	// Run entry is enabled. It is separate from the Run key itself.
 	startupApprovedKeyPath = `Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run`
@@ -783,6 +794,44 @@ func autostartCommand(exe string) (string, error) {
 	return `"` + exe + `"`, nil
 }
 
+// autostartEntryCommand returns the command line stored in a Run value, and
+// whether the value exists at all.
+func autostartEntryCommand(valueName string) (string, bool) {
+	k, err := registry.OpenKey(registry.CURRENT_USER, runKeyPath, registry.QUERY_VALUE)
+	if err != nil {
+		return "", false
+	}
+	defer k.Close()
+	v, _, err := k.GetStringValue(valueName)
+	if err != nil {
+		return "", false
+	}
+	return v, true
+}
+
+// isControlCenterEntry reports whether a stored Run command names the control
+// center instead of the pet.
+//
+// A logon may only start the pet, so an entry naming the control center is never
+// a user's choice - it is this package's own past mistake (see
+// controlCenterExeName). That distinction is what makes it safe to repair: an
+// entry pointing at ANOTHER PET is somebody's install and stays untouched (README
+// §4), while an entry naming the control center is rewritten without asking.
+//
+// The path is extracted rather than compared as a whole because a Run value is a
+// Windows command line: it may be quoted, and it may carry arguments.
+func isControlCenterEntry(command string) bool {
+	p := strings.TrimSpace(command)
+	if strings.HasPrefix(p, `"`) {
+		if end := strings.Index(p[1:], `"`); end >= 0 {
+			p = p[1 : 1+end]
+		}
+	} else if i := strings.IndexAny(p, " \t"); i >= 0 {
+		p = p[:i]
+	}
+	return strings.EqualFold(filepath.Base(p), controlCenterExeName)
+}
+
 // autostartEnabled reports whether the named Run entry exists.
 //
 // The value name is a parameter rather than a constant so tests can point at a
@@ -790,30 +839,45 @@ func autostartCommand(exe string) (string, error) {
 // real auto-start setting, and a test that deletes it silently turns the
 // feature off for whoever runs the suite.
 func autostartEnabled(valueName string) bool {
-	k, err := registry.OpenKey(registry.CURRENT_USER, runKeyPath, registry.QUERY_VALUE)
-	if err != nil {
+	_, ok := autostartEntryCommand(valueName)
+	return ok
+}
+
+// autostartUsable reports whether the named entry would really start the pet.
+//
+// Three conditions, not one: the value must exist, Explorer's StartupApproved
+// record must not mark it disabled, and the program it names must not be the
+// control center. Each of the three has produced the same user-visible symptom on
+// its own - a ticked box and no pet at logon - and each was found only after a
+// user reported it, which is why they are now all part of the one predicate the
+// two programs read.
+func autostartUsable(valueName string) bool {
+	command, ok := autostartEntryCommand(valueName)
+	if !ok {
 		return false
 	}
-	defer k.Close()
-	_, _, err = k.GetStringValue(valueName)
-	return err == nil
+	if startupApprovedDisabled(valueName) {
+		return false
+	}
+	return !isControlCenterEntry(command)
 }
 
 // AutostartEnabled reports whether auto-start is actually in effect.
-//
-// That is two conditions, not one: the Run value must exist *and* Explorer's
-// StartupApproved record must not mark it disabled. Checking only for the value
-// is what let the panel show a ticked box while nothing started at logon.
 func AutostartEnabled() bool {
-	return autostartEnabled(autostartValueName) && !startupApprovedDisabled(autostartValueName)
+	return autostartUsable(autostartValueName)
 }
 
 // repairAutostart fixes the named Run entry when it is genuinely unusable, and
 // reports whether it changed anything.
 //
-// The only defect it repairs is the Go-escaped path an older build wrote with
-// fmt.Sprintf("%q"): `"F:\\pet_pc\\...\PetPC.exe"`, which Explorer cannot
-// resolve. That is why the checkbox stayed ticked while nothing started.
+// Two defects are repaired, and deliberately only these two:
+//
+//  1. the Go-escaped path an older build wrote with fmt.Sprintf("%q"):
+//     `"F:\\pet_pc\\...\PetPC.exe"`, which Explorer cannot resolve;
+//  2. an entry naming the control center, which Windows resolves happily and
+//     starts - the wrong program. See controlCenterExeName.
+//
+// Both are why the checkbox stayed ticked while nothing started.
 //
 // It deliberately does NOT rewrite an entry that simply points somewhere else.
 // GetState runs this on every read, so a blanket "make it match the running
@@ -836,7 +900,7 @@ func repairAutostart(valueName string) bool {
 		// No entry (or unreadable): nothing to repair. Enabling writes it.
 		return false
 	}
-	if !isGoEscapedPath(current) {
+	if !isGoEscapedPath(current) && !isControlCenterEntry(current) {
 		// Either correct or pointing at a different install the user chose.
 		// Leave it alone; only the settings toggle may repoint it.
 		return false
@@ -876,8 +940,13 @@ func RepairAutostart() bool {
 	return repaired
 }
 
-// setAutostart adds or removes the named Run entry for this executable.
-func setAutostart(valueName string, enable bool) error {
+// setAutostart adds or removes the named Run entry for exe.
+//
+// exe is a parameter rather than "whatever is running" because the two programs
+// that can reach this function are not interchangeable: the entry must name the
+// PET, and resolving os.Executable() inside here made the control center register
+// itself (see controlCenterExeName).
+func setAutostart(valueName, exe string, enable bool) error {
 	k, err := registry.OpenKey(registry.CURRENT_USER, runKeyPath, registry.SET_VALUE)
 	if err != nil {
 		return fmt.Errorf("open Run key: %w", err)
@@ -891,7 +960,7 @@ func setAutostart(valueName string, enable bool) error {
 		return nil
 	}
 
-	command, err := autostartCommand(ExecutablePath())
+	command, err := autostartCommand(exe)
 	if err != nil {
 		return err
 	}
@@ -907,8 +976,28 @@ func setAutostart(valueName string, enable bool) error {
 	return nil
 }
 
-// SetAutostart adds or removes the per-user Run entry for this executable.
-// Writing to HKCU needs no elevation.
+// SetAutostartFor adds or removes the per-user Run entry for exe.
+//
+// The caller passes the executable that should start at logon: the pet. Writing to
+// HKCU needs no elevation.
+//
+// Naming the control center is refused instead of stored. That is the whole bug this
+// signature exists to make impossible: the control center's switch used to call a
+// function that resolved os.Executable() - itself - so the entry was written, Windows
+// honoured it, and the program at logon was the wrong one. An entry that starts the
+// wrong program is indistinguishable from an entry that is missing, and the user has no
+// way to see the difference.
+func SetAutostartFor(exe string, enable bool) error {
+	if enable && isControlCenterEntry(exe) {
+		return fmt.Errorf("开机自启必须指向桌宠，不能指向控制中心（%s）", filepath.Base(exe))
+	}
+	return setAutostart(autostartValueName, exe, enable)
+}
+
+// SetAutostart adds or removes the per-user Run entry for THIS executable.
+//
+// The pet's own entry point. The control center must call SetAutostartFor with the
+// pet's path: os.Executable() is the control center when the control center asks.
 func SetAutostart(enable bool) error {
-	return setAutostart(autostartValueName, enable)
+	return SetAutostartFor(ExecutablePath(), enable)
 }
