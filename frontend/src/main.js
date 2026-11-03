@@ -723,7 +723,21 @@ function togglePetMenu() {
     closePetMenu().catch(fail);
     return;
   }
-  App.OpenPetMenu().then(applyLayout).catch(fail);
+  // 先把状态读新，再开卡片。
+  //
+  // 为什么是"这一刻读"，而不是让它一直保持新鲜：`menuHidden`（右键菜单显示哪几格）的写入者
+  // 是控制中心，而它唯一被用到的地方就是这张卡片 —— 所以读在"有人要打开它"的这一刻，总是
+  // 最新的，也不必为一个一天变不了几次的值留一个每秒的定时器（等文件变化用轮询是本项目明写
+  // 的反模式：日志会被几万行淹没，而它等的东西几乎从不改变）。
+  //
+  // 顺序是"读完再开"：倒过来会先画九格再藏掉，用户看得见那一下闪。GetState 失败也照样开
+  // 卡片——菜单不该因为一次读失败而不出来。
+  App.GetState()
+    .then((next) => applyState(next))
+    .catch(() => {})
+    .finally(() => {
+      App.OpenPetMenu().then(applyLayout).catch(fail);
+    });
 }
 
 /**
@@ -1195,13 +1209,6 @@ function wire() {
 
   // Go emits the layout after asynchronous work (initial placement, snapping).
   EventsOn('pet:layout', applyLayout);
-
-  // 一份完整的新 State。今天的唯一发起者是"右键菜单显示哪几格"被外部改了（写入者是控制
-  // 中心，读者是这一页）；这也正是用户报的那条："这里设置不能实时生效右键菜单"。
-  //
-  // 用整份 State 而不是只发那个数组：这一页对状态的消费全部经过 applyState，多一条只发
-  // 差量的通道就是第二个真相源（本项目为此吃过亏——见 todoBadge 与旧 Stats 的注释）。
-  EventsOn('pet:state', (payload) => applyState(payload));
 
   // `pet:chat-open` is gone, and both halves went together: it told the PANEL to switch to
   // its 对话 tab, the tab went with the panel, and Go's OpenChat (its only emitter) went

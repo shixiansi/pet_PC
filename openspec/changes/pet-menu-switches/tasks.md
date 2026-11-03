@@ -59,13 +59,15 @@
    想到**的地方。现在 fixed = `[plugins, quit]`，`petmenu_test` 里那条断言也跟着变成
    "固定的恰好是回家与出门这两格"。
 2. **改完不实时生效**。写入者是控制中心，读者是桌宠那一页，而两者之间没有任何东西通知它：
-   在控制中心关掉一格、回来右键，菜单还是九格（用户原话）。补的是**推**，不是轮询：
-   `app_settingswatch.go` 每秒看一眼 `menuHidden`，变了就 `emitEvent(eventPetState, GetState())`，
-   页面 `EventsOn('pet:state', applyState)`。
-   - 为什么是整份 State 而不是只发那个数组：这一页对状态的消费全部走 `applyState`，多一条
-     "只发差量"的通道就是第二个真相源。
-   - 为什么 `syncMenuHidden` 被拆成方法：ticker 要一个 Wails ctx 才转得动，而"变了就推、
-     没变就不推"正是唯一会错的地方——推两次让页面白重画，不推就是用户报的那个 bug。
-     用例 `TestSyncMenuHiddenPushesState` / `TestSyncMenuHiddenIgnoresAFixedCell` 直接调它。
-   - 页面那一半：`pet-menu.test.js` 里一条"收到 pet:state 就当场生效"，断言被点名的格子藏起
-     来、没被点名的不动。
+   在控制中心关掉一格、回来右键，菜单还是九格（用户原话）。
+
+   第一版修法是"宿主每秒看一眼设置文件，变了就推一份 State"——**被用户当场否了**（"啥玩意定时
+   器吗"），而这正是本仓库自己写下的反模式（AGENTS §3.9 第 4 条：为一个一天变不了几次的东西
+   轮询，日志会被几万行淹没）。
+
+   最终的修法一行都不涉及时间：**读在用到的那一刻**。`menuHidden` 唯一的用处就是右键菜单那张
+   卡片，而打开它永远是一次用户手势——所以 `togglePetMenu()` 先 `GetState()`（等它回来再
+   `OpenPetMenu()`，倒过来会先画九格再藏掉，看得见闪），`applyState` → `applyMenuHidden` 把
+   格子藏好，然后开卡片。零定时器、零 IPC、零新增事件。
+   - 用例：`pet-menu.test.js` 里一条端到端的——右键之后 `GetState` 被又读了一次、而且那次
+     读**在 OpenPetMenu 之前**，被点名的格子藏起来、没被点名的不动。

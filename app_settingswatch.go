@@ -1,11 +1,9 @@
 package main
 
 import (
-	"slices"
 	"time"
 
 	"PetPC/internal/desktop"
-	"PetPC/internal/petmenu"
 )
 
 // Re-applying preferences that only take effect when APPLIED.
@@ -33,37 +31,6 @@ const settingsWatchInterval = time.Second
 // it resolves constants named eventXxx - a literal buried in a two-argument call is an emit
 // that scan cannot see, which would report the listener as dangling.
 const eventPetImage = "pet:image"
-
-// eventPetState carries a WHOLE fresh State to the page.
-//
-// 为什么需要它：`menuHidden`（右键菜单显示哪几格）唯一的写入者是控制中心，而这一页读的是它
-// 启动时拿到的那份 State —— 两份快照之间没有任何东西通知它。用户的原话是"这里设置不能实时
-// 生效右键菜单"：在控制中心关掉一格，回到桌宠右键，菜单还是九格。
-//
-// 推而不是让页面轮询：本仓库的规矩是「变化是推的，不是拉的」（AGENTS §3.9 第 3 条）——
-// 一个"等一个文件变化"的 setInterval 会在日志里变成几万行，而它等的东西一天变不了几次。
-const eventPetState = "pet:state"
-
-// syncMenuHidden pushes a fresh State when the denylist changed underneath us, and returns
-// the value now applied.
-//
-// 拆成方法而不是塞进那个 ticker 里，是为了能测：ticker 要一个 Wails ctx 才转得动，而
-// "变了就推、没变就不推"正是这里唯一会错的地方（推两次让页面白重画一遍，或者干脆不推——
-// 后者就是用户报的那个 bug）。
-func (a *App) syncMenuHidden(hidden []string, applied []string) []string {
-	want := petmenu.Normalise(hidden)
-	if slices.Equal(want, applied) {
-		return applied
-	}
-	state, err := a.GetState()
-	if err != nil {
-		a.log.Warnf("settings", "外部改动了右键菜单的开关，但读不到状态：%v", err)
-		return applied
-	}
-	a.emitEvent(eventPetState, state)
-	a.log.Infof("settings", "外部改动了右键菜单的开关（关掉 %d 格），已推送状态", len(state.Config.MenuHidden))
-	return want
-}
 
 // applyScale re-places the window for a new pet size, holding the bottom-right corner
 // steady so the pet appears to grow from there.
@@ -111,8 +78,6 @@ func (a *App) startSettingsWatch() {
 		// control center's 主题包 cards). Watching them in one comparison is deliberate: the two
 		// travel together in the layout, so two separate pushes would paint the same frame twice
 		// and - worse - could paint the new scheme with the old pack in between.
-		// 右键菜单显示哪几格：写入者是控制中心，读者是这一页，所以要盯着它。
-		appliedMenu := petmenu.Normalise(cfg.MenuHidden)
 		appliedTheme := a.panelTheme()
 		appliedPack := a.panelThemePack()
 		ticker := time.NewTicker(settingsWatchInterval)
@@ -150,7 +115,6 @@ func (a *App) startSettingsWatch() {
 					}
 					a.log.Infof("settings", "外部改动了外观，已推送布局（配色 %s，主题包 %q）", theme, pack)
 				}
-				appliedMenu = a.syncMenuHidden(cfg.MenuHidden, appliedMenu)
 				if img := a.store.ImagePath(); img != appliedImage {
 					appliedImage = img
 					a.emitEvent(eventPetImage, map[string]any{

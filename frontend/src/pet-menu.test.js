@@ -431,21 +431,39 @@ describe('pet menu: the cells the user switched off', () => {
     expect(calls.length).toBeGreaterThan(0);
   });
 
-  it('控制中心改完开关，桌宠这一页收到 pet:state 就当场生效（不用重启）', async () => {
-    // 用户报的那条：「这里设置不能实时生效右键菜单」。写入者是控制中心，读者是这一页，
-    // 中间没有任何东西通知它——所以 app_settingswatch.go 每秒看一眼 settings.json，变了就
-    // 推一份完整 State。这条用例钉的是页面那一半：它得听，而且要重画。
-    const { emit } = await mountApp();
-    showMenu(emit);
-    await tick();
+  it('每次右键都现读一份状态：控制中心刚关掉的格子，这一次打开就已经没了', async () => {
+    // 用户报的那条：「这里设置不能实时生效右键菜单」。修法不是给它一个每秒的定时器，而是
+    // **在用到的那一刻读**：menuHidden 唯一的用处就是这张卡片，而打开它永远是一次用户手势。
+    let reads = 0;
+    const handler = () => {
+      reads += 1;
+      // 第一次是启动时的 refresh（九格全开）；之后是用户点出来的那一次（主题被关掉了）。
+      return reads === 1 ? baseState() : baseState({ config: { menuHidden: ['theme'] } });
+    };
+    // OpenPetMenu 在 jsdom 夹具里没有默认答案（它返回 null，于是 applyLayout 直接返回），
+    // 所以这里显式给一份「菜单卡片」的布局——真实宿主由 app_pet_menu.go 提供同一个东西。
+    const { calls } = await mountApp({
+      handlers: {
+        GetState: handler,
+        OpenPetMenu: () => layout({ bubble: bubbleView('menu') }),
+      },
+    });
     const cell = (id) => $('bubble-menu').querySelector(`[data-menu="${id}"]`);
-    expect(cell('theme').classList.contains('hidden')).toBe(false);
 
-    emit('pet:state', baseState({ config: { menuHidden: ['theme', 'hide'] } }));
+    await rightClickPet();
+    // 读状态 → 应用 → 开卡片 → 重画都在微任务里，但 applyLayout 会排一次
+    // requestAnimationFrame（jsdom 里被夹具换成了 setTimeout 0），所以多让出两拍。
     await tick();
+    await tick();
+    // 右键真的又读了一次，而且是在打开卡片**之前**（倒过来会先画九格再藏掉，看得见闪）。
+    const names = calls.map((c) => c.name);
+    expect(callsTo(calls, 'GetState').length).toBeGreaterThanOrEqual(2);
+    expect(names.lastIndexOf('GetState')).toBeLessThan(names.indexOf('OpenPetMenu'));
+
+    expect(isHidden('bubble-menu')).toBe(false);
     expect(cell('theme').classList.contains('hidden')).toBe(true);
-    expect(cell('hide').classList.contains('hidden')).toBe(true);
-    // 没被点名的格子不受影响（推整份 State 不该把别人的显隐搅乱）。
+    // 没被点名的格子不受影响。
     expect(cell('todos').classList.contains('hidden')).toBe(false);
   });
 });
+
