@@ -130,30 +130,6 @@ export function SetPetScale(arg1) {
   return window['go']['main']['Market']['SetPetScale'](arg1);
 }
 
-export function SetRemindWhenEmpty(arg1) {
-  return window['go']['main']['Market']['SetRemindWhenEmpty'](arg1);
-}
-
-export function SetReminderCadence(arg1, arg2) {
-  return window['go']['main']['Market']['SetReminderCadence'](arg1, arg2);
-}
-
-export function SetReminderDisplay(arg1, arg2) {
-  return window['go']['main']['Market']['SetReminderDisplay'](arg1, arg2);
-}
-
-export function SetReminderEnabled(arg1) {
-  return window['go']['main']['Market']['SetReminderEnabled'](arg1);
-}
-
-export function SetReminderOnStartup(arg1) {
-  return window['go']['main']['Market']['SetReminderOnStartup'](arg1);
-}
-
-export function SetReminderWindow(arg1, arg2) {
-  return window['go']['main']['Market']['SetReminderWindow'](arg1, arg2);
-}
-
 export function SetSnapToEdge(arg1) {
   return window['go']['main']['Market']['SetSnapToEdge'](arg1);
 }

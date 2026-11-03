@@ -184,64 +184,21 @@ func (m *Market) ResetPetImage() (store.Config, error) {
 	return s.Config(), nil
 }
 
-// --- 对话提醒 ---------------------------------------------------------------------
-
-// These switches write the todo PLUGIN's reminder preferences, not a host loop's.
+// --- 对话提醒：**没有**了（2026-11-03 删掉）------------------------------------
 //
-// The host's own 30-second reminder scheduler retired with the host timer
-// (app_reminder.go keeps only the manual "立刻提醒"), and the schedule lives in the todo
-// plugin's resident frame now - which reads the SAME settings.json file. So every setter below
-// is still "save a preference": there is no loop here to start, stop or restart, and the
-// plugin picks the new value up on its next turn.
+// 这里原来有一组开关：开启对话提醒 / 启动时自动开启 / 没有待办时也提醒 / 间隔 / 抖动 /
+// 活跃时段 / 一次提几件 / 气泡停留几秒。它们写的是宿主 `settings.json` 里的 `reminder*`
+// 字段，而**宿主的提醒调度器随「提醒搬进待办插件」一起删掉了**（app_reminder.go 的文件头
+// 写着这件事：只剩手动「立刻提醒」）。于是那组开关一个字都没人读——用户把「开启对话提醒」
+// 关了又开，什么也没发生，因为那个值没有任何消费者。
 //
-// What that means for the page's wording: 「这些改动是即时的」 stays true, but the reason is the
-// plugin's frame, not a host tick. Saying otherwise was the stale sentence this comment used to
-// repeat.
-
-func (m *Market) SetReminderEnabled(on bool) (store.Config, error) {
-	return store.SaveSettings(m.dataDir, func(c *store.Config) { c.ReminderEnabled = on })
-}
-
-func (m *Market) SetReminderOnStartup(on bool) (store.Config, error) {
-	return store.SaveSettings(m.dataDir, func(c *store.Config) { c.ReminderOnStartup = on })
-}
-
-func (m *Market) SetRemindWhenEmpty(on bool) (store.Config, error) {
-	return store.SaveSettings(m.dataDir, func(c *store.Config) { c.RemindWhenEmpty = on })
-}
-
-// SetReminderCadence is the interval row: a base interval plus the random jitter added to it.
+// 2026-11-03 用户的两句反馈正是从这里来的（"提醒开了关了后就没了""关了后再开也不显示了"），
+// 而真正的提醒（待办插件自己的 config）是另一回事：它那条是插件不认 `config.changed`
+// 导致的，已经在插件 1.3.1 修掉。
 //
-// Two fields in one method because they are one row in the UI and one sentence in the user's
-// head ("every 30 minutes, plus up to 3"). Two calls could silently leave the pair in a state
-// nobody asked for.
-func (m *Market) SetReminderCadence(intervalMin, jitterMaxMin int) (store.Config, error) {
-	return store.SaveSettings(m.dataDir, func(c *store.Config) {
-		c.ReminderIntervalMin = intervalMin
-		c.ReminderJitterMaxMin = jitterMaxMin
-	})
-}
-
-// SetReminderWindow is the active hours, "09:00" and "22:00".
-//
-// NOT validated here: Config.Normalise owns the accepted format and what a bad value falls
-// back to, and the config it returns is what the page shows - so a typo shows up as the value
-// that was actually stored instead of as the value that was typed.
-func (m *Market) SetReminderWindow(from, to string) (store.Config, error) {
-	return store.SaveSettings(m.dataDir, func(c *store.Config) {
-		c.ReminderFrom = from
-		c.ReminderTo = to
-	})
-}
-
-// SetReminderDisplay is how many todos one bubble shows and how long it stays.
-func (m *Market) SetReminderDisplay(items, autoHideSec int) (store.Config, error) {
-	return store.SaveSettings(m.dataDir, func(c *store.Config) {
-		c.ReminderMaxItems = items
-		c.ReminderAutoHideSec = autoHideSec
-	})
-}
-
+// 所以这组开关连同它的五个绑定一起删了。**别再照着"这里少了一组开关"把它加回来**：一组
+// 点了没反应的开关比没有这组开关更糟（AGENTS §3.1 的那条不变量，用在 UI 上也一样）。提醒的
+// 设置项现在只有一处：控制中心「插件」页里待办插件自己声明的那几项。
 // --- 桌宠右键菜单显示哪些格子（2026-11-03）-------------------------------------
 //
 // 「开始」页那一组开关：桌宠的右键菜单有九格，用户可以把不常用的关掉（归位、主题这种）。

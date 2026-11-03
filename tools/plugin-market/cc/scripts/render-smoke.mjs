@@ -592,12 +592,14 @@ await open('高级');
 check('高级：不再显示已退休的密钥卡与模型卡',
   !text().includes('llm-key.bin') && !text().includes('DPAPI 密文') && !text().includes('deepseek-chat'));
 check('高级：数据目录来自 DataDir()', text().includes('C:\\fake\\PetPC'));
-check('高级：整组对话提醒搬过来了', text().includes('开启对话提醒') && text().includes('活跃时段') && text().includes('没有待办时也提醒'));
+// 这一页原来还有一组「对话提醒」开关，写的是宿主 settings.json 里的 reminder* 字段——而那些
+// 字段在提醒搬进待办插件之后就没人读了（app_reminder.go 的调度器已删）。一组点了没反应的
+// 开关比没有更糟，所以 2026-11-03 整组删掉；这里钉住"它没有长回来"。
+check('高级：那组写进没人读的字段的「对话提醒」开关已经删掉',
+  !text().includes('开启对话提醒') && !text().includes('没有待办时也提醒'));
 check('高级：提醒说明指向待办插件，而不是宿主那个已退休的循环',
-  text().includes('待办插件的') && !text().includes('每 30 秒读一次设置'));
+  text().includes('待办插件') && !text().includes('每 30 秒读一次设置'));
 check('高级：数据表不再列 todos.json', !text().includes('todos.json'));
-const numberValues = [...w.document.querySelectorAll('input[type="number"]')].map((i) => i.value);
-check('高级：提醒间隔来自 reminderIntervalMin（30）', numberValues.includes('30'));
 
 // The report is generated on demand, so this also checks that the button is wired and that
 // the text arrives - the two things a "有按钮" screenshot cannot tell you.

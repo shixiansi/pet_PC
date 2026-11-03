@@ -576,18 +576,7 @@ export const ChoosePetImage = (): Promise<Config> => (DEV ? savedConfig({ petIma
 export const ResetPetImage = (): Promise<Config> =>
   DEV ? savedConfig({ petImageFile: undefined, originalPath: undefined }) : host.ResetPetImage();
 
-export const SetReminderEnabled = (on: boolean): Promise<Config> =>
-  DEV ? savedConfig({ reminderEnabled: on }) : host.SetReminderEnabled(on);
-export const SetReminderOnStartup = (on: boolean): Promise<Config> =>
-  DEV ? savedConfig({ reminderOnStartup: on }) : host.SetReminderOnStartup(on);
-export const SetRemindWhenEmpty = (on: boolean): Promise<Config> =>
-  DEV ? savedConfig({ remindWhenEmpty: on }) : host.SetRemindWhenEmpty(on);
-export const SetReminderCadence = (intervalMin: number, jitterMaxMin: number): Promise<Config> =>
-  DEV ? savedConfig({ reminderIntervalMin: intervalMin, reminderJitterMaxMin: jitterMaxMin }) : host.SetReminderCadence(intervalMin, jitterMaxMin);
-export const SetReminderWindow = (from: string, to: string): Promise<Config> =>
-  DEV ? savedConfig({ reminderFrom: from, reminderTo: to }) : host.SetReminderWindow(from, to);
-export const SetReminderDisplay = (items: number, autoHideSec: number): Promise<Config> =>
-  DEV ? savedConfig({ reminderMaxItems: items, reminderAutoHideSec: autoHideSec }) : host.SetReminderDisplay(items, autoHideSec);
+
 
 export const DataDir = (): Promise<string> => (DEV ? later('C:\\fake\\PetPC') : host.DataDir());
 

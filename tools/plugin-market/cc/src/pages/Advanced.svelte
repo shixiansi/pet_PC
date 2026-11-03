@@ -2,18 +2,7 @@
   import { onMount } from 'svelte';
   import Card from '../components/Card.svelte';
   import Button from '../components/Button.svelte';
-  import {
-    MainSettings,
-    DataDir,
-    Diagnostics,
-    SetReminderEnabled,
-    SetReminderOnStartup,
-    SetRemindWhenEmpty,
-    SetReminderCadence,
-    SetReminderWindow,
-    SetReminderDisplay,
-  } from '../lib/bridge';
-  import type { Config } from '../lib/bridge';
+  import { DataDir, Diagnostics } from '../lib/bridge';
   // Copying is the only thing this page wants from the runtime, and the generated wrapper is
   // the supported way in. Outside Wails it throws ("window.runtime is undefined") and the
   // page says so rather than pretending the clipboard worked.
@@ -26,7 +15,6 @@
   // plugin-data/<id>/secret-*.bin，模型的每一项现在都是插件自己的配置——它们的编辑入口是
   // 「插件」页（选中插件，右栏就是它自己声明的设置项），而那张 llm-key.bin 只留给一次性迁移
   // 读。留着它们比删掉更糟：一行"未设置"会让人去找一个不存在的开关。
-  let cfg = $state<Config | null>(null);
   let dir = $state('');
   let report = $state('');
   let busy = $state(false);
@@ -35,24 +23,12 @@
 
   onMount(async () => {
     try {
-      cfg = await MainSettings();
       dir = await DataDir();
     } catch (e) {
       error = String(e);
     }
   });
 
-  // One writer for every switch and number on this page: each setter answers with the config
-  // the store SAVED (Normalise included), so the page shows what was actually stored rather
-  // than what was typed - typing 999 into an interval leaves the clamped value on screen.
-  async function save(run: () => Promise<Config>) {
-    try {
-      cfg = await run();
-      error = '';
-    } catch (e) {
-      error = String(e);
-    }
-  }
 
   // Built on demand, not on mount: it stats every file in the data directory and reads a log
   // tail, which is wasted work for the 99 visits out of 100 that are just "what is my data
@@ -81,93 +57,20 @@
   }
 </script>
 
-<Card title="对话提醒">
-  {#if cfg}
-    <!-- A `const` copy, not the state variable: Svelte narrows `cfg` for the markup but not
-         inside the event closures, and a handler that reads `c.reminderTo` would have to
-         pretend it cannot be null. `c` IS the narrowed value. -->
-    {@const c = cfg}
-    <label class="switch">
-      <input type="checkbox" checked={c.reminderEnabled} onchange={(e) => save(() => SetReminderEnabled((e.currentTarget as HTMLInputElement).checked))} />
-      <span>开启对话提醒</span>
-    </label>
-    <label class="switch">
-      <input type="checkbox" checked={c.reminderOnStartup} onchange={(e) => save(() => SetReminderOnStartup((e.currentTarget as HTMLInputElement).checked))} />
-      <span>启动时自动开启提醒</span>
-    </label>
-    <label class="switch">
-      <input type="checkbox" checked={cfg.remindWhenEmpty} onchange={(e) => save(() => SetRemindWhenEmpty((e.currentTarget as HTMLInputElement).checked))} />
-      <span>没有待办时也提醒</span>
-    </label>
-
-    <div class="field">
-      <span>提醒间隔</span>
-      <div class="inline">
-        <input
-          type="number"
-          min="5"
-          max="240"
-          step="5"
-          value={c.reminderIntervalMin}
-          onchange={(e) =>
-            save(() => SetReminderCadence(Number((e.currentTarget as HTMLInputElement).value), c.reminderJitterMaxMin))}
-        />
-        <span class="unit">分钟，另加随机</span>
-        <input
-          type="number"
-          min="0"
-          max="60"
-          step="1"
-          value={c.reminderJitterMaxMin}
-          onchange={(e) => save(() => SetReminderCadence(c.reminderIntervalMin, Number((e.currentTarget as HTMLInputElement).value)))}
-        />
-        <span class="unit">分钟</span>
-      </div>
-    </div>
-
-    <div class="field">
-      <span>活跃时段</span>
-      <div class="inline">
-        <input type="time" value={c.reminderFrom} onchange={(e) => save(() => SetReminderWindow((e.currentTarget as HTMLInputElement).value, c.reminderTo))} />
-        <span class="unit">到</span>
-        <input type="time" value={c.reminderTo} onchange={(e) => save(() => SetReminderWindow(c.reminderFrom, (e.currentTarget as HTMLInputElement).value))} />
-      </div>
-    </div>
-
-    <div class="field">
-      <span>每次显示</span>
-      <div class="inline">
-        <input
-          type="number"
-          min="1"
-          max="5"
-          step="1"
-          value={c.reminderMaxItems}
-          onchange={(e) => save(() => SetReminderDisplay(Number((e.currentTarget as HTMLInputElement).value), c.reminderAutoHideSec))}
-        />
-        <span class="unit">条，停留</span>
-        <input
-          type="number"
-          min="5"
-          max="60"
-          step="1"
-          value={c.reminderAutoHideSec}
-          onchange={(e) => save(() => SetReminderDisplay(c.reminderMaxItems, Number((e.currentTarget as HTMLInputElement).value)))}
-        />
-        <span class="unit">秒</span>
-      </div>
-    </div>
-
-    <p class="hint">
-      这些是**待办插件的**提醒参数：循环跑在它的常驻帧里，读的是同一份
-      <code>settings.json</code>，所以改完立刻按新值走，不需要重启。桌宠这边只剩「立刻提醒一次」——
-      那是你按下去的动作，任何插件都没法替你按。
-    </p>
-  {:else}
-    <p class="hint">读取中…</p>
-  {/if}
+<Card title="提醒">
+  <p class="hint">
+    定时提醒住在**待办插件**里：在「插件」页选中待办，右边那一栏就是它自己的设置（开关、间隔、
+    活跃时段、一次提几件）。改完由它自己的常驻帧按新值走——2026-11-03 之前它只在帧重挂时才
+    重读一次，所以"关了再开"要退出桌宠重开才生效，现在收到 <code>config.changed</code> 就重读。
+  </p>
+  <p class="hint">
+    桌宠这边只剩「立刻提醒一次」（托盘菜单 / 右键菜单那一格）：那是你按下去的动作，任何插件都
+    没法替你按。这一页原来还有一组「对话提醒」开关（开启 / 启动时自动开启 / 间隔 / 活跃时段…），
+    它们写的是宿主 <code>settings.json</code> 里的 <code>reminder*</code> 字段，而宿主的调度器
+    随「提醒搬进待办插件」一起删掉了——那些字段**没有任何读者**。一组点了没反应的开关比没有
+    这组开关更糟，所以整组删掉了。
+  </p>
 </Card>
-
 <Card title="诊断">
   <div class="row">
     <Button variant="primary" onclick={generate}>{busy ? '生成中…' : '生成诊断报告'}</Button>
@@ -210,37 +113,7 @@
   dd { margin: 0; color: var(--text); }
   .mono { font: var(--font-mono); }
   .row { display: flex; align-items: center; gap: var(--space-2); }
-  .switch {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) 0;
-    border-bottom: 1px solid var(--line);
-    color: var(--text);
-  }
-  .switch:last-of-type { border-bottom: 0; }
-  input[type='checkbox'] { accent-color: var(--accent-strong); }
-  .field {
-    display: grid;
-    grid-template-columns: 88px 1fr;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .field:last-of-type { border-bottom: 0; }
-  .inline { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-  .inline input[type='number'] { width: 72px; }
-  .inline input[type='time'] { width: 110px; }
-  .field input {
-    background: var(--bg-sunken);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    color: var(--text);
-    font: var(--font-mono);
-    padding: var(--space-1) var(--space-2);
-  }
-  .unit { color: var(--text-dim); font-size: 12px; }
+
   .ok { color: var(--ok); font-size: 12px; }
   .report {
     margin: var(--space-3) 0 0;

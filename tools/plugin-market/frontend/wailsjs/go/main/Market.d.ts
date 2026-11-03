@@ -72,18 +72,6 @@ export function SetPetMenuHidden(arg1:Array<string>):Promise<store.Config>;
 
 export function SetPetScale(arg1:number):Promise<store.Config>;
 
-export function SetRemindWhenEmpty(arg1:boolean):Promise<store.Config>;
-
-export function SetReminderCadence(arg1:number,arg2:number):Promise<store.Config>;
-
-export function SetReminderDisplay(arg1:number,arg2:number):Promise<store.Config>;
-
-export function SetReminderEnabled(arg1:boolean):Promise<store.Config>;
-
-export function SetReminderOnStartup(arg1:boolean):Promise<store.Config>;
-
-export function SetReminderWindow(arg1:string,arg2:string):Promise<store.Config>;
-
 export function SetSnapToEdge(arg1:boolean):Promise<store.Config>;
 
 export function SetTheme(arg1:string):Promise<void>;
