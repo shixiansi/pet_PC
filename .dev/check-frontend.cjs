@@ -442,8 +442,8 @@ check(
 //
 //   1. 那张表里的每个 id，index.html 里都有一格（data-menu），一个不多一个不少——"表里
 //      加了、markup 忘了加"是这条功能最可能的形状；
-//   2. 只能有一个 fixed（退出）：它是桌宠那一侧唯一的退出口，而"改这些开关"住在控制中心，
-//      所以没有别的格子需要固定；
+//   2. fixed 恰好是这两格：退出（桌宠那一侧唯一的退出口）与 控制中心（**改这些开关的地方
+//      就在它里面**）。其余七格都关得掉——关掉之后还回得去，因为控制中心永远在；
 //   3. 两头都真的接上了：桌宠照着 State 藏格子，控制中心有那一组开关。
 const petmenuGo = fs.readFileSync(path.join(root, 'internal/petmenu/petmenu.go'), 'utf8');
 const goMenuCells = [...petmenuGo.matchAll(/\{"([a-z]+)", "([^"]+)", (true|false)\},/g)].map((m) => ({
@@ -459,11 +459,11 @@ check(
   'the menu cells are one table, shared by both programs, and the markup has every one of them',
   goMenuCells.length === 9 &&
     goMenuCells.map((c) => c.id).join(',') === htmlMenuCells.join(',') &&
-    goMenuCells.filter((c) => c.fixed).map((c) => c.id).join(',') === 'quit' &&
+    goMenuCells.filter((c) => c.fixed).map((c) => c.id).join(',') === 'plugins,quit' &&
     /func \(m \*Market\) PetMenuCells\(\)/.test(marketMenuGo) &&
     /func \(m \*Market\) SetPetMenuHidden\(/.test(marketMenuGo) &&
     /petmenu\.Normalise/.test(marketMenuGo),
-  'the shared table, the markup and the control-center bindings disagree (or the fixed set is not [quit])',
+  'the shared table, the markup and the control-center bindings disagree (or the fixed set is not [plugins quit])',
 );
 check(
   'both ends are wired: the pet hides the cells, the control center switches them',

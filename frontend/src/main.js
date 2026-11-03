@@ -1196,6 +1196,13 @@ function wire() {
   // Go emits the layout after asynchronous work (initial placement, snapping).
   EventsOn('pet:layout', applyLayout);
 
+  // 一份完整的新 State。今天的唯一发起者是"右键菜单显示哪几格"被外部改了（写入者是控制
+  // 中心，读者是这一页）；这也正是用户报的那条："这里设置不能实时生效右键菜单"。
+  //
+  // 用整份 State 而不是只发那个数组：这一页对状态的消费全部经过 applyState，多一条只发
+  // 差量的通道就是第二个真相源（本项目为此吃过亏——见 todoBadge 与旧 Stats 的注释）。
+  EventsOn('pet:state', (payload) => applyState(payload));
+
   // `pet:chat-open` is gone, and both halves went together: it told the PANEL to switch to
   // its 对话 tab, the tab went with the panel, and Go's OpenChat (its only emitter) went
   // with them. A listener left behind would be a subscription nothing ever sends - which is

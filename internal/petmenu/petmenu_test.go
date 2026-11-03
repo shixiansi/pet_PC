@@ -31,20 +31,23 @@ func TestCellsMatchTheMenuMarkup(t *testing.T) {
 	}
 }
 
-// TestOnlyQuitIsFixed pins the decision itself, not just its implementation.
+// TestOnlyTheWayOutAndTheWayBackAreFixed pins the decision itself, not just its
+// implementation.
 //
-// 只有 退出 是固定的：它是桌宠那一侧唯一的退出口。**没有任何别的格子需要固定**，因为
-// "改这些开关"住在控制中心里——那一页托盘菜单一直开得出来，所以把某一格关掉永远回得去。
-// 这条断言存在的意义是：哪天有人想再加一个 fixed，他得先回答"关掉它之后用户从哪回来"。
-func TestOnlyQuitIsFixed(t *testing.T) {
+// 只有两格固定：退出（桌宠那一侧唯一的退出口）与 控制中心（**改这些开关的地方就在它里面**）。
+// 其余七格都关得掉，因为关掉之后还回得去——控制中心永远在。
+//
+// 这条断言存在的意义是：哪天有人想再加一个 fixed，他得先回答"关掉它之后用户从哪回来"；
+// 反过来，想拿掉这两个里的任何一个，得先回答"那用户怎么退出 / 怎么改回来"。
+func TestOnlyTheWayOutAndTheWayBackAreFixed(t *testing.T) {
 	var fixed []string
 	for _, cell := range Cells() {
 		if cell.Fixed {
 			fixed = append(fixed, cell.ID)
 		}
 	}
-	if len(fixed) != 1 || fixed[0] != "quit" {
-		t.Fatalf("fixed cells = %v, want exactly [quit]", fixed)
+	if len(fixed) != 2 || fixed[0] != "plugins" || fixed[1] != "quit" {
+		t.Fatalf("fixed cells = %v, want exactly [plugins quit]", fixed)
 	}
 }
 
@@ -61,7 +64,9 @@ func TestNormalise(t *testing.T) {
 		{"empty stays empty", nil, nil},
 		{"a hideable cell survives", []string{"theme"}, []string{"theme"}},
 		{"the way out is dropped", []string{"quit"}, nil},
+		{"the way back is dropped", []string{"plugins"}, nil},
 		{"the way out is dropped, the rest kept", []string{"quit", "theme"}, []string{"theme"}},
+		{"the way back is dropped, the rest kept", []string{"plugins", "snap"}, []string{"snap"}},
 		{"unknown ids are dropped", []string{"nope", "sales"}, nil},
 		{"duplicates collapse", []string{"theme", "theme"}, []string{"theme"}},
 		// 菜单顺序，不是调用方的顺序。

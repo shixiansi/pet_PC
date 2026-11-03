@@ -430,4 +430,22 @@ describe('pet menu: the cells the user switched off', () => {
     // 总之它必须发出去一次调用，而不是因为隔壁少了格子就静默不动。
     expect(calls.length).toBeGreaterThan(0);
   });
+
+  it('控制中心改完开关，桌宠这一页收到 pet:state 就当场生效（不用重启）', async () => {
+    // 用户报的那条：「这里设置不能实时生效右键菜单」。写入者是控制中心，读者是这一页，
+    // 中间没有任何东西通知它——所以 app_settingswatch.go 每秒看一眼 settings.json，变了就
+    // 推一份完整 State。这条用例钉的是页面那一半：它得听，而且要重画。
+    const { emit } = await mountApp();
+    showMenu(emit);
+    await tick();
+    const cell = (id) => $('bubble-menu').querySelector(`[data-menu="${id}"]`);
+    expect(cell('theme').classList.contains('hidden')).toBe(false);
+
+    emit('pet:state', baseState({ config: { menuHidden: ['theme', 'hide'] } }));
+    await tick();
+    expect(cell('theme').classList.contains('hidden')).toBe(true);
+    expect(cell('hide').classList.contains('hidden')).toBe(true);
+    // 没被点名的格子不受影响（推整份 State 不该把别人的显隐搅乱）。
+    expect(cell('todos').classList.contains('hidden')).toBe(false);
+  });
 });
